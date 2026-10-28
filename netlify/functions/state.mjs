@@ -65,14 +65,17 @@ export default async req => {
 
   if (req.method === 'GET') {
     const data = await store.get(key, { type: 'json' });
-    return json({ text: data?.text || '', updatedAt: Number(data?.updatedAt || 0) });
+    return json({ text: data?.text || '', html: data?.html ?? null, updatedAt: Number(data?.updatedAt || 0) });
   }
 
   if (req.method === 'POST') {
     const body = await req.json().catch(() => null);
     if (typeof body?.text !== 'string') return json({ error: 'Missing text' }, 400);
     if (body.text.length > MAX_TEXT_CHARS) return json({ error: 'Text too long' }, 413);
-    const next = { text: body.text, updatedAt: Date.now() };
+    // html carries the layout with inline images; the page sanitizes it whenever it is shown.
+    const html = typeof body.html === 'string' ? body.html : null;
+    if (html && html.length > MAX_TEXT_CHARS * 2) return json({ error: 'Text too long' }, 413);
+    const next = { text: body.text, html, updatedAt: Date.now() };
     await store.setJSON(key, next);
     return json({ updatedAt: next.updatedAt });
   }

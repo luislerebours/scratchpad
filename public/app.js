@@ -1,11 +1,14 @@
 const API_STATE = '/.netlify/functions/state';
 const API_FILES = '/.netlify/functions/files';
+const API_IMAGES = '/.netlify/functions/images';
 const POLL_MS = 2000;
 const SAVE_DELAY_MS = 450;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const PARALLEL_CHUNKS = 3;
 const CHUNK_RETRIES = 3;
 const LAST_SHEET_KEY = 'scratchpad:lastSheet';
+const MAX_IMAGE_BYTES = 3_900_000;
+const MAX_IMAGE_DIM = 3000;
 const SHEET_COUNT = 5;
 const DEFAULT_SHEET_NAMES = ['Sheet 1', 'Sheet 2', 'Sheet 3', 'Sheet 4', 'Sheet 5'];
 
@@ -46,6 +49,7 @@ const previewModal = document.querySelector('#previewModal');
 const previewBody = document.querySelector('#previewBody');
 const previewTitle = document.querySelector('#previewTitle');
 const previewSaveBtn = document.querySelector('#previewSaveBtn');
+const previewRemoveBtn = document.querySelector('#previewRemoveBtn');
 
 let activeSheet = 1;
 let localUpdatedAt = 0;
@@ -64,6 +68,8 @@ let currentFiles = [];
 let filesSignature = '';
 let selecting = false;
 let selectedIds = new Set();
+let pendingImageUploads = 0;
+let viewedImage = null;
 
 function validSheet(value) {
   const n = Number(value);
@@ -181,18 +187,15 @@ async function fetchState(sheet = activeSheet) {
     const remoteTs = Number(data.updatedAt || 0);
     const recentlyTyping = Date.now() - lastInputAt < 850;
 
-    if (remoteTs > localUpdatedAt && !saving && !recentlyTyping) {
-      const selectionStart = pad.selectionStart;
-      const selectionEnd = pad.selectionEnd;
-      pad.value = data.text || '';
+    const busy = saving || recentlyTyping || pendingImageUploads > 0;
+    const remoteHtml = typeof data.html === 'string' ? data.html : textToHtml(data.text || '');
+
+    if (remoteTs > localUpdatedAt && !busy) {
+      renderEditor(remoteHtml);
       localUpdatedAt = remoteTs;
       timestampEl.textContent = formatDate(localUpdatedAt);
-      if (document.activeElement === pad) {
-        const max = pad.value.length;
-        pad.setSelectionRange(Math.min(selectionStart, max), Math.min(selectionEnd, max));
-      }
-    } else if (!localUpdatedAt && !saving && !saveTimer && !recentlyTyping) {
-      pad.value = data.text || '';
+    } else if (!localUpdatedAt && !busy && !saveTimer) {
+      renderEditor(remoteHtml);
       localUpdatedAt = remoteTs;
       timestampEl.textContent = formatDate(localUpdatedAt);
     }
@@ -204,14 +207,15 @@ async function fetchState(sheet = activeSheet) {
 
 async function saveState(sheet = activeSheet) {
   const targetSheet = validSheet(sheet);
-  const textToSave = pad.value;
+  const textToSave = pad.innerText;
+  const htmlToSave = serializeEditor();
   saving = true;
   if (targetSheet === activeSheet) setStatus('', 'Saving…');
   try {
     const r = await fetch(stateUrl(targetSheet), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textToSave })
+      body: JSON.stringify({ text: textToSave, html: htmlToSave })
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
@@ -227,29 +231,350 @@ async function saveState(sheet = activeSheet) {
   }
 }
 
-pad.addEventListener('input', () => {
+// Called after anything changes the editor's content.
+function onEditorChanged() {
   lastInputAt = Date.now();
+  updateEmptyState();
   clearTimeout(saveTimer);
   setStatus('', 'Unsaved');
   const sheetAtInput = activeSheet;
   saveTimer = setTimeout(() => { saveTimer = null; saveState(sheetAtInput); }, SAVE_DELAY_MS);
+}
+
+pad.addEventListener('input', onEditorChanged);
+
+// Text and images only: block bold/italic and other formatting shortcuts.
+pad.addEventListener('beforeinput', e => {
+  if (e.inputType.startsWith('format')) e.preventDefault();
 });
 
 copyBtn.addEventListener('click', async () => {
-  await navigator.clipboard.writeText(pad.value);
+  const text = pad.innerText;
+  const html = serializeEditor().replace(/src="\//g, `src="${location.origin}/`);
+  try {
+    if (!window.ClipboardItem || !navigator.clipboard.write) throw new Error('No rich clipboard');
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type:'text/html' }),
+      'text/plain': new Blob([text], { type:'text/plain' })
+    })]);
+  } catch {
+    await navigator.clipboard.writeText(text);
+  }
   showToast('Copied');
 });
 
 clearBtn.addEventListener('click', () => {
-  if (!pad.value || confirm(`Clear ${currentSheetName()} for everyone?`)) {
-    pad.value = '';
-    pad.dispatchEvent(new Event('input'));
+  if (editorIsEmpty() || confirm(`Clear ${currentSheetName()} for everyone?`)) {
+    pad.replaceChildren();
+    onEditorChanged();
   }
+});
+
+// ---- Editor content: text plus this site's own images ----
+
+const PAD_IMAGE_SRC = /^\/\.netlify\/functions\/images\?sheet=[1-5]&id=[A-Za-z0-9-]{1,64}$/;
+const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'UL', 'OL', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'TR', 'TABLE', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER']);
+const DROPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED', 'NOSCRIPT', 'SVG', 'MATH', 'HEAD', 'TITLE', 'META', 'LINK', 'VIDEO', 'AUDIO', 'CANVAS', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON']);
+
+function textToHtml(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+function makePadImage(src) {
+  const img = document.createElement('img');
+  img.setAttribute('src', src);
+  img.className = 'pad-image';
+  img.alt = 'Pasted image';
+  return img;
+}
+
+// Copies only text, line breaks and this site's images from `source` into
+// `target`. Anyone with the link can edit, so stored html is never trusted:
+// it is rebuilt through this before it is shown or saved. `onOtherImage`
+// may return a stand-in element for any other image (used when pasting).
+function appendClean(source, target, onOtherImage) {
+  for (const node of [...source.childNodes]) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      target.append(node.textContent);
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = node.tagName.toUpperCase();
+    if (DROPPED_TAGS.has(tag)) continue;
+    if (tag === 'BR') {
+      target.append(document.createElement('br'));
+    } else if (tag === 'IMG') {
+      const src = node.getAttribute('src') || '';
+      const img = PAD_IMAGE_SRC.test(src) ? makePadImage(src) : onOtherImage?.(src);
+      if (img) target.append(img);
+    } else if (BLOCK_TAGS.has(tag)) {
+      const div = document.createElement('div');
+      appendClean(node, div, onOtherImage);
+      target.append(div);
+    } else {
+      appendClean(node, target, onOtherImage);
+    }
+  }
+}
+
+function cleanHtml(html, onOtherImage) {
+  // DOMParser documents are inert: nothing in them runs or loads.
+  const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}`, 'text/html');
+  const out = document.createElement('div');
+  appendClean(doc.body, out, onOtherImage);
+  return out;
+}
+
+// The editor as html to store; images still uploading are left out.
+function serializeEditor() {
+  const out = document.createElement('div');
+  appendClean(pad, out);
+  return out.innerHTML;
+}
+
+function editorIsEmpty() {
+  return !pad.querySelector('img') && !pad.textContent.trim();
+}
+
+function updateEmptyState() {
+  pad.classList.toggle('is-empty', editorIsEmpty());
+}
+
+function caretOffset() {
+  const sel = getSelection();
+  if (!sel.rangeCount || !pad.contains(sel.focusNode)) return null;
+  const range = document.createRange();
+  range.selectNodeContents(pad);
+  range.setEnd(sel.focusNode, sel.focusOffset);
+  return range.toString().length;
+}
+
+function placeCaret(offset) {
+  const range = document.createRange();
+  const walker = document.createTreeWalker(pad, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  let node;
+  let placed = false;
+  while ((node = walker.nextNode())) {
+    if (remaining <= node.length) {
+      range.setStart(node, remaining);
+      placed = true;
+      break;
+    }
+    remaining -= node.length;
+  }
+  if (!placed) {
+    range.selectNodeContents(pad);
+    range.collapse(false);
+  }
+  range.collapse(true);
+  const sel = getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function renderEditor(html) {
+  const clean = cleanHtml(html);
+  if (clean.innerHTML === serializeEditor()) return;
+  const caret = document.activeElement === pad ? caretOffset() : null;
+  pad.replaceChildren(...clean.childNodes);
+  if (caret !== null) placeCaret(caret);
+  updateEmptyState();
+}
+
+function insertAtCaret(nodes) {
+  const sel = getSelection();
+  let range = sel.rangeCount ? sel.getRangeAt(0) : null;
+  if (!range || !pad.contains(range.commonAncestorContainer)) {
+    range = document.createRange();
+    range.selectNodeContents(pad);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  const fragment = document.createDocumentFragment();
+  fragment.append(...nodes);
+  const last = fragment.lastChild;
+  range.insertNode(fragment);
+  if (last) {
+    range.setStartAfter(last);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  onEditorChanged();
+}
+
+// ---- Images in the text ----
+
+function loadBitmap(blob) {
+  if (window.createImageBitmap) return createImageBitmap(blob).catch(() => loadImageElement(blob));
+  return loadImageElement(blob);
+}
+
+function loadImageElement(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Unreadable image')); };
+    img.src = url;
+  });
+}
+
+// Keeps screenshots and photos as they are when they fit; otherwise (too big,
+// or a format not every browser shows, like HEIC) redraws them as JPEG.
+async function prepareImage(blob) {
+  const keep = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  if (keep.includes(blob.type) && blob.size <= MAX_IMAGE_BYTES) return blob;
+  const source = await loadBitmap(blob);
+  const width = source.width;
+  const height = source.height;
+  let scale = Math.min(1, MAX_IMAGE_DIM / Math.max(width, height));
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+    if (out && out.size <= MAX_IMAGE_BYTES) return out;
+    scale *= 0.75;
+  }
+  throw new Error('Image too large');
+}
+
+// Uploads the image behind a placeholder <img>, then points it at the server copy.
+async function uploadPadImage(img, blob) {
+  pendingImageUploads++;
+  const sheet = activeSheet;
+  const localUrl = img.getAttribute('src');
+  try {
+    const prepared = await prepareImage(blob);
+    const r = await fetch(`${API_IMAGES}?sheet=${sheet}`, {
+      method:'POST',
+      headers:{ 'Content-Type': prepared.type || 'image/jpeg' },
+      body:prepared
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { src } = await r.json();
+    img.setAttribute('src', src);
+    delete img.dataset.pending;
+    img.classList.remove('pending');
+  } catch {
+    img.remove();
+    showToast('Image upload failed');
+  } finally {
+    if (localUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
+    pendingImageUploads--;
+    if (sheet === activeSheet) onEditorChanged();
+  }
+}
+
+function pendingImage(src) {
+  const img = makePadImage(src);
+  img.dataset.pending = '1';
+  img.classList.add('pending');
+  return img;
+}
+
+function insertImageFiles(files) {
+  const imgs = files.map(file => pendingImage(URL.createObjectURL(file)));
+  insertAtCaret(imgs);
+  imgs.forEach((img, i) => uploadPadImage(img, files[i]));
+}
+
+// An image pasted as a link (from a web page, say): copy it here if the
+// browser is allowed to read it, otherwise drop it.
+async function importLinkedImage(img, src) {
+  try {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('Not an image');
+    await uploadPadImage(img, blob);
+  } catch {
+    img.remove();
+    onEditorChanged();
+  }
+}
+
+function sortFiles(fileList) {
+  const files = [...(fileList || [])];
+  return {
+    images: files.filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name)),
+    others: files.filter(f => !(f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name)))
+  };
+}
+
+pad.addEventListener('paste', e => {
+  const data = e.clipboardData;
+  if (!data) return;
+  const { images, others } = sortFiles(data.files);
+  if (images.length || others.length) {
+    e.preventDefault();
+    if (others.length) uploadFiles(others);
+    if (images.length) insertImageFiles(images);
+    return;
+  }
+
+  const html = data.getData('text/html');
+  if (html && /<img/i.test(html)) {
+    e.preventDefault();
+    const imports = [];
+    const clean = cleanHtml(html, src => {
+      if (!/^(https?:|data:image\/|blob:)/i.test(src)) return null;
+      const img = pendingImage(src);
+      imports.push([img, src]);
+      return img;
+    });
+    insertAtCaret([...clean.childNodes]);
+    imports.forEach(([img, src]) => importLinkedImage(img, src));
+    return;
+  }
+
+  // Everything else goes in as plain text, without outside formatting.
+  e.preventDefault();
+  const text = data.getData('text/plain');
+  if (text && !document.execCommand('insertText', false, text)) {
+    insertAtCaret(text.split('\n').flatMap((line, i) => (i ? [document.createElement('br'), line] : [line])));
+  }
+});
+
+pad.addEventListener('dragover', e => {
+  if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault();
+});
+
+pad.addEventListener('drop', e => {
+  const { images, others } = sortFiles(e.dataTransfer?.files);
+  if (!images.length && !others.length) return;
+  e.preventDefault();
+  const range = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+  const pos = !range && document.caretPositionFromPoint?.(e.clientX, e.clientY);
+  if (range || pos) {
+    const r = range || document.createRange();
+    if (pos) r.setStart(pos.offsetNode, pos.offset);
+    r.collapse(true);
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
+  }
+  if (others.length) uploadFiles(others);
+  if (images.length) insertImageFiles(images);
+});
+
+pad.addEventListener('click', e => {
+  const img = e.target.closest('img.pad-image');
+  if (img && !img.dataset.pending) openImageViewer(img);
 });
 
 async function switchSheet(nextSheet, { remember = true } = {}) {
   nextSheet = validSheet(nextSheet);
   if (nextSheet === activeSheet) return;
+  if (pendingImageUploads) {
+    showToast('Wait for images to finish uploading');
+    return;
+  }
   if (remember) rememberCurrentSheet(nextSheet);
 
   if (saveTimer) {
@@ -258,12 +583,13 @@ async function switchSheet(nextSheet, { remember = true } = {}) {
     await saveState(activeSheet);
   }
 
-  pad.readOnly = true;
+  pad.contentEditable = 'false';
   activeSheet = nextSheet;
   localUpdatedAt = 0;
   lastInputAt = 0;
   lastFileRefresh = 0;
-  pad.value = '';
+  pad.replaceChildren();
+  updateEmptyState();
   setSelecting(false);
   fileList.innerHTML = '';
   fileIndex = new Map();
@@ -281,7 +607,7 @@ async function switchSheet(nextSheet, { remember = true } = {}) {
 
   setStatus('', 'Loading…');
   await Promise.all([fetchState(activeSheet), loadFiles(true, activeSheet)]);
-  pad.readOnly = false;
+  pad.contentEditable = 'true';
 }
 
 sheetTabs.forEach(tab => {
@@ -781,7 +1107,45 @@ async function openPreview(file) {
   }
 }
 
+// Full-screen view of an image in the text, with Save and Remove.
+function openImageViewer(img) {
+  clearPreviewObjectUrl();
+  previewAbort?.abort();
+  previewAbort = null;
+  viewedImage = img;
+  previewFile = { inline:true };
+  previewLoadedFile = null;
+  previewTitle.textContent = 'Image';
+  previewRemoveBtn.hidden = false;
+  const view = document.createElement('img');
+  view.className = 'preview-image';
+  view.alt = 'Image';
+  view.src = img.src;
+  previewBody.replaceChildren(view);
+  previewModal.hidden = false;
+  document.body.classList.add('modal-open');
+
+  const wanted = previewFile;
+  fetch(img.src).then(r => r.blob()).then(blob => {
+    if (previewFile !== wanted) return;
+    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    previewLoadedFile = new File([blob], `Scratch Pad image ${stamp}.${ext}`, { type: blob.type });
+  }).catch(() => {});
+}
+
+previewRemoveBtn.addEventListener('click', () => {
+  const img = viewedImage;
+  closePreview();
+  if (img?.isConnected) {
+    img.remove();
+    onEditorChanged();
+  }
+});
+
 function closePreview() {
+  viewedImage = null;
+  previewRemoveBtn.hidden = true;
   previewAbort?.abort();
   previewAbort = null;
   previewModal.hidden = true;
@@ -799,6 +1163,10 @@ previewSaveBtn.addEventListener('click', async () => {
     if (previewLoadedFile) {
       if (isIOS() && await sharePreparedFile(previewLoadedFile)) return;
       downloadPreparedFile(previewLoadedFile);
+      return;
+    }
+    if (previewFile.inline) {
+      showToast('Still loading…');
       return;
     }
     await saveSharedFile(previewFile);

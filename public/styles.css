@@ -48,8 +48,11 @@ h1 { margin:0; font-size: clamp(1.55rem, 4vw, 2rem); letter-spacing:-.03em; }
 .btn.secondary { background:rgba(255,255,255,.08); color:var(--text); border:1px solid var(--line); }
 .btn.danger { background:rgba(255,107,120,.12); color:#ff9ca6; border:1px solid rgba(255,107,120,.20); }
 .btn.compact { padding:7px 11px; font-size:.88rem; }
-textarea { display:block; width:100%; min-height:55vh; resize:vertical; border:0; outline:0; background:transparent; color:var(--text); padding:20px; line-height:1.52; font-size:1rem; }
-textarea::placeholder { color:#6f7d9b; }
+.editor { position:relative; min-height:55vh; box-sizing:border-box; padding:20px; outline:0; color:var(--text); line-height:1.52; font-size:1rem; white-space:pre-wrap; overflow-wrap:anywhere; -webkit-user-select:text; user-select:text; }
+.editor.is-empty::before { content:attr(data-placeholder); position:absolute; top:20px; left:20px; right:20px; color:#6f7d9b; pointer-events:none; }
+.editor[contenteditable="false"] { opacity:.6; }
+.pad-image { display:block; max-width:100%; max-height:min(480px, 60vh); height:auto; margin:10px 0; border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.04); cursor:zoom-in; }
+.pad-image.pending { opacity:.45; outline:2px dashed var(--accent); outline-offset:3px; cursor:progress; }
 .hint { border-top:1px solid var(--line); padding:10px 15px 12px; color:var(--muted); font-size:.8rem; }
 .files-card { margin-top:18px; padding:18px; }
 .section-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; }
@@ -161,7 +164,8 @@ footer { color:#7683a0; text-align:center; font-size:.78rem; padding:16px 4px 0;
   .brand-icon { width:46px; height:46px; border-radius:13px; }
   .card-toolbar { align-items:flex-start; }
   .timestamp { padding-top:8px; }
-  textarea { min-height:52vh; padding:16px; }
+  .editor { min-height:52vh; padding:16px; }
+  .editor.is-empty::before { top:16px; left:16px; right:16px; }
   .files-card { padding:14px; }
   .file-row { grid-template-columns:minmax(0,1fr); }
   .file-actions { justify-content:flex-start; }

@@ -48,8 +48,8 @@
           <button id="clearBtn" class="btn danger" type="button">Clear</button>
         </div>
       </div>
-      <textarea id="scratchpad" spellcheck="true" placeholder="Type or paste anything here…"></textarea>
-      <div class="hint">Each sheet saves separately. Changes are checked for updates every 2 seconds.</div>
+      <div id="scratchpad" class="editor is-empty" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Scratch pad" spellcheck="true" data-placeholder="Type or paste anything here, text or images…"></div>
+      <div class="hint">Each sheet saves separately. Paste or drop images right into the text.</div>
     </section>
 
     <section class="card files-card">
@@ -130,6 +130,7 @@
           <h2 id="previewTitle">File</h2>
         </div>
         <div class="preview-toolbar">
+          <button id="previewRemoveBtn" class="btn danger compact" type="button" hidden>Remove</button>
           <button id="previewSaveBtn" class="btn secondary compact" type="button">Save</button>
           <button class="modal-close" type="button" data-close-preview aria-label="Close preview">×</button>
         </div>

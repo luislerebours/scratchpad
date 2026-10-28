@@ -129,7 +129,7 @@ async function fetchState(sheet = activeSheet) {
         const max = pad.value.length;
         pad.setSelectionRange(Math.min(selectionStart, max), Math.min(selectionEnd, max));
       }
-    } else if (!localUpdatedAt) {
+    } else if (!localUpdatedAt && !saving && !saveTimer && !recentlyTyping) {
       pad.value = data.text || '';
       localUpdatedAt = remoteTs;
       timestampEl.textContent = formatDate(localUpdatedAt);
@@ -170,7 +170,7 @@ pad.addEventListener('input', () => {
   clearTimeout(saveTimer);
   setStatus('', 'Unsaved');
   const sheetAtInput = activeSheet;
-  saveTimer = setTimeout(() => saveState(sheetAtInput), SAVE_DELAY_MS);
+  saveTimer = setTimeout(() => { saveTimer = null; saveState(sheetAtInput); }, SAVE_DELAY_MS);
 });
 
 copyBtn.addEventListener('click', async () => {
@@ -195,6 +195,7 @@ async function switchSheet(nextSheet) {
     await saveState(activeSheet);
   }
 
+  pad.readOnly = true;
   activeSheet = nextSheet;
   localUpdatedAt = 0;
   lastInputAt = 0;
@@ -213,6 +214,7 @@ async function switchSheet(nextSheet) {
 
   setStatus('', 'Loading…');
   await Promise.all([fetchState(activeSheet), loadFiles(true, activeSheet)]);
+  pad.readOnly = false;
 }
 
 sheetTabs.forEach(tab => {

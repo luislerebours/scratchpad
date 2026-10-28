@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Scratch Pad" />
+  <title>Scratch Pad</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/assets/icon-192.png" alt="" class="brand-icon" />
+        <div>
+          <h1>Scratch Pad</h1>
+          <p>Five shared sheets across your devices</p>
+        </div>
+      </div>
+      <div id="status" class="status" aria-live="polite"><span class="dot"></span><span>Connecting…</span></div>
+    </header>
+
+    <div class="sheet-bar">
+      <nav class="sheet-tabs" aria-label="Scratch Pad sheets">
+        <button class="sheet-tab active" type="button" data-sheet="1" aria-selected="true"><span class="sheet-label">Sheet 1</span></button>
+        <button class="sheet-tab" type="button" data-sheet="2" aria-selected="false"><span class="sheet-label">Sheet 2</span></button>
+        <button class="sheet-tab" type="button" data-sheet="3" aria-selected="false"><span class="sheet-label">Sheet 3</span></button>
+        <button class="sheet-tab" type="button" data-sheet="4" aria-selected="false"><span class="sheet-label">Sheet 4</span></button>
+        <button class="sheet-tab" type="button" data-sheet="5" aria-selected="false"><span class="sheet-label">Sheet 5</span></button>
+      </nav>
+      <button id="renameSheetBtn" class="rename-sheet-btn" type="button" aria-label="Rename current sheet" title="Rename current sheet">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19 9.2 14.8 5 4 15.8V20Zm2-3.4 8.8-8.8 1.4 1.4L7.4 18H6v-1.4ZM17.9 3.3a1.4 1.4 0 0 1 2 0l.8.8a1.4 1.4 0 0 1 0 2l-1.4 1.4-2.8-2.8 1.4-1.4Z"/></svg>
+        <span>Rename</span>
+      </button>
+    </div>
+
+    <section class="card pad-card">
+      <div class="card-toolbar">
+        <div class="timestamp" id="timestamp">Not saved yet</div>
+        <div class="actions">
+          <button id="copyBtn" class="btn secondary" type="button">Copy</button>
+          <button id="clearBtn" class="btn danger" type="button">Clear</button>
+        </div>
+      </div>
+      <textarea id="scratchpad" spellcheck="true" placeholder="Type or paste anything here…"></textarea>
+      <div class="hint">Each sheet saves separately. Changes are checked for updates every 2 seconds.</div>
+    </section>
+
+    <section class="card files-card">
+      <div class="section-heading">
+        <div>
+          <h2>Files — <span id="filesSheetLabel">Sheet 1</span></h2>
+          <p>Files are organized by sheet. Share images and documents up to 4 MB each.</p>
+        </div>
+        <label class="btn upload-btn">
+          Upload
+          <input id="fileInput" type="file" multiple hidden />
+        </label>
+      </div>
+      <div id="dropZone" class="drop-zone" tabindex="0">
+        <strong>Drop files here</strong>
+        <span>or tap Upload</span>
+      </div>
+      <div id="fileList" class="file-list"></div>
+      <div id="emptyFiles" class="empty-state">No shared files on this sheet yet.</div>
+    </section>
+
+    <footer>Anyone with this site URL can view and edit all five shared sheets and their files.</footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="renameModal" class="modal-backdrop" hidden>
+    <section class="modal-card rename-modal" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
+      <div class="modal-header">
+        <div>
+          <div class="modal-kicker">Current sheet</div>
+          <h2 id="renameTitle">Rename sheet</h2>
+        </div>
+        <button class="modal-close" type="button" data-close-rename aria-label="Close">×</button>
+      </div>
+      <form id="renameForm">
+        <label class="field-label" for="renameInput">Sheet name</label>
+        <input id="renameInput" class="rename-input" type="text" maxlength="40" autocomplete="off" />
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" data-close-rename>Cancel</button>
+          <button class="btn" type="submit">Save name</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="previewModal" class="modal-backdrop preview-backdrop" hidden>
+    <section class="modal-card preview-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+      <div class="modal-header preview-header">
+        <div class="preview-title-wrap">
+          <div class="modal-kicker">File preview</div>
+          <h2 id="previewTitle">File</h2>
+        </div>
+        <div class="preview-toolbar">
+          <button id="previewSaveBtn" class="btn secondary compact" type="button">Save</button>
+          <button class="modal-close" type="button" data-close-preview aria-label="Close preview">×</button>
+        </div>
+      </div>
+      <div id="previewBody" class="preview-body"></div>
+    </section>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

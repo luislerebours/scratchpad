@@ -17,6 +17,22 @@ const clearBtn = document.querySelector('#clearBtn');
 const fileInput = document.querySelector('#fileInput');
 const fileList = document.querySelector('#fileList');
 const transferList = document.querySelector('#transferList');
+const filesHint = document.querySelector('#filesHint');
+const selectBtn = document.querySelector('#selectBtn');
+const uploadBtn = document.querySelector('#uploadBtn');
+const selectBar = document.querySelector('#selectBar');
+const selectAllBtn = document.querySelector('#selectAllBtn');
+const selectTotal = document.querySelector('#selectTotal');
+const bulkBar = document.querySelector('#bulkBar');
+const bulkCount = document.querySelector('#bulkCount');
+const bulkSize = document.querySelector('#bulkSize');
+const bulkSaveBtn = document.querySelector('#bulkSaveBtn');
+const bulkDeleteBtn = document.querySelector('#bulkDeleteBtn');
+const sheetModal = document.querySelector('#sheetModal');
+const sheetTitle = document.querySelector('#sheetTitle');
+const sheetText = document.querySelector('#sheetText');
+const sheetItems = document.querySelector('#sheetItems');
+const sheetActions = document.querySelector('#sheetActions');
 const emptyFiles = document.querySelector('#emptyFiles');
 const dropZone = document.querySelector('#dropZone');
 const toastEl = document.querySelector('#toast');
@@ -44,6 +60,10 @@ let previewFile = null;
 let previewLoadedFile = null;
 let previewAbort = null;
 let fileIndex = new Map();
+let currentFiles = [];
+let filesSignature = '';
+let selecting = false;
+let selectedIds = new Set();
 
 function validSheet(value) {
   const n = Number(value);
@@ -244,8 +264,11 @@ async function switchSheet(nextSheet, { remember = true } = {}) {
   lastInputAt = 0;
   lastFileRefresh = 0;
   pad.value = '';
+  setSelecting(false);
   fileList.innerHTML = '';
   fileIndex = new Map();
+  currentFiles = [];
+  filesSignature = '';
   emptyFiles.hidden = false;
   timestampEl.textContent = 'Loading…';
   filesSheetLabel.textContent = currentSheetName();
@@ -352,7 +375,7 @@ async function withRetry(fn, signal) {
 
 // ---- Transfer progress rows ----
 
-function createTransfer(name, verb, total) {
+function createTransfer(name, verb, total, items = null) {
   const row = document.createElement('div');
   row.className = 'transfer-row';
   row.innerHTML = `
@@ -363,6 +386,19 @@ function createTransfer(name, verb, total) {
     <div class="transfer-bar"><div class="transfer-fill"></div></div>
     <div class="transfer-meta"></div>`;
   row.querySelector('.transfer-name').textContent = name;
+  const itemEls = (items || []).map(itemName => {
+    const el = document.createElement('div');
+    el.className = 'transfer-item';
+    el.innerHTML = '<span></span><span>Waiting</span>';
+    el.firstChild.textContent = itemName;
+    return el;
+  });
+  if (itemEls.length) {
+    const list = document.createElement('div');
+    list.className = 'transfer-items';
+    list.append(...itemEls);
+    row.append(list);
+  }
   const fill = row.querySelector('.transfer-fill');
   const meta = row.querySelector('.transfer-meta');
   const cancelBtn = row.querySelector('.transfer-cancel');
@@ -391,6 +427,27 @@ function createTransfer(name, verb, total) {
     status(text) {
       meta.textContent = text;
     },
+    item(index, text, state) {
+      const el = itemEls[index];
+      if (!el) return;
+      el.lastChild.textContent = text;
+      el.classList.toggle('done', state === 'done');
+    },
+    // Keeps the row with a button, for steps that need a fresh tap (iOS share).
+    ready(text, label, onClick) {
+      fill.style.width = '100%';
+      row.classList.add('ready');
+      cancelBtn.remove();
+      meta.textContent = text;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn compact transfer-ready';
+      btn.textContent = label;
+      btn.addEventListener('click', async () => {
+        if (await onClick()) row.remove();
+      });
+      row.querySelector('.transfer-top').append(btn);
+    },
     done(text) {
       fill.style.width = '100%';
       finish('done', text);
@@ -413,27 +470,135 @@ async function loadFiles(force = false, sheet = activeSheet) {
     if (requestedSheet !== activeSheet) return;
 
     const files = Array.isArray(data.files) ? data.files : [];
-    fileIndex = new Map(files.map(f => [f.id, { ...f, sheet: requestedSheet }]));
-    fileList.innerHTML = files.map(f => {
-      const id = escapeHtml(f.id);
+    lastFileRefresh = Date.now();
+    const signature = JSON.stringify(files);
+    if (signature === filesSignature) return;
+    filesSignature = signature;
+    currentFiles = files.map(f => ({ ...f, sheet: requestedSheet }));
+    fileIndex = new Map(currentFiles.map(f => [f.id, f]));
+    for (const id of selectedIds) if (!fileIndex.has(id)) selectedIds.delete(id);
+    if (!currentFiles.length) setSelecting(false);
+    renderFiles();
+  } catch (err) {
+    // Keep text sync working even if file listing fails.
+  }
+}
+
+function renderFiles() {
+  fileList.innerHTML = currentFiles.map(f => {
+    const id = escapeHtml(f.id);
+    const meta = `${bytes(f.size || 0)} · ${new Date(f.uploadedAt).toLocaleString()}`;
+    if (selecting) {
+      const checked = selectedIds.has(f.id);
       return `
+      <label class="file-row selectable${checked ? ' selected' : ''}">
+        <input type="checkbox" data-select="${id}"${checked ? ' checked' : ''} />
+        <span class="file-main">
+          <span class="file-title">${escapeHtml(f.name)}</span>
+          <span class="file-meta">${meta}</span>
+        </span>
+      </label>`;
+    }
+    return `
       <div class="file-row">
         <div class="file-main">
           <button class="file-name" type="button" data-view="${id}">${escapeHtml(f.name)}</button>
-          <div class="file-meta">${bytes(f.size || 0)} · ${new Date(f.uploadedAt).toLocaleString()}</div>
+          <div class="file-meta">${meta}</div>
         </div>
         <div class="file-actions">
           <button class="icon-btn" type="button" data-save="${id}">Save</button>
           <button class="icon-btn delete" type="button" data-delete="${id}">Delete</button>
         </div>
       </div>`;
-    }).join('');
-    emptyFiles.hidden = files.length > 0;
-    lastFileRefresh = Date.now();
-  } catch (err) {
-    // Keep text sync working even if file listing fails.
-  }
+  }).join('');
+  emptyFiles.hidden = currentFiles.length > 0;
+  selectBtn.hidden = !currentFiles.length;
+  updateSelectionUi();
 }
+
+// ---- Select mode ----
+
+function selectedFiles() {
+  return currentFiles.filter(f => selectedIds.has(f.id));
+}
+
+function setSelecting(on) {
+  if (on === selecting) return;
+  selecting = on;
+  selectedIds = new Set();
+  document.body.classList.toggle('selecting', on);
+  renderFiles();
+}
+
+function updateSelectionUi() {
+  const files = selectedFiles();
+  const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
+  selectBtn.textContent = selecting ? 'Done' : 'Select';
+  uploadBtn.hidden = selecting;
+  filesHint.textContent = selecting ? 'Tap files to select them.' : 'Files are organized by sheet. Share any file up to 100 MB.';
+  selectBar.hidden = !selecting;
+  bulkBar.hidden = !selecting;
+  const all = currentFiles.length > 0 && files.length === currentFiles.length;
+  selectAllBtn.textContent = all ? 'Clear selection' : 'Select all';
+  selectTotal.textContent = `${currentFiles.length} file${currentFiles.length === 1 ? '' : 's'}`;
+  bulkCount.textContent = `${files.length} selected`;
+  bulkSize.textContent = files.length ? ` · ${bytes(total)}` : '';
+  bulkSaveBtn.disabled = bulkDeleteBtn.disabled = !files.length;
+  bulkSaveBtn.textContent = files.length ? `Save ${files.length}` : 'Save';
+  bulkDeleteBtn.textContent = files.length ? `Delete ${files.length}` : 'Delete';
+}
+
+selectBtn.addEventListener('click', () => setSelecting(!selecting));
+
+selectAllBtn.addEventListener('click', () => {
+  selectedIds = selectedIds.size === currentFiles.length ? new Set() : new Set(currentFiles.map(f => f.id));
+  renderFiles();
+});
+
+fileList.addEventListener('change', e => {
+  const box = e.target.closest('[data-select]');
+  if (!box) return;
+  if (box.checked) selectedIds.add(box.dataset.select);
+  else selectedIds.delete(box.dataset.select);
+  box.closest('.file-row').classList.toggle('selected', box.checked);
+  updateSelectionUi();
+});
+
+// ---- Bottom sheet (confirmations and choices) ----
+
+function openSheet({ title, text, files = [], actions }) {
+  sheetTitle.textContent = title;
+  sheetText.textContent = text;
+  sheetItems.replaceChildren(...files.map(f => {
+    const row = document.createElement('div');
+    row.className = 'sheet-item';
+    row.innerHTML = '<span></span><span></span>';
+    row.firstChild.textContent = f.name;
+    row.lastChild.textContent = bytes(f.size || 0);
+    return row;
+  }));
+  sheetItems.hidden = !files.length;
+  sheetActions.replaceChildren(...actions.map(action => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `btn ${action.kind || 'secondary'}${action.full ? ' full' : ''}`;
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      closeSheet();
+      action.run?.();
+    });
+    return btn;
+  }));
+  sheetModal.hidden = false;
+  document.body.classList.add('modal-open');
+}
+
+function closeSheet() {
+  sheetModal.hidden = true;
+  if (renameModal.hidden && previewModal.hidden) document.body.classList.remove('modal-open');
+}
+
+sheetModal.addEventListener('click', e => { if (e.target === sheetModal) closeSheet(); });
 
 // ---- Downloads ----
 
@@ -644,8 +809,10 @@ previewSaveBtn.addEventListener('click', async () => {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (!previewModal.hidden) closePreview();
+  if (!sheetModal.hidden) closeSheet();
+  else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
+  else if (selecting) setSelecting(false);
 });
 
 fileList.addEventListener('click', async (e) => {
@@ -680,6 +847,214 @@ fileList.addEventListener('click', async (e) => {
     showToast('Delete failed');
   }
 });
+
+// ---- Saving and deleting several files ----
+
+function shareFiles(files) {
+  if (!navigator.share || (navigator.canShare && !navigator.canShare({ files }))) return false;
+  return navigator.share({ files }).then(() => true);
+}
+
+function safeFileName(name) {
+  return String(name).replace(/[\\/:*?"<>|]+/g, '-').trim() || 'files';
+}
+
+// Hands finished files to the user: the share sheet on iOS, downloads elsewhere.
+async function deliverFiles(files, transfer, label) {
+  if (isIOS() && navigator.share) {
+    try {
+      if (await shareFiles(files)) {
+        transfer.done(`${label} saved`);
+        return;
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        transfer.done(`${label} ready`);
+        return;
+      }
+    }
+    // iOS only opens Share right after a tap, so ask for one more.
+    transfer.ready(`${label} ready`, 'Save to Files', async () => {
+      try {
+        return await shareFiles(files);
+      } catch (err) {
+        return err?.name === 'AbortError' ? false : (showToast('Could not open Share'), false);
+      }
+    });
+    return;
+  }
+  for (const file of files) {
+    downloadPreparedFile(file);
+    await new Promise(resolve => setTimeout(resolve, 350));
+  }
+  transfer.done(`${label} downloaded`);
+}
+
+async function saveFiles(files, asZip) {
+  const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
+  const count = `${files.length} file${files.length === 1 ? '' : 's'}`;
+  const transfer = createTransfer(`Saving ${count}${asZip ? ' as .zip' : ''}`, 'Downloading', total, files.map(f => f.name));
+  const prepared = [];
+  let finishedBytes = 0;
+  try {
+    for (const [i, file] of files.entries()) {
+      transfer.item(i, '0%');
+      prepared.push(await fetchSharedFile(file, {
+        signal: transfer.signal,
+        onProgress: loaded => {
+          transfer.update(finishedBytes + loaded);
+          transfer.item(i, `${file.size ? Math.floor((loaded / file.size) * 100) : 100}%`);
+        }
+      }));
+      finishedBytes += file.size || 0;
+      transfer.item(i, 'Done', 'done');
+    }
+    if (!asZip) {
+      await deliverFiles(prepared, transfer, count);
+      return;
+    }
+    transfer.status('Zipping…');
+    const zipName = `${safeFileName(currentSheetName(files[0].sheet))} - ${count}.zip`;
+    const zip = await makeZip(prepared, zipName);
+    await deliverFiles([zip], transfer, zipName);
+  } catch (err) {
+    transfer.fail(err?.name === 'AbortError' ? 'Save cancelled' : 'Save failed');
+  }
+}
+
+bulkSaveBtn.addEventListener('click', () => {
+  const files = selectedFiles();
+  if (!files.length) return;
+  setSelecting(false);
+  if (files.length === 1) {
+    saveSharedFile(files[0]);
+    return;
+  }
+  const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
+  openSheet({
+    title: `Save ${files.length} files`,
+    text: `${bytes(total)} total. Save them one by one, or bundled into a single .zip file.`,
+    files,
+    actions: [
+      { label: 'Separate files', kind: 'primary', run: () => saveFiles(files, false) },
+      { label: 'One .zip file', run: () => saveFiles(files, true) },
+      { label: 'Cancel', kind: 'secondary', full: true }
+    ]
+  });
+});
+
+bulkDeleteBtn.addEventListener('click', () => {
+  const files = selectedFiles();
+  if (!files.length) return;
+  const sheetName = currentSheetName(files[0].sheet);
+  openSheet({
+    title: `Delete ${files.length} file${files.length === 1 ? '' : 's'}?`,
+    text: `They’ll be removed from ${sheetName} on every device. This can’t be undone.`,
+    files,
+    actions: [
+      { label: 'Cancel', kind: 'secondary' },
+      {
+        label: `Delete ${files.length}`,
+        kind: 'danger-solid',
+        run: async () => {
+          setSelecting(false);
+          setStatus('', 'Deleting…');
+          const results = await Promise.all(files.map(f =>
+            fetch(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}`), { method:'DELETE' }).then(r => r.ok).catch(() => false)
+          ));
+          const failed = results.filter(ok => !ok).length;
+          setStatus('live', 'Live');
+          showToast(failed ? `${failed} file${failed === 1 ? '' : 's'} could not be deleted` : `Deleted ${files.length} file${files.length === 1 ? '' : 's'}`);
+          await loadFiles(true, files[0].sheet);
+        }
+      }
+    ]
+  });
+});
+
+// ---- Zip (stored, no compression: photos, video and PDFs are already compressed) ----
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytesArr) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytesArr.length; i++) c = CRC_TABLE[(c ^ bytesArr[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function uniqueZipName(name, used) {
+  const base = safeFileName(name || 'file');
+  let candidate = base;
+  for (let n = 2; used.has(candidate.toLowerCase()); n++) {
+    const dot = base.lastIndexOf('.');
+    candidate = dot > 0 ? `${base.slice(0, dot)} (${n})${base.slice(dot)}` : `${base} (${n})`;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+async function makeZip(files, zipName) {
+  const encoder = new TextEncoder();
+  const now = new Date();
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const used = new Set();
+  const body = [];
+  const directory = [];
+  let offset = 0;
+  let directorySize = 0;
+
+  for (const file of files) {
+    const name = encoder.encode(uniqueZipName(file.name, used));
+    const crc = crc32(new Uint8Array(await file.arrayBuffer()));
+    const size = file.size;
+
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true); // UTF-8 names
+    local.setUint16(10, time, true);
+    local.setUint16(12, date, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, size, true);
+    local.setUint32(22, size, true);
+    local.setUint16(26, name.length, true);
+    body.push(local.buffer, name, file);
+
+    const central = new DataView(new ArrayBuffer(46));
+    central.setUint32(0, 0x02014b50, true);
+    central.setUint16(4, 20, true);
+    central.setUint16(6, 20, true);
+    central.setUint16(8, 0x0800, true);
+    central.setUint16(12, time, true);
+    central.setUint16(14, date, true);
+    central.setUint32(16, crc, true);
+    central.setUint32(20, size, true);
+    central.setUint32(24, size, true);
+    central.setUint16(28, name.length, true);
+    central.setUint32(42, offset, true);
+    directory.push(central.buffer, name);
+
+    offset += 30 + name.length + size;
+    directorySize += 46 + name.length;
+  }
+
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, files.length, true);
+  end.setUint16(10, files.length, true);
+  end.setUint32(12, directorySize, true);
+  end.setUint32(16, offset, true);
+  return new File([...body, ...directory, end.buffer], zipName, { type:'application/zip' });
+}
 
 // ---- Uploads ----
 

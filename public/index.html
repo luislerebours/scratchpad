@@ -56,18 +56,25 @@
       <div class="section-heading">
         <div>
           <h2>Files — <span id="filesSheetLabel">Sheet 1</span></h2>
-          <p>Files are organized by sheet. Share any file up to 100 MB.</p>
+          <p id="filesHint">Files are organized by sheet. Share any file up to 100 MB.</p>
         </div>
-        <label class="btn upload-btn">
-          Upload
-          <input id="fileInput" type="file" multiple hidden />
-        </label>
+        <div class="files-head-actions">
+          <button id="selectBtn" class="btn secondary" type="button" hidden>Select</button>
+          <label id="uploadBtn" class="btn upload-btn">
+            Upload
+            <input id="fileInput" type="file" multiple hidden />
+          </label>
+        </div>
       </div>
       <div id="dropZone" class="drop-zone" tabindex="0">
         <strong>Drop files here</strong>
         <span>or tap Upload</span>
       </div>
       <div id="transferList" class="transfer-list" aria-live="polite"></div>
+      <div id="selectBar" class="select-bar" hidden>
+        <button id="selectAllBtn" class="link-btn" type="button">Select all</button>
+        <span id="selectTotal"></span>
+      </div>
       <div id="fileList" class="file-list"></div>
       <div id="emptyFiles" class="empty-state">No shared files on this sheet yet.</div>
     </section>
@@ -75,7 +82,25 @@
     <footer>Anyone with this site URL can view and edit all five shared sheets and their files.</footer>
   </main>
 
+  <div id="bulkBar" class="bulk-bar" hidden>
+    <div class="bulk-summary"><strong id="bulkCount">0 selected</strong><span id="bulkSize"></span></div>
+    <div class="bulk-actions">
+      <button id="bulkSaveBtn" class="btn bulk-save" type="button" disabled>Save</button>
+      <button id="bulkDeleteBtn" class="btn bulk-delete" type="button" disabled>Delete</button>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="sheetModal" class="modal-backdrop sheet-backdrop" hidden>
+    <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="sheet-grabber" aria-hidden="true"></div>
+      <h2 id="sheetTitle"></h2>
+      <p id="sheetText" class="sheet-text"></p>
+      <div id="sheetItems" class="sheet-items"></div>
+      <div id="sheetActions" class="sheet-actions"></div>
+    </section>
+  </div>
 
   <div id="renameModal" class="modal-backdrop" hidden>
     <section class="modal-card rename-modal" role="dialog" aria-modal="true" aria-labelledby="renameTitle">

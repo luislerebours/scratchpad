@@ -43,6 +43,22 @@ export default async req => {
     return json(next);
   }
 
+  // The sheet last opened on any device, so every device reopens there.
+  if (url.searchParams.get('meta') === 'current') {
+    if (req.method === 'GET') {
+      const data = await store.get('meta/current', { type: 'json' });
+      return json({ sheet: parseSheet(data?.sheet) || 1, updatedAt: Number(data?.updatedAt || 0) });
+    }
+    if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+    const body = await req.json().catch(() => null);
+    const current = parseSheet(body?.sheet);
+    if (!current) return json({ error: 'Invalid sheet' }, 400);
+    const next = { sheet: current, updatedAt: Date.now() };
+    await store.setJSON('meta/current', next);
+    return json(next);
+  }
+
   const sheet = parseSheet(url.searchParams.get('sheet'));
   if (!sheet) return json({ error: 'Invalid sheet' }, 400);
   const key = `sheets/${sheet}`;

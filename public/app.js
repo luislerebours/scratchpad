@@ -7,8 +7,11 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const PARALLEL_CHUNKS = 3;
 const CHUNK_RETRIES = 3;
 const LAST_SHEET_KEY = 'scratchpad:lastSheet';
-const MAX_IMAGE_BYTES = 3_900_000;
-const MAX_IMAGE_DIM = 3000;
+const MAX_PREVIEW_BYTES = 3_900_000;
+const PREVIEW_DIM = 2560;
+const SHOW_ORIGINAL_UP_TO = 1_500_000;
+const DISPLAYABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const STORABLE_TYPES = [...DISPLAYABLE_TYPES, 'image/avif', 'image/heic', 'image/heif'];
 const SHEET_COUNT = 5;
 const DEFAULT_SHEET_NAMES = ['Sheet 1', 'Sheet 2', 'Sheet 3', 'Sheet 4', 'Sheet 5'];
 
@@ -50,6 +53,10 @@ const previewBody = document.querySelector('#previewBody');
 const previewTitle = document.querySelector('#previewTitle');
 const previewSaveBtn = document.querySelector('#previewSaveBtn');
 const previewRemoveBtn = document.querySelector('#previewRemoveBtn');
+const padCard = document.querySelector('.pad-card');
+const imageTools = document.querySelector('#imageTools');
+const imageFrame = document.querySelector('#imageFrame');
+const imageHandle = document.querySelector('#imageHandle');
 
 let activeSheet = 1;
 let localUpdatedAt = 0;
@@ -70,6 +77,8 @@ let selecting = false;
 let selectedIds = new Set();
 let pendingImageUploads = 0;
 let viewedImage = null;
+let selectedImage = null;
+let resizingImage = false;
 
 function validSheet(value) {
   const n = Number(value);
@@ -187,7 +196,7 @@ async function fetchState(sheet = activeSheet) {
     const remoteTs = Number(data.updatedAt || 0);
     const recentlyTyping = Date.now() - lastInputAt < 850;
 
-    const busy = saving || recentlyTyping || pendingImageUploads > 0;
+    const busy = saving || recentlyTyping || resizingImage || pendingImageUploads > 0;
     const remoteHtml = typeof data.html === 'string' ? data.html : textToHtml(data.text || '');
 
     if (remoteTs > localUpdatedAt && !busy) {
@@ -280,12 +289,32 @@ function textToHtml(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
-function makePadImage(src) {
+function makePadImage(src, width = null) {
   const img = document.createElement('img');
   img.setAttribute('src', src);
   img.className = 'pad-image';
   img.alt = 'Pasted image';
+  setImageWidth(img, width);
   return img;
+}
+
+// Width is a percentage of the text column, so it looks the same on every device.
+function clampWidth(value) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(10, n)) : null;
+}
+
+function setImageWidth(img, width) {
+  width = clampWidth(width);
+  if (width) {
+    img.dataset.width = String(width);
+    img.style.width = `${width}%`;
+    img.style.maxHeight = 'none';
+  } else {
+    delete img.dataset.width;
+    img.style.width = '';
+    img.style.maxHeight = '';
+  }
 }
 
 // Copies only text, line breaks and this site's images from `source` into
@@ -305,7 +334,7 @@ function appendClean(source, target, onOtherImage) {
       target.append(document.createElement('br'));
     } else if (tag === 'IMG') {
       const src = node.getAttribute('src') || '';
-      const img = PAD_IMAGE_SRC.test(src) ? makePadImage(src) : onOtherImage?.(src);
+      const img = PAD_IMAGE_SRC.test(src) ? makePadImage(src, node.getAttribute('data-width')) : onOtherImage?.(src);
       if (img) target.append(img);
     } else if (BLOCK_TAGS.has(tag)) {
       const div = document.createElement('div');
@@ -380,6 +409,7 @@ function renderEditor(html) {
   pad.replaceChildren(...clean.childNodes);
   if (caret !== null) placeCaret(caret);
   updateEmptyState();
+  positionImageTools();
 }
 
 function insertAtCaret(nodes) {
@@ -421,15 +451,21 @@ function loadImageElement(blob) {
   });
 }
 
-// Keeps screenshots and photos as they are when they fit; otherwise (too big,
-// or a format not every browser shows, like HEIC) redraws them as JPEG.
-async function prepareImage(blob) {
-  const keep = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-  if (keep.includes(blob.type) && blob.size <= MAX_IMAGE_BYTES) return blob;
+function imageTypeOf(blob) {
+  if (blob.type) return blob.type.toLowerCase();
+  const name = blob.name || '';
+  if (/\.heic$/i.test(name)) return 'image/heic';
+  if (/\.heif$/i.test(name)) return 'image/heif';
+  return '';
+}
+
+// A smaller JPEG for showing in the text; the original is kept as well.
+// Throws when this browser can't read the image (HEIC outside Safari, say).
+async function makeDisplayCopy(blob) {
   const source = await loadBitmap(blob);
   const width = source.width;
   const height = source.height;
-  let scale = Math.min(1, MAX_IMAGE_DIM / Math.max(width, height));
+  let scale = Math.min(1, PREVIEW_DIM / Math.max(width, height));
   for (let attempt = 0; attempt < 6; attempt++) {
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(width * scale));
@@ -439,10 +475,14 @@ async function prepareImage(blob) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
     const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.86));
-    if (out && out.size <= MAX_IMAGE_BYTES) return out;
+    if (out && out.size <= MAX_PREVIEW_BYTES) return out;
     scale *= 0.75;
   }
   throw new Error('Image too large');
+}
+
+function imageUrl(sheet, extra) {
+  return `${API_IMAGES}?sheet=${validSheet(sheet)}&${extra}`;
 }
 
 // Uploads the image behind a placeholder <img>, then points it at the server copy.
@@ -450,21 +490,60 @@ async function uploadPadImage(img, blob) {
   pendingImageUploads++;
   const sheet = activeSheet;
   const localUrl = img.getAttribute('src');
+  let type = imageTypeOf(blob);
+  const name = blob.name || 'Pasted image';
+  let transfer = null;
   try {
-    const prepared = await prepareImage(blob);
-    const r = await fetch(`${API_IMAGES}?sheet=${sheet}`, {
-      method:'POST',
-      headers:{ 'Content-Type': prepared.type || 'image/jpeg' },
-      body:prepared
+    if (blob.size > MAX_FILE_BYTES) throw new Error(`${name} is over ${bytes(MAX_FILE_BYTES)}`);
+    const needsCopy = !DISPLAYABLE_TYPES.includes(type) || blob.size > SHOW_ORIGINAL_UP_TO;
+    transfer = createTransfer(name, 'Uploading', blob.size);
+    let preview = null;
+    if (needsCopy) {
+      transfer.status('Preparing…');
+      try {
+        preview = await makeDisplayCopy(blob);
+      } catch {
+        // Can't be shown in this browser: keep it as a file instead.
+        transfer.done('Added to Files instead');
+        img.remove();
+        showToast('This image can’t be shown here, so it was added to Files');
+        uploadFiles([blob instanceof File ? blob : new File([blob], name, { type })]);
+        return;
+      }
+    }
+    if (!STORABLE_TYPES.includes(type)) {
+      // An unusual format (SVG from a web page, say): keep the JPEG copy only.
+      blob = preview;
+      type = preview.type;
+      preview = null;
+    }
+
+    const start = await postJson(imageUrl(sheet, 'action=start'), { type, size: blob.size });
+    const id = encodeURIComponent(start.id);
+    const loaded = new Array(start.chunks).fill(0);
+    const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
+    if (preview) {
+      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1`), preview, transfer.signal, () => {}, preview.type), transfer.signal);
+    }
+    await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
+      const part = blob.slice(i * start.chunkSize, Math.min(blob.size, (i + 1) * start.chunkSize));
+      await withRetry(() => {
+        loaded[i] = 0;
+        return putChunk(imageUrl(sheet, `id=${id}&chunk=${i}`), part, transfer.signal, n => {
+          loaded[i] = n;
+          report();
+        });
+      }, transfer.signal);
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const { src } = await r.json();
+    const { src } = await postJson(imageUrl(sheet, `id=${id}&action=finish`));
     img.setAttribute('src', src);
     delete img.dataset.pending;
     img.classList.remove('pending');
-  } catch {
+    transfer.done(`Image added · ${bytes(blob.size)}`);
+  } catch (err) {
     img.remove();
-    showToast('Image upload failed');
+    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : 'Image upload failed');
+    else showToast(err?.message?.includes('over') ? err.message : 'Image upload failed');
   } finally {
     if (localUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
     pendingImageUploads--;
@@ -563,9 +642,133 @@ pad.addEventListener('drop', e => {
   if (images.length) insertImageFiles(images);
 });
 
+// ---- Selecting and resizing an image in the text ----
+
+try { document.execCommand('enableObjectResizing', false, false); } catch { /* Firefox only */ }
+
+function selectImage(img) {
+  if (selectedImage !== img) selectedImage?.classList.remove('selected');
+  selectedImage = img;
+  img.classList.add('selected');
+  imageTools.hidden = false;
+  imageFrame.hidden = false;
+  positionImageTools();
+}
+
+function deselectImage() {
+  selectedImage?.classList.remove('selected');
+  selectedImage = null;
+  imageTools.hidden = true;
+  imageFrame.hidden = true;
+}
+
+function positionImageTools() {
+  if (!selectedImage) return;
+  if (!selectedImage.isConnected || !pad.contains(selectedImage)) {
+    deselectImage();
+    return;
+  }
+  const card = padCard.getBoundingClientRect();
+  const r = selectedImage.getBoundingClientRect();
+  Object.assign(imageFrame.style, {
+    left: `${r.left - card.left}px`,
+    top: `${r.top - card.top}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`
+  });
+  const barW = imageTools.offsetWidth;
+  const barH = imageTools.offsetHeight;
+  let top = r.bottom - card.top + 10;
+  if (top + barH > card.height - 6) top = r.top - card.top - barH - 10;
+  if (top < 6) top = r.top - card.top + 10;
+  const left = Math.min(Math.max(8, r.left - card.left), card.width - barW - 8);
+  imageTools.style.top = `${top}px`;
+  imageTools.style.left = `${Math.max(8, left)}px`;
+  const width = Number(selectedImage.dataset.width || 0);
+  imageTools.querySelectorAll('[data-size]').forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.size) === width);
+  });
+}
+
 pad.addEventListener('click', e => {
   const img = e.target.closest('img.pad-image');
-  if (img && !img.dataset.pending) openImageViewer(img);
+  if (img && !img.dataset.pending) selectImage(img);
+  else deselectImage();
+});
+
+document.addEventListener('pointerdown', e => {
+  if (selectedImage && !e.target.closest('#imageTools, #imageFrame, img.pad-image')) deselectImage();
+});
+
+pad.addEventListener('keydown', e => {
+  if (!selectedImage) return;
+  if (e.key === 'Escape') deselectImage();
+  else if (e.key === 'Backspace' || e.key === 'Delete') {
+    e.preventDefault();
+    const img = selectedImage;
+    deselectImage();
+    img.remove();
+    onEditorChanged();
+  } else if (e.key.length === 1 || e.key === 'Enter') {
+    deselectImage();
+  }
+});
+
+pad.addEventListener('input', positionImageTools);
+window.addEventListener('resize', positionImageTools);
+new ResizeObserver(positionImageTools).observe(pad);
+
+imageTools.addEventListener('click', e => {
+  const img = selectedImage;
+  if (!img) return;
+  const sizeBtn = e.target.closest('[data-size]');
+  if (sizeBtn) {
+    setImageWidth(img, Number(sizeBtn.dataset.size));
+    onEditorChanged();
+    positionImageTools();
+    return;
+  }
+  const tool = e.target.closest('[data-tool]')?.dataset.tool;
+  if (tool === 'view') {
+    deselectImage();
+    openImageViewer(img);
+  } else if (tool === 'remove') {
+    deselectImage();
+    img.remove();
+    onEditorChanged();
+  }
+});
+
+// Drag the corner handle to any width.
+imageHandle.addEventListener('pointerdown', e => {
+  const img = selectedImage;
+  if (!img) return;
+  e.preventDefault();
+  e.stopPropagation();
+  imageHandle.setPointerCapture(e.pointerId);
+  const styles = getComputedStyle(img.parentElement === pad ? pad : img.parentElement);
+  const column = (img.parentElement === pad ? pad : img.parentElement).clientWidth
+    - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
+  const startX = e.clientX;
+  const startWidth = img.getBoundingClientRect().width;
+  resizingImage = true;
+
+  const move = ev => {
+    const width = ((startWidth + ev.clientX - startX) / column) * 100;
+    setImageWidth(img, width);
+    lastInputAt = Date.now();
+    positionImageTools();
+  };
+  const end = () => {
+    imageHandle.removeEventListener('pointermove', move);
+    imageHandle.removeEventListener('pointerup', end);
+    imageHandle.removeEventListener('pointercancel', end);
+    resizingImage = false;
+    onEditorChanged();
+  };
+  imageHandle.addEventListener('pointermove', move);
+  imageHandle.addEventListener('pointerup', end);
+  imageHandle.addEventListener('pointercancel', end);
 });
 
 async function switchSheet(nextSheet, { remember = true } = {}) {
@@ -588,6 +791,7 @@ async function switchSheet(nextSheet, { remember = true } = {}) {
   localUpdatedAt = 0;
   lastInputAt = 0;
   lastFileRefresh = 0;
+  deselectImage();
   pad.replaceChildren();
   updateEmptyState();
   setSelecting(false);
@@ -958,7 +1162,8 @@ async function fetchSharedFile(file, { signal, onProgress } = {}) {
   await runPool(file.chunks, PARALLEL_CHUNKS, async i => {
     parts[i] = await withRetry(() => {
       loaded[i] = 0;
-      return fetchChunk(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&chunk=${i}`), signal, n => {
+      const url = file.chunkUrl ? file.chunkUrl(i) : filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&chunk=${i}`);
+      return fetchChunk(url, signal, n => {
         loaded[i] = n;
         report();
       });
@@ -1113,7 +1318,7 @@ function openImageViewer(img) {
   previewAbort?.abort();
   previewAbort = null;
   viewedImage = img;
-  previewFile = { inline:true };
+  previewFile = { inline:true, src: img.getAttribute('src') };
   previewLoadedFile = null;
   previewTitle.textContent = 'Image';
   previewRemoveBtn.hidden = false;
@@ -1124,14 +1329,32 @@ function openImageViewer(img) {
   previewBody.replaceChildren(view);
   previewModal.hidden = false;
   document.body.classList.add('modal-open');
+}
 
-  const wanted = previewFile;
-  fetch(img.src).then(r => r.blob()).then(blob => {
-    if (previewFile !== wanted) return;
-    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+// Downloads an image's untouched original (in chunks, with progress) and saves it.
+async function saveOriginalImage(src) {
+  const params = new URL(src, location.origin).searchParams;
+  const sheet = validSheet(params.get('sheet'));
+  const id = encodeURIComponent(params.get('id') || '');
+  try {
+    const r = await fetch(imageUrl(sheet, `id=${id}&info=1`), { cache:'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const info = await r.json();
+    const ext = ((info.type.split('/')[1] || 'png').replace('jpeg', 'jpg'));
     const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-    previewLoadedFile = new File([blob], `Scratch Pad image ${stamp}.${ext}`, { type: blob.type });
-  }).catch(() => {});
+    const name = `Scratch Pad image ${stamp}.${ext}`;
+    const file = { name, type: info.type, size: info.size, chunks: info.chunks, sheet, chunkUrl: i => imageUrl(sheet, `id=${id}&chunk=${i}`) };
+    const transfer = createTransfer(name, 'Downloading original', info.size);
+    transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
+    try {
+      const prepared = await fetchSharedFile(file, { signal: transfer.signal, onProgress: transfer.update });
+      await deliverFiles([prepared], transfer, name);
+    } catch (err) {
+      transfer.fail(err?.name === 'AbortError' ? 'Download cancelled' : 'Download failed');
+    }
+  } catch {
+    showToast('Could not save image');
+  }
 }
 
 previewRemoveBtn.addEventListener('click', () => {
@@ -1166,7 +1389,9 @@ previewSaveBtn.addEventListener('click', async () => {
       return;
     }
     if (previewFile.inline) {
-      showToast('Still loading…');
+      const src = previewFile.src;
+      closePreview();
+      await saveOriginalImage(src);
       return;
     }
     await saveSharedFile(previewFile);
@@ -1427,14 +1652,14 @@ async function makeZip(files, zipName) {
 // ---- Uploads ----
 
 // Sends one chunk with XHR so the browser reports upload progress.
-function putChunk(url, blob, signal, onBytes) {
+function putChunk(url, blob, signal, onBytes, contentType = 'application/octet-stream') {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(abortError());
     const xhr = new XMLHttpRequest();
     const onAbort = () => xhr.abort();
     signal.addEventListener('abort', onAbort, { once:true });
     xhr.open('PUT', url);
-    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('Content-Type', contentType);
     xhr.upload.onprogress = e => onBytes(e.loaded);
     xhr.onload = () => {
       signal.removeEventListener('abort', onAbort);

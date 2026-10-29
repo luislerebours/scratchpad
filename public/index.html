@@ -49,7 +49,17 @@
         </div>
       </div>
       <div id="scratchpad" class="editor is-empty" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Scratch pad" spellcheck="true" data-placeholder="Type or paste anything here, text or images…"></div>
-      <div class="hint">Each sheet saves separately. Paste or drop images right into the text.</div>
+      <div id="imageFrame" class="image-frame" hidden><span id="imageHandle" class="image-handle" title="Drag to resize"></span></div>
+      <div id="imageTools" class="image-tools" role="toolbar" aria-label="Image" hidden>
+        <button type="button" data-size="33" aria-label="Small">S</button>
+        <button type="button" data-size="50" aria-label="Medium">M</button>
+        <button type="button" data-size="75" aria-label="Large">L</button>
+        <button type="button" data-size="100" aria-label="Full width">Full</button>
+        <span class="image-tools-sep" aria-hidden="true"></span>
+        <button type="button" data-tool="view">View</button>
+        <button type="button" data-tool="remove" class="danger">Remove</button>
+      </div>
+      <div class="hint">Each sheet saves separately. Paste or drop images right into the text; tap one to resize it.</div>
     </section>
 
     <section class="card files-card">

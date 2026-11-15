@@ -5,8 +5,7 @@ const API_AUTH = '/.netlify/functions/auth';
 const API_SYNC = '/.netlify/functions/sync';
 const API_CHECK = '/api/check';
 const SAFETY_CHECK_MS = 60_000;
-const OLD_FILE_DAYS = 14;
-const VERY_OLD_FILE_DAYS = 30;
+const OLD_FILE_DAYS = 30;
 const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 const PING_MS = 25_000;
 const POLL_MS = 2000;
@@ -1210,10 +1209,9 @@ function updateOldFilesNote() {
   const old = currentFiles.filter(isOldFile);
   oldFilesNote.hidden = !old.length || selecting || snoozed();
   if (oldFilesNote.hidden) return;
-  const veryOld = old.every(f => fileAgeDays(f) >= VERY_OLD_FILE_DAYS);
   const size = old.reduce((sum, f) => sum + (f.size || 0), 0);
   const count = old.length === 1 ? '1 file here is' : `${old.length} files here are`;
-  oldFilesText.innerHTML = `${count} over ${veryOld ? 'a month' : '2 weeks'} old <span>(${escapeHtml(bytes(size))})</span>. Still need ${old.length === 1 ? 'it' : 'them'}? Clearing out what you’re done with keeps things tidy.`;
+  oldFilesText.innerHTML = `${count} over a month old <span>(${escapeHtml(bytes(size))})</span>. Still need ${old.length === 1 ? 'it' : 'them'}? Clearing out what you’re done with keeps things tidy.`;
 }
 
 document.querySelector('#oldFilesReview').addEventListener('click', () => {

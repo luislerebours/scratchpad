@@ -117,21 +117,31 @@
         <h2>Sign in</h2>
         <label class="field-label" for="signinEmail">Email</label>
         <input id="signinEmail" class="auth-input" type="email" autocomplete="username" inputmode="email" required />
-        <label class="field-label" for="signinPassword">Password</label>
-        <input id="signinPassword" class="auth-input" type="password" autocomplete="current-password" required />
+        <div class="label-row">
+          <label class="field-label" for="signinPassword">Password</label>
+          <button class="link-btn small-link" type="button" data-go="email" data-mode="reset">Forgot password?</button>
+        </div>
+        <div class="password-field">
+          <input id="signinPassword" class="auth-input" type="password" autocomplete="current-password" required />
+          <button class="reveal-btn" type="button" aria-label="Show password" aria-pressed="false" data-reveal>
+            <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.7 17.7 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+          </button>
+        </div>
         <p class="auth-error" role="alert"></p>
         <button class="btn auth-submit" type="submit">Sign in</button>
-        <p class="auth-alt">New here, or forgot your password?<br /><button class="link-btn" type="button" data-go="email">Get a code by email</button></p>
+        <div class="auth-divider"><span>New to Scratch Pad?</span></div>
+        <button class="btn secondary auth-create" type="button" data-go="email" data-mode="create">Create an account</button>
       </form>
 
       <form id="emailForm" class="auth-step" data-step="email" novalidate hidden>
-        <h2>Get a code</h2>
-        <p class="auth-text">We’ll email you a code like <strong>otter4821</strong>. Use it to create your account or choose a new password.</p>
+        <h2 id="emailTitle">Create your account</h2>
+        <p class="auth-text" id="emailText">Enter your email. We’ll send a code like <strong>otter4821</strong> to confirm it’s you, then you’ll choose a password.</p>
         <label class="field-label" for="codeEmail">Email</label>
         <input id="codeEmail" class="auth-input" type="email" autocomplete="email" inputmode="email" required />
         <p class="auth-error" role="alert"></p>
-        <button class="btn auth-submit" type="submit">Email me a code</button>
-        <p class="auth-alt"><button class="link-btn" type="button" data-go="signin">Back to sign in</button></p>
+        <button class="btn auth-submit" type="submit" id="emailSubmit">Continue</button>
+        <p class="auth-alt" id="emailAlt">Already have an account? <button class="link-btn" type="button" data-go="signin">Sign in</button></p>
       </form>
 
       <form id="codeForm" class="auth-step" data-step="code" novalidate hidden>
@@ -149,8 +159,13 @@
         <p class="auth-text">Any password you like, at least 8 characters. You’ll stay signed in on this device for a year.</p>
         <input type="email" id="passwordEmail" autocomplete="username" hidden />
         <label class="field-label" for="newPassword">Password</label>
-        <input id="newPassword" class="auth-input" type="password" autocomplete="new-password" minlength="8" required />
-        <label class="show-password"><input id="showPassword" type="checkbox" /> Show password</label>
+        <div class="password-field">
+          <input id="newPassword" class="auth-input" type="password" autocomplete="new-password" minlength="8" required />
+          <button class="reveal-btn" type="button" aria-label="Show password" aria-pressed="false" data-reveal>
+            <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.7 17.7 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+          </button>
+        </div>
         <p class="auth-error" role="alert"></p>
         <button class="btn auth-submit" type="submit">Save and sign in</button>
       </form>

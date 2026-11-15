@@ -62,7 +62,18 @@ body.signed-out .app-shell { display:none; }
 .auth-input { width:100%; box-sizing:border-box; min-height:48px; margin-bottom:14px; border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:12px 13px; outline:none; background:rgba(0,0,0,.22); color:var(--text); font:inherit; font-size:1rem; }
 .auth-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(44,199,255,.14); }
 .code-input { font-size:1.25rem; font-weight:700; letter-spacing:.06em; }
-.show-password { display:flex; align-items:center; gap:8px; margin:-4px 0 14px; color:var(--muted); font-size:.88rem; }
+.password-field { position:relative; }
+.password-field .auth-input { padding-right:52px; }
+.reveal-btn { position:absolute; top:2px; right:2px; width:44px; height:44px; display:flex; align-items:center; justify-content:center; border:0; border-radius:10px; background:transparent; color:var(--muted); cursor:pointer; }
+.reveal-btn:hover, .reveal-btn[aria-pressed="true"] { color:var(--text); }
+.reveal-btn svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.reveal-btn .eye-closed, .reveal-btn[aria-pressed="true"] .eye-open { display:none; }
+.reveal-btn[aria-pressed="true"] .eye-closed { display:block; }
+.label-row { display:flex; justify-content:space-between; align-items:baseline; }
+.small-link { min-height:auto; padding:0 0 7px; font-size:.83rem; }
+.auth-divider { display:flex; align-items:center; gap:12px; margin:20px 0 12px; color:var(--muted); font-size:.85rem; }
+.auth-divider::before, .auth-divider::after { content:''; flex:1; height:1px; background:var(--line); }
+.auth-create { min-height:50px; font-size:1rem; }
 .auth-error { min-height:1.2em; margin:0 0 10px; color:#ff9ca6; font-size:.9rem; }
 .auth-submit { min-height:50px; font-size:1rem; }
 .auth-submit:disabled { opacity:.6; }

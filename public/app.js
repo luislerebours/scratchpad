@@ -2058,13 +2058,32 @@ authForm('#passwordForm', async () => {
   location.replace('/');
 });
 
-document.querySelector('#showPassword').addEventListener('change', e => {
-  document.querySelector('#newPassword').type = e.target.checked ? 'text' : 'password';
+// The eye button in a password box shows or hides what was typed.
+authScreen.addEventListener('click', e => {
+  const btn = e.target.closest('[data-reveal]');
+  if (!btn) return;
+  const input = btn.parentElement.querySelector('input');
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.setAttribute('aria-pressed', String(show));
+  btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  input.focus();
 });
+
+// The email step serves both new accounts and forgotten passwords.
+function setEmailMode(mode) {
+  const create = mode !== 'reset';
+  document.querySelector('#emailTitle').textContent = create ? 'Create your account' : 'Reset your password';
+  document.querySelector('#emailText').innerHTML = create
+    ? 'Enter your email. We’ll send a code like <strong>otter4821</strong> to confirm it’s you, then you’ll choose a password.'
+    : 'Enter your account’s email. We’ll send a code like <strong>otter4821</strong>, then you’ll choose a new password.';
+  document.querySelector('#emailSubmit').textContent = create ? 'Continue' : 'Email me a code';
+}
 
 authScreen.addEventListener('click', async e => {
   const go = e.target.closest('[data-go]');
   if (go) {
+    if (go.dataset.mode) setEmailMode(go.dataset.mode);
     const typed = authScreen.querySelector('.auth-step:not([hidden]) input[type="email"]')?.value.trim();
     if (typed) authEmail = typed;
     showAuth(go.dataset.go);

@@ -13,9 +13,17 @@ Pushes to `main` deploy straight to the live site.
 
 - `public/` is the static site (`index.html`, `app.js`, `styles.css`).
 - `netlify/functions/` holds the API, backed by Netlify Blobs:
-  - `state.mjs`: sheet text/html, sheet names, current sheet
+  - `auth.mjs`: accounts (emailed animal+4-digit code, then a password),
+    one-year session cookie renewed on each visit
+  - `state.mjs`: sheet list (up to 10 per account), sheet text/html, current sheet
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB)
   - `images.mjs`: images in the text (chunked original plus a display copy)
 - Netlify functions take about 4.5 MB per request, so anything larger travels
   in chunks.
-- Anyone with the URL can edit, so stored html is sanitized on every load and save.
+- `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,
+  which keeps each account's data in its own stores (`u-<id>-…`). The account
+  whose email matches the `OWNER_EMAIL` env var owns the original `scratchpad…`
+  stores from before accounts existed.
+- Email goes through Resend: `RESEND_API_KEY` and `MAIL_FROM` env vars on Netlify.
+  Locally, `SCRATCHPAD_DEV_MAIL=1` logs codes instead of sending them.
+- Stored html is sanitized on every load and save.

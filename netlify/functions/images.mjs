@@ -1,11 +1,10 @@
-import { getStore } from '@netlify/blobs';
 import { randomUUID } from 'node:crypto';
+import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 
 // Images pasted into a sheet's text. Netlify functions take about 4.5 MB per
 // request, so each image is kept twice: the untouched original in 4 MB chunks
 // (up to 100 MB), and a small display copy the page makes before uploading,
 // which is what the text shows. Small images skip the copy and show as-is.
-const SHEET_COUNT = 5;
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 4 * 1000 * 1000;
 const CHUNK_BYTES = 4 * 1000 * 1000;
@@ -14,31 +13,20 @@ const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
 const TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/heic', 'image/heif']);
 const PREVIEW_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-  });
-
-const parseSheet = value => {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 1 && n <= SHEET_COUNT ? n : null;
-};
-
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
 const chunkKey = (id, index) => `${id}-${index}`;
 
-const stores = sheet => ({
-  records: getStore({ name: `scratchpad-images-${sheet}`, consistency: 'strong' }),
-  chunks: getStore({ name: `scratchpad-image-chunks-${sheet}`, consistency: 'strong' }),
-  previews: getStore({ name: `scratchpad-image-previews-${sheet}`, consistency: 'strong' })
+const stores = (ns, sheet) => ({
+  records: userStore(ns, 'images', sheet),
+  chunks: userStore(ns, 'image-chunks', sheet),
+  previews: userStore(ns, 'image-previews', sheet)
 });
 
-// An id always names the same bytes, so responses can be cached for good.
+// An id always names the same bytes, so the browser may keep it for good;
+// "private" keeps shared caches (Netlify's CDN) from serving it to anyone else.
 const imageHeaders = type => ({
   'Content-Type': type,
-  'Cache-Control': 'public, max-age=31536000, immutable',
-  'Netlify-CDN-Cache-Control': 'public, durable, max-age=31536000, immutable',
+  'Cache-Control': 'private, max-age=31536000, immutable',
   'X-Content-Type-Options': 'nosniff'
 });
 
@@ -53,17 +41,17 @@ async function deleteImage(store, record) {
 // Deletes this sheet's images that no sheet's text has used for a week, and
 // uploads abandoned midway. Every sheet is checked because text (and its
 // images) can move between sheets.
-async function removeUnusedImages(sheet) {
-  const state = getStore({ name: 'scratchpad', consistency: 'strong' });
+async function removeUnusedImages(ns, sheet) {
+  const state = userStore(ns, 'state');
   const docs = await Promise.all(
-    Array.from({ length: SHEET_COUNT }, (_, i) => state.get(`sheets/${i + 1}`, { type: 'json' }))
+    Array.from({ length: MAX_SHEETS }, (_, i) => state.get(`sheets/${i + 1}`, { type: 'json' }))
   );
   const used = new Set();
   for (const doc of docs) {
     for (const match of String(doc?.html || '').matchAll(/[?&;]id=([A-Za-z0-9-]{1,64})/g)) used.add(match[1]);
   }
 
-  const store = stores(sheet);
+  const store = stores(ns, sheet);
   const { blobs } = await store.records.list();
   await Promise.all(blobs.map(async ({ key }) => {
     if (used.has(key)) return;
@@ -75,10 +63,13 @@ async function removeUnusedImages(sheet) {
 }
 
 export default async (req, context) => {
+  const auth = await requireUser(req);
+  if (auth.error) return auth.error;
+  const { ns } = auth;
   const url = new URL(req.url);
   const sheet = parseSheet(url.searchParams.get('sheet'));
   if (!sheet) return json({ error: 'Invalid sheet' }, 400);
-  const store = stores(sheet);
+  const store = stores(ns, sheet);
   const id = url.searchParams.get('id');
   const action = url.searchParams.get('action');
 
@@ -143,7 +134,7 @@ export default async (req, context) => {
     if (!record.preview && record.size > MAX_PREVIEW_BYTES) return json({ error: 'Display copy missing' }, 400);
     const done = { ...record, complete: true, uploadedAt: Date.now() };
     await store.records.setJSON(id, done);
-    context?.waitUntil?.(removeUnusedImages(sheet).catch(err => console.error('Image cleanup failed', err)));
+    context?.waitUntil?.(removeUnusedImages(ns, sheet).catch(err => console.error('Image cleanup failed', err)));
     return json({ src: `/.netlify/functions/images?sheet=${sheet}&id=${id}` });
   }
 

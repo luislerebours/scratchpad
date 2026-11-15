@@ -1,6 +1,7 @@
 const API_STATE = '/.netlify/functions/state';
 const API_FILES = '/.netlify/functions/files';
 const API_IMAGES = '/.netlify/functions/images';
+const API_AUTH = '/.netlify/functions/auth';
 const POLL_MS = 2000;
 const SAVE_DELAY_MS = 450;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -12,8 +13,7 @@ const PREVIEW_DIM = 2560;
 const SHOW_ORIGINAL_UP_TO = 1_500_000;
 const DISPLAYABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const STORABLE_TYPES = [...DISPLAYABLE_TYPES, 'image/avif', 'image/heic', 'image/heif'];
-const SHEET_COUNT = 5;
-const DEFAULT_SHEET_NAMES = ['Sheet 1', 'Sheet 2', 'Sheet 3', 'Sheet 4', 'Sheet 5'];
+const MAX_SHEETS = 10;
 
 const pad = document.querySelector('#scratchpad');
 const statusEl = document.querySelector('#status');
@@ -42,7 +42,11 @@ const sheetActions = document.querySelector('#sheetActions');
 const emptyFiles = document.querySelector('#emptyFiles');
 const dropZone = document.querySelector('#dropZone');
 const toastEl = document.querySelector('#toast');
-const sheetTabs = [...document.querySelectorAll('.sheet-tab')];
+const sheetTabsEl = document.querySelector('#sheetTabs');
+const addSheetBtn = document.querySelector('#addSheetBtn');
+const deleteSheetBtn = document.querySelector('#deleteSheetBtn');
+const accountBtn = document.querySelector('#accountBtn');
+const authScreen = document.querySelector('#authScreen');
 const filesSheetLabel = document.querySelector('#filesSheetLabel');
 const renameSheetBtn = document.querySelector('#renameSheetBtn');
 const renameModal = document.querySelector('#renameModal');
@@ -64,8 +68,9 @@ let saveTimer = null;
 let saving = false;
 let lastInputAt = 0;
 let lastFileRefresh = 0;
-let sheetNames = [...DEFAULT_SHEET_NAMES];
-let sheetNamesUpdatedAt = 0;
+let sheets = [{ id: 1, name: 'Sheet 1' }];
+let sheetsSignature = '';
+let account = null;
 let previewObjectUrl = null;
 let previewFile = null;
 let previewLoadedFile = null;
@@ -82,11 +87,15 @@ let resizingImage = false;
 
 function validSheet(value) {
   const n = Number(value);
-  return Number.isInteger(n) && n >= 1 && n <= SHEET_COUNT ? n : 1;
+  return Number.isInteger(n) && n >= 1 && n <= MAX_SHEETS ? n : (sheets[0]?.id || 1);
+}
+
+function hasSheet(id) {
+  return sheets.some(s => s.id === id);
 }
 
 function currentSheetName(sheet = activeSheet) {
-  return sheetNames[validSheet(sheet) - 1] || DEFAULT_SHEET_NAMES[validSheet(sheet) - 1];
+  return sheets.find(s => s.id === Number(sheet))?.name || `Sheet ${sheet}`;
 }
 
 function setStatus(mode, text) {
@@ -110,8 +119,8 @@ function stateUrl(sheet = activeSheet) {
   return `${API_STATE}?sheet=${validSheet(sheet)}`;
 }
 
-function namesUrl() {
-  return `${API_STATE}?meta=names`;
+function sheetsUrl() {
+  return `${API_STATE}?meta=sheets`;
 }
 
 function currentUrl() {
@@ -120,7 +129,8 @@ function currentUrl() {
 
 function rememberedSheet() {
   try {
-    return validSheet(localStorage.getItem(LAST_SHEET_KEY));
+    const sheet = Number(localStorage.getItem(LAST_SHEET_KEY));
+    return hasSheet(sheet) ? sheet : null;
   } catch {
     return null;
   }
@@ -130,7 +140,8 @@ async function fetchCurrentSheet() {
   try {
     const r = await fetch(currentUrl(), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return validSheet((await r.json()).sheet);
+    const sheet = Number((await r.json()).sheet);
+    return hasSheet(sheet) ? sheet : null;
   } catch {
     return null;
   }
@@ -155,33 +166,57 @@ function filesUrl(sheet = activeSheet, extra = '') {
   return `${API_FILES}?sheet=${validSheet(sheet)}${joiner}${extra}`;
 }
 
-function applySheetNames() {
-  sheetTabs.forEach((tab, index) => {
-    const label = tab.querySelector('.sheet-label');
-    const name = sheetNames[index] || DEFAULT_SHEET_NAMES[index];
-    label.textContent = name;
-    tab.title = `${name} — double-click to rename`;
-  });
+// ---- Sheet tabs: built from the account's sheet list ----
+
+function renderTabs() {
+  sheetTabsEl.replaceChildren(...sheets.map(sheet => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = `sheet-tab${sheet.id === activeSheet ? ' active' : ''}`;
+    tab.dataset.sheet = String(sheet.id);
+    tab.setAttribute('aria-selected', String(sheet.id === activeSheet));
+    tab.title = `${sheet.name} — double-click to rename`;
+    const label = document.createElement('span');
+    label.className = 'sheet-label';
+    label.textContent = sheet.name;
+    tab.append(label);
+    return tab;
+  }));
+  addSheetBtn.hidden = sheets.length >= MAX_SHEETS;
   filesSheetLabel.textContent = currentSheetName();
 }
 
-async function fetchSheetNames() {
+function applySheets(data) {
+  if (!Array.isArray(data?.sheets) || !data.sheets.length) return;
+  const signature = JSON.stringify(data.sheets);
+  if (signature === sheetsSignature) return;
+  sheetsSignature = signature;
+  sheets = data.sheets.map(s => ({ id: Number(s.id), name: String(s.name || `Sheet ${s.id}`) }));
+  renderTabs();
+  // The open sheet was deleted on another device.
+  if (!hasSheet(activeSheet)) switchSheet(sheets[0].id, { remember:false, force:true });
+}
+
+async function fetchSheets() {
   try {
-    const r = await fetch(namesUrl(), { cache:'no-store' });
+    const r = await fetch(sheetsUrl(), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    const remoteTs = Number(data.updatedAt || 0);
-    if (remoteTs >= sheetNamesUpdatedAt && Array.isArray(data.names)) {
-      sheetNames = DEFAULT_SHEET_NAMES.map((fallback, i) => {
-        const value = String(data.names[i] ?? '').trim();
-        return value || fallback;
-      });
-      sheetNamesUpdatedAt = remoteTs;
-      applySheetNames();
-    }
+    applySheets(await r.json());
   } catch {
-    // Sheet names fall back locally if metadata is temporarily unavailable.
+    // Keep the tabs we have if the list is briefly unavailable.
   }
+}
+
+async function postSheets(body) {
+  const r = await fetch(sheetsUrl(), {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body:JSON.stringify(body)
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Something went wrong');
+  applySheets(data);
+  return data;
 }
 
 async function fetchState(sheet = activeSheet) {
@@ -273,7 +308,7 @@ copyBtn.addEventListener('click', async () => {
 });
 
 clearBtn.addEventListener('click', () => {
-  if (editorIsEmpty() || confirm(`Clear ${currentSheetName()} for everyone?`)) {
+  if (editorIsEmpty() || confirm(`Clear ${currentSheetName()} on all your devices?`)) {
     pad.replaceChildren();
     onEditorChanged();
   }
@@ -281,7 +316,7 @@ clearBtn.addEventListener('click', () => {
 
 // ---- Editor content: text plus this site's own images ----
 
-const PAD_IMAGE_SRC = /^\/\.netlify\/functions\/images\?sheet=[1-5]&id=[A-Za-z0-9-]{1,64}$/;
+const PAD_IMAGE_SRC = /^\/\.netlify\/functions\/images\?sheet=(?:[1-9]|10)&id=[A-Za-z0-9-]{1,64}$/;
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'UL', 'OL', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'TR', 'TABLE', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER']);
 const DROPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED', 'NOSCRIPT', 'SVG', 'MATH', 'HEAD', 'TITLE', 'META', 'LINK', 'VIDEO', 'AUDIO', 'CANVAS', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON']);
 
@@ -771,9 +806,10 @@ imageHandle.addEventListener('pointerdown', e => {
   imageHandle.addEventListener('pointercancel', end);
 });
 
-async function switchSheet(nextSheet, { remember = true } = {}) {
+async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
   nextSheet = validSheet(nextSheet);
-  if (nextSheet === activeSheet) return;
+  if (nextSheet === activeSheet && !force) return;
+  if (!hasSheet(nextSheet)) return;
   if (pendingImageUploads) {
     showToast('Wait for images to finish uploading');
     return;
@@ -783,7 +819,7 @@ async function switchSheet(nextSheet, { remember = true } = {}) {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    await saveState(activeSheet);
+    if (hasSheet(activeSheet)) await saveState(activeSheet);
   }
 
   pad.contentEditable = 'false';
@@ -803,29 +839,74 @@ async function switchSheet(nextSheet, { remember = true } = {}) {
   timestampEl.textContent = 'Loading…';
   filesSheetLabel.textContent = currentSheetName();
 
-  for (const tab of sheetTabs) {
-    const isActive = Number(tab.dataset.sheet) === activeSheet;
-    tab.classList.toggle('active', isActive);
-    tab.setAttribute('aria-selected', String(isActive));
-  }
+  renderTabs();
 
   setStatus('', 'Loading…');
   await Promise.all([fetchState(activeSheet), loadFiles(true, activeSheet)]);
   pad.contentEditable = 'true';
 }
 
-sheetTabs.forEach(tab => {
-  tab.addEventListener('click', () => switchSheet(Number(tab.dataset.sheet)));
-  tab.addEventListener('dblclick', (e) => {
-    e.preventDefault();
-    const sheet = Number(tab.dataset.sheet);
-    if (sheet !== activeSheet) switchSheet(sheet).then(openRenameModal);
-    else openRenameModal();
+sheetTabsEl.addEventListener('click', e => {
+  const tab = e.target.closest('.sheet-tab');
+  if (tab) switchSheet(Number(tab.dataset.sheet));
+});
+
+sheetTabsEl.addEventListener('dblclick', e => {
+  const tab = e.target.closest('.sheet-tab');
+  if (!tab) return;
+  e.preventDefault();
+  const sheet = Number(tab.dataset.sheet);
+  if (sheet !== activeSheet) switchSheet(sheet).then(openRenameModal);
+  else openRenameModal();
+});
+
+addSheetBtn.addEventListener('click', async () => {
+  addSheetBtn.disabled = true;
+  try {
+    const data = await postSheets({ action:'add' });
+    await switchSheet(data.added);
+    openRenameModal();
+  } catch (err) {
+    showToast(err.message || 'Could not add a sheet');
+  } finally {
+    addSheetBtn.disabled = false;
+  }
+});
+
+deleteSheetBtn.addEventListener('click', () => {
+  const sheet = activeSheet;
+  const name = currentSheetName(sheet);
+  closeRenameModal();
+  if (sheets.length === 1) {
+    showToast('You need at least one sheet');
+    return;
+  }
+  openSheet({
+    title: `Delete ${name}?`,
+    text: 'Its text, images and files are deleted on all your devices. This can’t be undone.',
+    actions: [
+      { label: 'Cancel', kind: 'secondary' },
+      {
+        label: 'Delete sheet',
+        kind: 'danger-solid',
+        run: async () => {
+          clearTimeout(saveTimer);
+          saveTimer = null;
+          try {
+            await postSheets({ action:'delete', sheet });
+            showToast(`Deleted ${name}`);
+          } catch (err) {
+            showToast(err.message || 'Delete failed');
+          }
+        }
+      }
+    ]
   });
 });
 
 function openRenameModal() {
   renameInput.value = currentSheetName();
+  deleteSheetBtn.hidden = sheets.length <= 1;
   renameModal.hidden = false;
   document.body.classList.add('modal-open');
   requestAnimationFrame(() => {
@@ -851,16 +932,7 @@ renameForm.addEventListener('submit', async e => {
     return;
   }
   try {
-    const r = await fetch(namesUrl(), {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({ sheet:activeSheet, name })
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const data = await r.json();
-    sheetNames = DEFAULT_SHEET_NAMES.map((fallback, i) => String(data.names?.[i] || fallback));
-    sheetNamesUpdatedAt = Number(data.updatedAt || Date.now());
-    applySheetNames();
+    await postSheets({ action:'rename', sheet:activeSheet, name });
     closeRenameModal();
     showToast('Sheet renamed');
   } catch {
@@ -1760,21 +1832,186 @@ document.addEventListener('visibilitychange', async () => {
     }
     return;
   }
+  if (!appStarted) return;
+  await fetchSheets();
   const sheet = await fetchCurrentSheet();
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
 });
 
-await fetchSheetNames();
-const startSheet = (await fetchCurrentSheet()) || rememberedSheet() || 1;
-if (startSheet !== activeSheet) {
-  await switchSheet(startSheet, { remember:false });
-} else {
-  await fetchState(activeSheet);
-  await loadFiles(true, activeSheet);
+// ---- Account ----
+
+const rawFetch = window.fetch.bind(window);
+let appStarted = false;
+
+// Signed out elsewhere ("sign out everywhere", a password reset): back to sign-in.
+window.fetch = async (...args) => {
+  const r = await rawFetch(...args);
+  if (r.status === 401 && appStarted) location.replace('/');
+  return r;
+};
+
+accountBtn.addEventListener('click', () => {
+  openSheet({
+    title: account?.email || 'Account',
+    text: 'You stay signed in on this device for a year, renewed each time you open Scratch Pad.',
+    actions: [
+      { label: 'Sign out', kind: 'secondary', run: () => signOut('logout') },
+      { label: 'Sign out everywhere', kind: 'danger-solid', run: () => signOut('logout-all') },
+      { label: 'Cancel', kind: 'secondary', full: true }
+    ]
+  });
+});
+
+async function signOut(action) {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await saveState(activeSheet);
+  }
+  await rawFetch(`${API_AUTH}?action=${action}`, { method:'POST' }).catch(() => {});
+  location.replace('/');
 }
 
-setInterval(() => {
-  fetchState(activeSheet);
-  fetchSheetNames();
-  loadFiles(false, activeSheet);
-}, POLL_MS);
+async function authPost(action, body) {
+  const r = await rawFetch(`${API_AUTH}?action=${action}`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body:JSON.stringify(body)
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  return data;
+}
+
+let authEmail = '';
+let passwordToken = '';
+
+function showAuth(step) {
+  document.body.classList.add('signed-out');
+  authScreen.hidden = false;
+  for (const form of authScreen.querySelectorAll('.auth-step')) {
+    const active = form.dataset.step === step;
+    form.hidden = !active;
+    if (active) {
+      form.querySelector('.auth-error').textContent = '';
+      for (const input of form.querySelectorAll('input[type="email"]')) if (!input.value) input.value = authEmail;
+    }
+  }
+  if (step === 'code') document.querySelector('#codeEmailLabel').textContent = authEmail;
+  if (step === 'password') document.querySelector('#passwordEmail').value = authEmail;
+  const first = authScreen.querySelector(`.auth-step[data-step="${step}"] input:not([hidden]):not([type="checkbox"])`);
+  requestAnimationFrame(() => {
+    const target = step === 'signin' && first?.value ? document.querySelector('#signinPassword') : first;
+    target?.focus();
+  });
+}
+
+// Runs a form's request with its button disabled and errors shown under it.
+function authForm(id, run) {
+  const form = document.querySelector(id);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const button = form.querySelector('.auth-submit');
+    const error = form.querySelector('.auth-error');
+    error.textContent = '';
+    button.disabled = true;
+    try {
+      await run(form);
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+authForm('#signinForm', async () => {
+  authEmail = document.querySelector('#signinEmail').value.trim();
+  await authPost('login', { email: authEmail, password: document.querySelector('#signinPassword').value });
+  location.replace('/');
+});
+
+async function requestCode() {
+  await authPost('request-code', { email: authEmail });
+  document.querySelector('#codeInput').value = '';
+  showAuth('code');
+}
+
+authForm('#emailForm', async () => {
+  authEmail = document.querySelector('#codeEmail').value.trim();
+  if (!authEmail) throw new Error('Enter your email address');
+  await requestCode();
+});
+
+authForm('#codeForm', async () => {
+  const data = await authPost('verify-code', { email: authEmail, code: document.querySelector('#codeInput').value });
+  passwordToken = data.token;
+  document.querySelector('#passwordTitle').textContent = data.existing ? 'Choose a new password' : 'Choose a password';
+  showAuth('password');
+});
+
+authForm('#passwordForm', async () => {
+  const password = document.querySelector('#newPassword').value;
+  if (password.length < 8) throw new Error('Use at least 8 characters.');
+  await authPost('set-password', { token: passwordToken, password });
+  location.replace('/');
+});
+
+document.querySelector('#showPassword').addEventListener('change', e => {
+  document.querySelector('#newPassword').type = e.target.checked ? 'text' : 'password';
+});
+
+authScreen.addEventListener('click', async e => {
+  const go = e.target.closest('[data-go]');
+  if (go) {
+    const typed = authScreen.querySelector('.auth-step:not([hidden]) input[type="email"]')?.value.trim();
+    if (typed) authEmail = typed;
+    showAuth(go.dataset.go);
+    return;
+  }
+  if (e.target.closest('[data-resend]')) {
+    const error = document.querySelector('#codeForm .auth-error');
+    try {
+      await requestCode();
+      showToast('New code sent');
+    } catch (err) {
+      error.textContent = err.message;
+    }
+  }
+});
+
+async function startApp() {
+  document.body.classList.remove('signed-out');
+  authScreen.hidden = true;
+  accountBtn.textContent = (account.email || '?').charAt(0);
+  accountBtn.title = account.email;
+  await fetchSheets();
+  renderTabs();
+  const startSheet = (await fetchCurrentSheet()) || rememberedSheet() || sheets[0].id;
+  if (startSheet !== activeSheet || !hasSheet(activeSheet)) {
+    await switchSheet(startSheet, { remember:false, force:true });
+  } else {
+    await fetchState(activeSheet);
+    await loadFiles(true, activeSheet);
+  }
+  appStarted = true;
+
+  setInterval(() => {
+    fetchState(activeSheet);
+    fetchSheets();
+    loadFiles(false, activeSheet);
+  }, POLL_MS);
+}
+
+// Checking who is signed in also renews the one-year cookie.
+const me = await rawFetch(API_AUTH, { cache:'no-store' }).catch(() => null);
+if (me?.ok) {
+  account = await me.json();
+  await startApp();
+} else {
+  // The emailed link opens straight at the code step.
+  const params = new URLSearchParams(location.search);
+  authEmail = params.get('email') || '';
+  showAuth(params.get('step') === 'code' && authEmail ? 'code' : 'signin');
+  if (params.has('step')) history.replaceState(null, '', '/');
+}

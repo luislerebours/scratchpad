@@ -1,31 +1,19 @@
-import { getStore } from '@netlify/blobs';
 import { randomUUID } from 'node:crypto';
+import { json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
-const SHEET_COUNT = 5;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const CHUNK_BYTES = 4 * 1000 * 1000;
 const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
-
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-  });
-
-const parseSheet = value => {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 1 && n <= SHEET_COUNT ? n : null;
-};
 
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
 const chunkKey = (id, index) => `${id}-${index}`;
 
 // Records are kept in their own store so listing never touches chunk data.
-const stores = sheet => ({
-  records: getStore({ name: `scratchpad-files-${sheet}`, consistency: 'strong' }),
-  chunks: getStore({ name: `scratchpad-chunks-${sheet}`, consistency: 'strong' })
+const stores = (ns, sheet) => ({
+  records: userStore(ns, 'files', sheet),
+  chunks: userStore(ns, 'chunks', sheet)
 });
 
 const publicRecord = (record, sheet) => ({
@@ -46,11 +34,13 @@ async function deleteFile({ records, chunks }, record) {
 }
 
 export default async req => {
+  const auth = await requireUser(req);
+  if (auth.error) return auth.error;
   const url = new URL(req.url);
   const sheet = parseSheet(url.searchParams.get('sheet'));
   if (!sheet) return json({ error: 'Invalid sheet' }, 400);
 
-  const store = stores(sheet);
+  const store = stores(auth.ns, sheet);
   const id = url.searchParams.get('id');
   const action = url.searchParams.get('action');
   const chunkParam = url.searchParams.get('chunk');

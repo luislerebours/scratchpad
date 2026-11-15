@@ -20,20 +20,20 @@
         <img src="/assets/icon-192.png" alt="" class="brand-icon" />
         <div>
           <h1>Scratch Pad</h1>
-          <p>Five shared sheets across your devices</p>
+          <p>Your sheets, on all your devices</p>
         </div>
       </div>
-      <div id="status" class="status" aria-live="polite"><span class="dot"></span><span>Connecting…</span></div>
+      <div class="topbar-right">
+        <div id="status" class="status" aria-live="polite"><span class="dot"></span><span>Connecting…</span></div>
+        <button id="accountBtn" class="account-btn" type="button" aria-label="Account">?</button>
+      </div>
     </header>
 
     <div class="sheet-bar">
-      <nav class="sheet-tabs" aria-label="Scratch Pad sheets">
-        <button class="sheet-tab active" type="button" data-sheet="1" aria-selected="true"><span class="sheet-label">Sheet 1</span></button>
-        <button class="sheet-tab" type="button" data-sheet="2" aria-selected="false"><span class="sheet-label">Sheet 2</span></button>
-        <button class="sheet-tab" type="button" data-sheet="3" aria-selected="false"><span class="sheet-label">Sheet 3</span></button>
-        <button class="sheet-tab" type="button" data-sheet="4" aria-selected="false"><span class="sheet-label">Sheet 4</span></button>
-        <button class="sheet-tab" type="button" data-sheet="5" aria-selected="false"><span class="sheet-label">Sheet 5</span></button>
-      </nav>
+      <nav id="sheetTabs" class="sheet-tabs" aria-label="Scratch Pad sheets"></nav>
+      <button id="addSheetBtn" class="add-sheet-btn" type="button" aria-label="Add a sheet" title="Add a sheet">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+      </button>
       <button id="renameSheetBtn" class="rename-sheet-btn" type="button" aria-label="Rename current sheet" title="Rename current sheet">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19 9.2 14.8 5 4 15.8V20Zm2-3.4 8.8-8.8 1.4 1.4L7.4 18H6v-1.4ZM17.9 3.3a1.4 1.4 0 0 1 2 0l.8.8a1.4 1.4 0 0 1 0 2l-1.4 1.4-2.8-2.8 1.4-1.4Z"/></svg>
         <span>Rename</span>
@@ -89,8 +89,59 @@
       <div id="emptyFiles" class="empty-state">No shared files on this sheet yet.</div>
     </section>
 
-    <footer>Anyone with this site URL can view and edit all five shared sheets and their files.</footer>
+    <footer>Your sheets and files are private to your account.</footer>
   </main>
+
+  <section id="authScreen" class="auth-screen" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <img src="/assets/icon-192.png" alt="" class="brand-icon" />
+        <h1>Scratch Pad</h1>
+      </div>
+
+      <form id="signinForm" class="auth-step" data-step="signin" novalidate>
+        <h2>Sign in</h2>
+        <label class="field-label" for="signinEmail">Email</label>
+        <input id="signinEmail" class="auth-input" type="email" autocomplete="username" inputmode="email" required />
+        <label class="field-label" for="signinPassword">Password</label>
+        <input id="signinPassword" class="auth-input" type="password" autocomplete="current-password" required />
+        <p class="auth-error" role="alert"></p>
+        <button class="btn auth-submit" type="submit">Sign in</button>
+        <p class="auth-alt">New here, or forgot your password?<br /><button class="link-btn" type="button" data-go="email">Get a code by email</button></p>
+      </form>
+
+      <form id="emailForm" class="auth-step" data-step="email" novalidate hidden>
+        <h2>Get a code</h2>
+        <p class="auth-text">We’ll email you a code like <strong>otter4821</strong>. Use it to create your account or choose a new password.</p>
+        <label class="field-label" for="codeEmail">Email</label>
+        <input id="codeEmail" class="auth-input" type="email" autocomplete="email" inputmode="email" required />
+        <p class="auth-error" role="alert"></p>
+        <button class="btn auth-submit" type="submit">Email me a code</button>
+        <p class="auth-alt"><button class="link-btn" type="button" data-go="signin">Back to sign in</button></p>
+      </form>
+
+      <form id="codeForm" class="auth-step" data-step="code" novalidate hidden>
+        <h2>Enter your code</h2>
+        <p class="auth-text">We sent a code to <strong id="codeEmailLabel"></strong>. It expires in 15 minutes.</p>
+        <label class="field-label" for="codeInput">Code</label>
+        <input id="codeInput" class="auth-input code-input" type="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" placeholder="otter4821" required />
+        <p class="auth-error" role="alert"></p>
+        <button class="btn auth-submit" type="submit">Continue</button>
+        <p class="auth-alt"><button class="link-btn" type="button" data-resend>Send a new code</button> · <button class="link-btn" type="button" data-go="email">Use a different email</button></p>
+      </form>
+
+      <form id="passwordForm" class="auth-step" data-step="password" novalidate hidden>
+        <h2 id="passwordTitle">Choose a password</h2>
+        <p class="auth-text">Any password you like, at least 8 characters. You’ll stay signed in on this device for a year.</p>
+        <input type="email" id="passwordEmail" autocomplete="username" hidden />
+        <label class="field-label" for="newPassword">Password</label>
+        <input id="newPassword" class="auth-input" type="password" autocomplete="new-password" minlength="8" required />
+        <label class="show-password"><input id="showPassword" type="checkbox" /> Show password</label>
+        <p class="auth-error" role="alert"></p>
+        <button class="btn auth-submit" type="submit">Save and sign in</button>
+      </form>
+    </div>
+  </section>
 
   <div id="bulkBar" class="bulk-bar" hidden>
     <div class="bulk-summary"><strong id="bulkCount">0 selected</strong><span id="bulkSize"></span></div>
@@ -125,6 +176,7 @@
         <label class="field-label" for="renameInput">Sheet name</label>
         <input id="renameInput" class="rename-input" type="text" maxlength="40" autocomplete="off" />
         <div class="modal-actions">
+          <button id="deleteSheetBtn" class="btn danger delete-sheet-btn" type="button">Delete sheet</button>
           <button class="btn secondary" type="button" data-close-rename>Cancel</button>
           <button class="btn" type="submit">Save name</button>
         </div>

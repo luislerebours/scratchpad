@@ -45,3 +45,8 @@ Pushes to `main` deploy straight to the live site.
   Without `SYNC_URL`, devices just use the 2-second check.
 - Deploy the relay from `sync-worker/` with `npx wrangler deploy`.
 - Stored html is sanitized on every load and save.
+- UI: colors and sizes are tokens at the top of `public/styles.css`. Sheet,
+  file and account actions live in menus built by `openMenu()` in `app.js`
+  (clear/delete always confirm in a bottom sheet). The header dot is the
+  server connection; the toolbar text is the save state, which shows
+  "Saved" only after the server confirms.

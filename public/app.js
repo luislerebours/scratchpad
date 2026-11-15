@@ -23,15 +23,22 @@ const MAX_SHEETS = 10;
 
 const pad = document.querySelector('#scratchpad');
 const statusEl = document.querySelector('#status');
-const timestampEl = document.querySelector('#timestamp');
+const saveStatusEl = document.querySelector('#saveStatus');
+const saveStatusText = document.querySelector('#saveStatusText');
+const retrySaveBtn = document.querySelector('#retrySaveBtn');
 const copyBtn = document.querySelector('#copyBtn');
-const clearBtn = document.querySelector('#clearBtn');
-const toolbarDeleteBtn = document.querySelector('#toolbarDeleteBtn');
+const sheetMenuBtn = document.querySelector('#sheetMenuBtn');
+const attachLink = document.querySelector('#attachLink');
+const attachText = document.querySelector('#attachText');
+const tipsEl = document.querySelector('#tips');
+const tabsScroller = document.querySelector('#tabsScroller');
+const filesSection = document.querySelector('#filesSection');
+const filesHeading = document.querySelector('#filesHeading');
+const dropTarget = document.querySelector('#dropTarget');
+const avatarEl = document.querySelector('#avatar');
 const fileInput = document.querySelector('#fileInput');
 const fileList = document.querySelector('#fileList');
 const transferList = document.querySelector('#transferList');
-const storageMeter = document.querySelector('#storageMeter');
-const storageFill = document.querySelector('#storageFill');
 const storageText = document.querySelector('#storageText');
 const oldFilesNote = document.querySelector('#oldFilesNote');
 const oldFilesTitle = document.querySelector('#oldFilesTitle');
@@ -53,17 +60,14 @@ const sheetText = document.querySelector('#sheetText');
 const sheetItems = document.querySelector('#sheetItems');
 const sheetActions = document.querySelector('#sheetActions');
 const emptyFiles = document.querySelector('#emptyFiles');
-const dropZone = document.querySelector('#dropZone');
 const toastEl = document.querySelector('#toast');
 const sheetTabsEl = document.querySelector('#sheetTabs');
 const addSheetBtn = document.querySelector('#addSheetBtn');
-const deleteSheetBtn = document.querySelector('#deleteSheetBtn');
 const accountBtn = document.querySelector('#accountBtn');
 const authScreen = document.querySelector('#authScreen');
 const adminModal = document.querySelector('#adminModal');
 const adminBody = document.querySelector('#adminBody');
 const filesSheetLabel = document.querySelector('#filesSheetLabel');
-const renameSheetBtn = document.querySelector('#renameSheetBtn');
 const renameModal = document.querySelector('#renameModal');
 const renameForm = document.querySelector('#renameForm');
 const renameInput = document.querySelector('#renameInput');
@@ -125,9 +129,43 @@ function currentSheetName(sheet = activeSheet) {
   return sheets.find(s => s.id === Number(sheet))?.name || `Sheet ${sheet}`;
 }
 
-function setStatus(mode, text) {
-  statusEl.className = `status ${mode || ''}`.trim();
-  statusEl.querySelector('span:last-child').textContent = text;
+// Connection to the server, shown as a quiet dot in the header; words only
+// appear when something is wrong.
+function setConnection(state) {
+  if (statusEl.dataset.state === state) return;
+  const wasOffline = statusEl.dataset.state === 'offline';
+  statusEl.dataset.state = state;
+  // Back online after a failed save: try that save again on its own.
+  if (state === 'live' && wasOffline && saveStateName === 'failed') {
+    setTimeout(() => {
+      if (saveStateName === 'failed' && !saving && !saveTimer) saveState(activeSheet);
+    }, 0);
+  }
+  const label = state === 'live' ? 'Connected' : state === 'offline' ? 'Offline' : 'Connecting…';
+  statusEl.title = state === 'live' ? 'Connected: changes sync across your devices' : label;
+  statusEl.querySelector('.conn-label').textContent = label;
+}
+
+// Save state of the open sheet, shown in the editor toolbar. "Saved" only
+// ever follows a confirmed write (or content loaded from the server).
+let saveStateName = 'loading';
+
+function setSaveState(state) {
+  saveStateName = state;
+  renderSaveStatus();
+}
+
+function renderSaveStatus() {
+  const text = {
+    loading: 'Loading…',
+    unsaved: 'Unsaved changes',
+    saving: 'Saving…',
+    failed: 'Couldn’t save'
+  }[saveStateName] || (localUpdatedAt ? `Saved · ${formatSavedTime(localUpdatedAt)}` : 'Nothing saved yet');
+  saveStatusText.textContent = text;
+  saveStatusEl.dataset.state = saveStateName;
+  retrySaveBtn.hidden = saveStateName !== 'failed';
+  if (localUpdatedAt) saveStatusEl.title = new Date(localUpdatedAt).toLocaleString();
 }
 
 function showToast(text) {
@@ -137,9 +175,14 @@ function showToast(text) {
   showToast.timer = setTimeout(() => toastEl.classList.remove('show'), 1800);
 }
 
-function formatDate(ts) {
-  if (!ts) return 'Not saved yet';
-  return `Last updated ${new Intl.DateTimeFormat(undefined, { dateStyle:'medium', timeStyle:'short' }).format(new Date(ts))}`;
+function formatSavedTime(ts) {
+  const date = new Date(ts);
+  const now = new Date();
+  const time = new Intl.DateTimeFormat(undefined, { hour:'numeric', minute:'2-digit' }).format(date);
+  if (date.toDateString() === now.toDateString()) return time;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const day = new Intl.DateTimeFormat(undefined, sameYear ? { month:'short', day:'numeric' } : { month:'short', day:'numeric', year:'numeric' }).format(date);
+  return `${day}, ${time}`;
 }
 
 function stateUrl(sheet = activeSheet) {
@@ -193,6 +236,166 @@ function filesUrl(sheet = activeSheet, extra = '') {
   return `${API_FILES}?sheet=${validSheet(sheet)}${joiner}${extra}`;
 }
 
+// ---- Icons ----
+
+const ICON_PATHS = {
+  pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
+  eraser: '<path d="M20 20H9l-4.5-4.5a2 2 0 0 1 0-2.8L13 4.2a2 2 0 0 1 2.8 0l4 4a2 2 0 0 1 0 2.8L12 19"/><path d="m8 10 6 6"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  pin: '<path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/>',
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5L5 20"/>',
+  shield: '<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/>',
+  logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/>',
+  devices: '<rect x="3" y="4" width="13" height="10" rx="1.5"/><path d="M7 18h5M17 9h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z"/>'
+};
+
+const icon = name => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
+
+// ---- Returning focus after a dialog closes ----
+
+let returnFocusTo = null;
+
+function rememberFocus() {
+  const el = document.activeElement;
+  if (el && el !== document.body) returnFocusTo = el;
+}
+
+function restoreFocus() {
+  const el = returnFocusTo;
+  returnFocusTo = null;
+  if (el?.isConnected) el.focus({ preventScroll:true });
+}
+
+// ---- Menus (sheet, file and account actions) ----
+// items: { label, icon, danger, run } | 'separator' | { heading } | null (skipped)
+
+let openMenuState = null;
+
+function closeMenu({ focusTrigger = true } = {}) {
+  if (!openMenuState) return;
+  const { el, trigger } = openMenuState;
+  openMenuState = null;
+  el.remove();
+  trigger.setAttribute('aria-expanded', 'false');
+  if (!focusTrigger) return;
+  // The file list may have been redrawn while the menu was open: find the new button.
+  const target = trigger.isConnected ? trigger
+    : trigger.dataset.fileMenu ? fileList.querySelector(`[data-file-menu="${CSS.escape(trigger.dataset.fileMenu)}"]`) : null;
+  target?.focus({ preventScroll:true });
+}
+
+function openMenu(trigger, items, label) {
+  const toggling = openMenuState?.trigger === trigger;
+  closeMenu({ focusTrigger:false });
+  if (toggling) return;
+
+  const el = document.createElement('div');
+  el.className = 'menu';
+  el.setAttribute('role', 'menu');
+  if (label) el.setAttribute('aria-label', label);
+  for (const item of items) {
+    if (!item) continue;
+    if (item === 'separator') {
+      const sep = document.createElement('div');
+      sep.className = 'menu-sep';
+      sep.setAttribute('role', 'separator');
+      el.append(sep);
+    } else if (item.heading) {
+      const heading = document.createElement('div');
+      heading.className = 'menu-heading';
+      heading.textContent = item.heading;
+      el.append(heading);
+    } else {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `menu-item${item.danger ? ' danger' : ''}`;
+      btn.setAttribute('role', 'menuitem');
+      btn.tabIndex = -1;
+      btn.innerHTML = item.icon ? icon(item.icon) : '';
+      const text = document.createElement('span');
+      text.textContent = item.label;
+      btn.append(text);
+      btn.addEventListener('click', () => {
+        closeMenu();
+        item.run();
+      });
+      el.append(btn);
+    }
+  }
+  document.body.append(el);
+  trigger.setAttribute('aria-expanded', 'true');
+
+  // Below the button, right-aligned; flipped above or nudged in near screen edges.
+  // Returns false once the button has scrolled out of sight.
+  const place = () => {
+    const r = trigger.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = window.visualViewport?.height || window.innerHeight;
+    if (r.bottom < 0 || r.top > vh || !trigger.isConnected) return false;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const left = Math.max(8, Math.min(r.right - w, vw - w - 8));
+    let top = r.bottom + 6;
+    if (top + h > vh - 8) top = r.top - h - 6 >= 8 ? r.top - h - 6 : Math.max(8, vh - h - 8);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    return true;
+  };
+  openMenuState = { el, trigger, place, width: window.innerWidth };
+  place();
+
+  const entries = () => [...el.querySelectorAll('[role="menuitem"]')];
+  entries()[0]?.focus({ preventScroll:true });
+  el.addEventListener('keydown', e => {
+    const list = entries();
+    const i = list.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      list[(i + step + list.length) % list.length]?.focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      list[e.key === 'Home' ? 0 : list.length - 1]?.focus();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenu();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      closeMenu();
+    }
+  });
+}
+
+document.addEventListener('pointerdown', e => {
+  if (openMenuState && !openMenuState.el.contains(e.target) && !openMenuState.trigger.contains(e.target)) {
+    closeMenu({ focusTrigger:false });
+  }
+});
+// Scrolling carries the menu along with its button; it closes once the button is out of sight.
+document.addEventListener('scroll', e => {
+  if (openMenuState && !openMenuState.el.contains(e.target) && !openMenuState.place()) closeMenu({ focusTrigger:false });
+}, true);
+window.addEventListener('resize', () => {
+  // Phones resize when browser bars move; only a real width change closes the menu.
+  if (openMenuState && openMenuState.width !== window.innerWidth) closeMenu({ focusTrigger:false });
+});
+
+// Tips: close on Escape or a tap elsewhere.
+document.addEventListener('pointerdown', e => {
+  if (tipsEl.open && !tipsEl.contains(e.target)) tipsEl.open = false;
+});
+tipsEl.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && tipsEl.open) {
+    e.stopPropagation();
+    tipsEl.open = false;
+    tipsEl.querySelector('summary').focus();
+  }
+});
+
 // ---- Sheet tabs: built from the account's sheet list ----
 
 function renderTabs() {
@@ -201,8 +404,11 @@ function renderTabs() {
     tab.type = 'button';
     tab.className = `sheet-tab${sheet.id === activeSheet ? ' active' : ''}`;
     tab.dataset.sheet = String(sheet.id);
+    tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(sheet.id === activeSheet));
-    tab.title = `${sheet.name} — double-click to rename`;
+    // One stop in the Tab order; arrow keys move between tabs, Enter opens one.
+    tab.tabIndex = sheet.id === activeSheet ? 0 : -1;
+    tab.title = sheet.name;
     const label = document.createElement('span');
     label.className = 'sheet-label';
     label.textContent = sheet.name;
@@ -210,9 +416,50 @@ function renderTabs() {
     return tab;
   }));
   addSheetBtn.hidden = sheets.length >= MAX_SHEETS;
-  toolbarDeleteBtn.hidden = sheets.length <= 1;
   filesSheetLabel.textContent = currentSheetName();
+  dropTarget.textContent = `to ${currentSheetName()}`;
+  requestAnimationFrame(() => revealActiveTab());
 }
+
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Keeps the open tab fully in view, and fades the edges that hide more tabs.
+function revealActiveTab(smooth = false) {
+  const tab = sheetTabsEl.querySelector('.sheet-tab.active');
+  if (tab) {
+    const pad = 28;
+    const left = tab.offsetLeft;
+    const right = left + tab.offsetWidth;
+    const view = tabsScroller.clientWidth;
+    let target = null;
+    if (left - pad < tabsScroller.scrollLeft) target = Math.max(0, left - pad);
+    else if (right + pad > tabsScroller.scrollLeft + view) target = right + pad - view;
+    if (target !== null) tabsScroller.scrollTo({ left: target, behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto' });
+  }
+  updateTabFades();
+}
+
+function updateTabFades() {
+  const max = tabsScroller.scrollWidth - tabsScroller.clientWidth;
+  tabsScroller.classList.toggle('fade-start', tabsScroller.scrollLeft > 2);
+  tabsScroller.classList.toggle('fade-end', tabsScroller.scrollLeft < max - 2);
+}
+
+tabsScroller.addEventListener('scroll', updateTabFades, { passive:true });
+window.addEventListener('resize', () => revealActiveTab());
+
+// Arrow keys move between tabs.
+sheetTabsEl.addEventListener('keydown', e => {
+  const tabs = [...sheetTabsEl.querySelectorAll('.sheet-tab')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  const tab = tabs[(next + tabs.length) % tabs.length];
+  tab.focus();
+  tab.scrollIntoView({ block:'nearest', inline:'nearest' });
+});
 
 function applySheets(data) {
   if (!Array.isArray(data?.sheets) || !data.sheets.length) return;
@@ -267,19 +514,20 @@ async function fetchState(sheet = activeSheet) {
     if (remoteTs > localUpdatedAt && !busy) {
       renderEditor(remoteHtml);
       localUpdatedAt = remoteTs;
-      timestampEl.textContent = formatDate(localUpdatedAt);
+      if (saveStateName === 'failed') saveStateName = 'saved';
     } else if (!localUpdatedAt && !busy && !saveTimer) {
       renderEditor(remoteHtml);
       localUpdatedAt = remoteTs;
-      timestampEl.textContent = formatDate(localUpdatedAt);
     } else if (remoteTs > localUpdatedAt) {
       // Mid-edit: not applied yet, so the next check fetches it again.
       return false;
     }
-    setStatus('live', 'Live');
+    setConnection('live');
+    // What's on screen now matches the server.
+    if (!saveTimer && !saving && saveStateName !== 'failed') setSaveState('saved');
     return true;
   } catch (err) {
-    if (requestedSheet === activeSheet) setStatus('error', 'Offline');
+    if (requestedSheet === activeSheet) setConnection('offline');
     return false;
   }
 }
@@ -289,7 +537,7 @@ async function saveState(sheet = activeSheet) {
   const textToSave = pad.innerText;
   const htmlToSave = serializeEditor();
   saving = true;
-  if (targetSheet === activeSheet) setStatus('', 'Saving…');
+  if (targetSheet === activeSheet) setSaveState('saving');
   try {
     const r = await fetch(stateUrl(targetSheet), {
       method: 'POST',
@@ -302,22 +550,25 @@ async function saveState(sheet = activeSheet) {
       // Our own save: no need to fetch it back on the next check.
       if (data.rev && !saveTimer) revs.text = data.rev;
       localUpdatedAt = Number(data.updatedAt || Date.now());
-      timestampEl.textContent = formatDate(localUpdatedAt);
-      setStatus('live', 'Saved');
+      setConnection('live');
+      // Typed again while this save was in flight: still unsaved.
+      setSaveState(saveTimer ? 'unsaved' : 'saved');
     }
   } catch (err) {
-    if (targetSheet === activeSheet) setStatus('error', 'Save failed');
+    if (targetSheet === activeSheet && !saveTimer) setSaveState('failed');
   } finally {
     saving = false;
   }
 }
+
+retrySaveBtn.addEventListener('click', () => saveState(activeSheet));
 
 // Called after anything changes the editor's content.
 function onEditorChanged() {
   lastInputAt = Date.now();
   updateEmptyState();
   clearTimeout(saveTimer);
-  setStatus('', 'Unsaved');
+  setSaveState('unsaved');
   const sheetAtInput = activeSheet;
   saveTimer = setTimeout(() => { saveTimer = null; saveState(sheetAtInput); }, SAVE_DELAY_MS);
 }
@@ -344,11 +595,38 @@ copyBtn.addEventListener('click', async () => {
   showToast('Copied');
 });
 
-clearBtn.addEventListener('click', () => {
-  if (editorIsEmpty() || confirm(`Clear ${currentSheetName()} on all your devices?`)) {
-    pad.replaceChildren();
-    onEditorChanged();
+// Clearing empties the text and images; the sheet and its files stay.
+function confirmClearSheet() {
+  const name = currentSheetName();
+  if (editorIsEmpty()) {
+    showToast(`${name} is already empty`);
+    return;
   }
+  openSheet({
+    title: `Clear the text in ${name}?`,
+    text: 'This removes all text and images in the editor, on all your devices. The sheet and its files stay.',
+    actions: [
+      { label: 'Cancel', kind: 'secondary' },
+      {
+        label: 'Clear text',
+        kind: 'danger-solid',
+        run: () => {
+          pad.replaceChildren();
+          onEditorChanged();
+          showToast(`Cleared ${name}`);
+        }
+      }
+    ]
+  });
+}
+
+sheetMenuBtn.addEventListener('click', () => {
+  openMenu(sheetMenuBtn, [
+    { label: 'Rename sheet', icon: 'pencil', run: openRenameModal },
+    'separator',
+    { label: 'Clear sheet text…', icon: 'eraser', run: confirmClearSheet },
+    sheets.length > 1 ? { label: 'Delete sheet…', icon: 'trash', danger: true, run: confirmDeleteSheet } : null
+  ], 'Sheet actions');
 });
 
 // ---- Editor content: text plus this site's own images ----
@@ -875,12 +1153,13 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
   currentFiles = [];
   filesSignature = '';
   emptyFiles.hidden = false;
-  timestampEl.textContent = 'Loading…';
+  updateAttachLink();
   filesSheetLabel.textContent = currentSheetName();
 
   renderTabs();
+  revealActiveTab(true);
 
-  setStatus('', 'Loading…');
+  setSaveState('loading');
   await Promise.all([fetchState(activeSheet), loadFiles(true, activeSheet)]);
   pad.contentEditable = 'true';
 }
@@ -912,7 +1191,7 @@ addSheetBtn.addEventListener('click', async () => {
   }
 });
 
-// From the rename dialog or the toolbar next to Copy and Clear.
+// From the sheet menu (••• in the editor toolbar).
 function confirmDeleteSheet() {
   const sheet = activeSheet;
   const name = currentSheetName(sheet);
@@ -944,12 +1223,9 @@ function confirmDeleteSheet() {
   });
 }
 
-deleteSheetBtn.addEventListener('click', confirmDeleteSheet);
-toolbarDeleteBtn.addEventListener('click', confirmDeleteSheet);
-
 function openRenameModal() {
+  rememberFocus();
   renameInput.value = currentSheetName();
-  deleteSheetBtn.hidden = sheets.length <= 1;
   renameModal.hidden = false;
   document.body.classList.add('modal-open');
   requestAnimationFrame(() => {
@@ -959,11 +1235,12 @@ function openRenameModal() {
 }
 
 function closeRenameModal() {
+  if (renameModal.hidden) return;
   renameModal.hidden = true;
   if (previewModal.hidden) document.body.classList.remove('modal-open');
+  restoreFocus();
 }
 
-renameSheetBtn.addEventListener('click', openRenameModal);
 renameModal.querySelectorAll('[data-close-rename]').forEach(btn => btn.addEventListener('click', closeRenameModal));
 renameModal.addEventListener('click', e => { if (e.target === renameModal) closeRenameModal(); });
 
@@ -1098,8 +1375,32 @@ function createTransfer(name, verb, total, items = null) {
       fill.style.width = '100%';
       finish('done', text);
     },
-    fail(text) {
-      finish('failed', text);
+    // With retry, the row stays (with Retry and Dismiss) until one is chosen.
+    fail(text, retry) {
+      if (!retry) {
+        finish('failed', text);
+        return;
+      }
+      row.classList.add('failed');
+      cancelBtn.remove();
+      meta.textContent = text;
+      const buttons = document.createElement('div');
+      buttons.className = 'transfer-buttons';
+      const again = document.createElement('button');
+      again.type = 'button';
+      again.className = 'transfer-cancel transfer-retry';
+      again.textContent = 'Retry';
+      again.addEventListener('click', () => {
+        row.remove();
+        retry();
+      });
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'transfer-cancel';
+      dismiss.textContent = 'Dismiss';
+      dismiss.addEventListener('click', () => row.remove());
+      buttons.append(again, dismiss);
+      row.querySelector('.transfer-top').append(buttons);
     }
   };
 }
@@ -1135,43 +1436,92 @@ async function loadFiles(force = false, sheet = activeSheet) {
 
 const fileAgeDays = f => (Date.now() - (f.uploadedAt || Date.now())) / 86_400_000;
 const isOldFile = f => !f.kept && fileAgeDays(f) >= OLD_FILE_DAYS;
+const canKeep = f => f.kept || fileAgeDays(f) >= OLD_FILE_DAYS;
+
+// When a file arrived, the way people say it: "Just now", "Yesterday", "6 days ago".
+function fileWhen(ts) {
+  if (!ts) return '';
+  const minutes = Math.round((Date.now() - ts) / 60000);
+  if (minutes < 2) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 45) return `${days} days ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+// A small mark for the kind of file: [css class, label].
+function fileKind(f) {
+  const ext = (String(f.name).split('.').pop() || '').toLowerCase();
+  const type = f.type || '';
+  if (type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'avif', 'svg'].includes(ext)) return ['img', ''];
+  if (type === 'application/pdf' || ext === 'pdf') return ['pdf', 'PDF'];
+  if (['xls', 'xlsx', 'xlsm', 'numbers', 'ods'].includes(ext)) return ['sheet', 'XLS'];
+  if (ext === 'csv') return ['sheet', 'CSV'];
+  if (['doc', 'docx', 'pages', 'rtf', 'odt'].includes(ext)) return ['doc', 'DOC'];
+  if (['ppt', 'pptx', 'key', 'odp'].includes(ext)) return ['slides', 'PPT'];
+  if (['zip', 'rar', '7z', 'gz', 'tar'].includes(ext)) return ['zip', 'ZIP'];
+  if (type.startsWith('video/') || ['mov', 'mp4', 'm4v', 'webm', 'avi'].includes(ext)) return ['video', 'VID'];
+  if (type.startsWith('audio/') || ['mp3', 'm4a', 'wav', 'aac', 'flac'].includes(ext)) return ['audio', 'AUD'];
+  if (type.startsWith('text/') || ['txt', 'md', 'json', 'log'].includes(ext)) return ['text', 'TXT'];
+  return ['file', ext && ext.length <= 4 ? ext.toUpperCase() : 'FILE'];
+}
+
+function fileIconHtml(f) {
+  const [kind, label] = fileKind(f);
+  return `<span class="file-icon kind-${kind}" aria-hidden="true">${kind === 'img' ? icon('image') : escapeHtml(label)}</span>`;
+}
 
 function renderFiles() {
   fileList.innerHTML = currentFiles.map(f => {
     const id = escapeHtml(f.id);
-    const old = isOldFile(f);
-    const showKeep = f.kept || fileAgeDays(f) >= OLD_FILE_DAYS;
-    const age = f.kept ? 'Kept' : timeAgo(f.uploadedAt);
-    const meta = `${bytes(f.size || 0)} · <span class="age">${escapeHtml(age)}</span>`;
+    const name = escapeHtml(f.name);
+    const when = f.kept ? `${fileWhen(f.uploadedAt)} · Kept` : fileWhen(f.uploadedAt);
+    const meta = `${bytes(f.size || 0)} · <span class="age">${escapeHtml(when)}</span>`;
+    const metaTitle = escapeHtml(`${bytes(f.size || 0)} · uploaded ${new Date(f.uploadedAt).toLocaleString()}`);
     if (selecting) {
       const checked = selectedIds.has(f.id);
       return `
-      <label class="file-row selectable${checked ? ' selected' : ''}">
-        <input type="checkbox" data-select="${id}"${checked ? ' checked' : ''} />
+      <label class="file-row selectable${checked ? ' selected' : ''}" role="listitem">
+        <input type="checkbox" data-select="${id}"${checked ? ' checked' : ''} aria-label="Select ${name}" />
+        ${fileIconHtml(f)}
         <span class="file-main">
-          <span class="file-title">${escapeHtml(f.name)}</span>
+          <span class="file-title" title="${name}">${name}</span>
           <span class="file-meta">${meta}</span>
         </span>
       </label>`;
     }
     return `
-      <div class="file-row${old ? ' is-old' : ''}">
+      <div class="file-row${isOldFile(f) ? ' is-old' : ''}" role="listitem">
+        ${fileIconHtml(f)}
         <div class="file-main">
-          <button class="file-name" type="button" data-view="${id}">${escapeHtml(f.name)}</button>
-          <div class="file-meta" title="${escapeHtml(new Date(f.uploadedAt).toLocaleString())}">${meta}</div>
+          <button class="file-name" type="button" data-view="${id}" title="${name}">${name}</button>
+          <div class="file-meta" title="${metaTitle}">${meta}</div>
         </div>
-        <div class="file-actions">
-          ${showKeep ? `<button class="icon-btn keep" type="button" data-keep="${id}" aria-pressed="${f.kept ? 'true' : 'false'}" title="${f.kept ? 'Kept: no reminders about this file' : 'Keep: stop reminders about this file'}">${f.kept ? 'Kept' : 'Keep'}</button>` : ''}
-          <button class="icon-btn" type="button" data-save="${id}">Download</button>
-          <button class="icon-btn delete" type="button" data-delete="${id}">Delete</button>
-        </div>
+        <button class="icon-btn" type="button" data-save="${id}" aria-label="Download ${name}" title="Download">${icon('download')}</button>
+        <button class="icon-btn" type="button" data-file-menu="${id}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button>
       </div>`;
   }).join('');
   emptyFiles.hidden = currentFiles.length > 0;
   selectBtn.hidden = !currentFiles.length;
   updateSelectionUi();
   updateOldFilesNote();
+  updateAttachLink();
 }
+
+// "2 attachments" at the foot of the editor, counting this sheet's files.
+function updateAttachLink() {
+  const count = currentFiles.length;
+  attachLink.hidden = !count;
+  attachText.textContent = `${count} attachment${count === 1 ? '' : 's'}`;
+}
+
+attachLink.addEventListener('click', () => {
+  filesSection.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block:'start' });
+  filesHeading.focus({ preventScroll:true });
+});
 
 // ---- Storage meter ----
 
@@ -1180,12 +1530,9 @@ async function loadUsage() {
     const r = await fetch(`${API_STATE}?meta=usage`, { cache:'no-store' });
     if (!r.ok) return;
     const { bytes: used, quota } = await r.json();
-    storageMeter.hidden = false;
     const share = quota ? used / quota : 0;
-    storageFill.style.width = quota ? `${Math.min(100, share * 100)}%` : '0%';
-    storageMeter.querySelector('.storage-bar').hidden = !quota;
-    storageMeter.classList.toggle('near', share >= 0.8 && share < 1);
-    storageMeter.classList.toggle('full', share >= 1);
+    storageText.classList.toggle('near', share >= 0.8 && share < 1);
+    storageText.classList.toggle('full', share >= 1);
     storageText.textContent = quota ? `${bytes(used)} of ${bytes(quota)} used` : `${bytes(used)} used`;
   } catch {
     // The meter is a nicety; uploads are still checked on the server.
@@ -1254,7 +1601,7 @@ function updateSelectionUi() {
   const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
   selectBtn.textContent = selecting ? 'Done' : 'Select';
   uploadBtn.hidden = selecting;
-  filesHint.textContent = selecting ? 'Tap files to select them.' : 'Files are organized by sheet. Share any file up to 100 MB.';
+  filesHint.textContent = selecting ? 'Tap files to select them' : 'Up to 100 MB per file';
   selectBar.hidden = !selecting;
   bulkBar.hidden = !selecting;
   const all = currentFiles.length > 0 && files.length === currentFiles.length;
@@ -1308,13 +1655,18 @@ function openSheet({ title, text, files = [], actions }) {
     });
     return btn;
   }));
+  sheetActions.dataset.count = String(actions.length);
+  rememberFocus();
   sheetModal.hidden = false;
   document.body.classList.add('modal-open');
+  sheetActions.querySelector('.btn.secondary')?.focus({ preventScroll:true });
 }
 
 function closeSheet() {
+  if (sheetModal.hidden) return;
   sheetModal.hidden = true;
-  if (renameModal.hidden && previewModal.hidden) document.body.classList.remove('modal-open');
+  if (renameModal.hidden && previewModal.hidden && adminModal.hidden) document.body.classList.remove('modal-open');
+  restoreFocus();
 }
 
 sheetModal.addEventListener('click', e => { if (e.target === sheetModal) closeSheet(); });
@@ -1438,6 +1790,7 @@ async function openPreview(file) {
   previewAbort = controller;
   previewFile = file;
   previewLoadedFile = null;
+  if (previewModal.hidden) rememberFocus();
   previewTitle.textContent = file.name || 'File';
   previewBody.innerHTML = `
     <div class="preview-loading">
@@ -1567,6 +1920,7 @@ function closePreview() {
   previewLoadedFile = null;
   clearPreviewObjectUrl();
   if (renameModal.hidden) document.body.classList.remove('modal-open');
+  restoreFocus();
 }
 
 previewModal.querySelectorAll('[data-close-preview]').forEach(btn => btn.addEventListener('click', closePreview));
@@ -1599,6 +1953,50 @@ document.addEventListener('keydown', e => {
   else if (selecting) setSelecting(false);
 });
 
+async function toggleKeep(file) {
+  try {
+    await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
+    showToast(file.kept ? 'Reminders back on for this file' : 'Kept: no more reminders about this file');
+    await loadFiles(true, file.sheet);
+  } catch {
+    showToast('Couldn’t update the file');
+  }
+}
+
+function confirmDeleteFile(file) {
+  openSheet({
+    title: 'Delete this file?',
+    text: `It’ll be removed from ${currentSheetName(file.sheet)} on every device. This can’t be undone.`,
+    files: [file],
+    actions: [
+      { label: 'Cancel', kind: 'secondary' },
+      {
+        label: 'Delete file',
+        kind: 'danger-solid',
+        run: async () => {
+          const r = await fetch(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}`), { method:'DELETE' }).catch(() => null);
+          if (r?.ok) {
+            showToast('File deleted');
+            if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
+          } else {
+            showToast('Couldn’t delete the file');
+          }
+        }
+      }
+    ]
+  });
+}
+
+function openFileMenu(trigger, file) {
+  openMenu(trigger, [
+    { label: 'Preview', icon: 'eye', run: () => openPreview(file) },
+    { label: 'Download', icon: 'download', run: () => saveSharedFile(file) },
+    canKeep(file) ? { label: file.kept ? 'Stop keeping' : 'Keep (no reminders)', icon: 'pin', run: () => toggleKeep(file) } : null,
+    'separator',
+    { label: 'Delete file…', icon: 'trash', danger: true, run: () => confirmDeleteFile(file) }
+  ], `Actions for ${file.name}`);
+}
+
 fileList.addEventListener('click', async (e) => {
   const viewBtn = e.target.closest('[data-view]');
   if (viewBtn) {
@@ -1617,34 +2015,10 @@ fileList.addEventListener('click', async (e) => {
     return;
   }
 
-  const keepBtn = e.target.closest('[data-keep]');
-  if (keepBtn) {
-    const file = fileIndex.get(keepBtn.dataset.keep);
-    if (!file) return;
-    keepBtn.disabled = true;
-    try {
-      await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
-      showToast(file.kept ? 'Reminders back on for this file' : 'Kept: no more reminders about this file');
-      await loadFiles(true, file.sheet);
-    } catch {
-      keepBtn.disabled = false;
-      showToast('Couldn’t update the file');
-    }
-    return;
-  }
-
-  const deleteBtn = e.target.closest('[data-delete]');
-  if (!deleteBtn) return;
-  const file = fileIndex.get(deleteBtn.dataset.delete);
-  if (!file || !confirm(`Delete ${file.name}?`)) return;
-  deleteBtn.disabled = true;
-  const r = await fetch(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}`), { method:'DELETE' }).catch(() => null);
-  if (r?.ok) {
-    showToast('File deleted');
-    if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
-  } else {
-    deleteBtn.disabled = false;
-    showToast('Delete failed');
+  const menuBtn = e.target.closest('[data-file-menu]');
+  if (menuBtn) {
+    const file = fileIndex.get(menuBtn.dataset.fileMenu);
+    if (file) openFileMenu(menuBtn, file);
   }
 });
 
@@ -1758,12 +2132,10 @@ bulkDeleteBtn.addEventListener('click', () => {
         kind: 'danger-solid',
         run: async () => {
           setSelecting(false);
-          setStatus('', 'Deleting…');
           const results = await Promise.all(files.map(f =>
             fetch(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}`), { method:'DELETE' }).then(r => r.ok).catch(() => false)
           ));
           const failed = results.filter(ok => !ok).length;
-          setStatus('live', 'Live');
           showToast(failed ? `${failed} file${failed === 1 ? '' : 's'} could not be deleted` : `Deleted ${files.length} file${files.length === 1 ? '' : 's'}`);
           await loadFiles(true, files[0].sheet);
         }
@@ -1928,14 +2300,16 @@ async function uploadFile(file, targetSheet, transfer) {
     return true;
   } catch (err) {
     if (id) fetch(filesUrl(targetSheet, `id=${encodeURIComponent(id)}`), { method:'DELETE' }).catch(() => {});
-    transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota ? err.message : 'Upload failed');
+    if (err?.name === 'AbortError') transfer.fail('Upload cancelled');
+    else if (err?.quota) transfer.fail(err.message);
+    else transfer.fail('Upload failed. Check your connection and retry.', () => uploadFiles([file], targetSheet));
     return false;
   }
 }
 
-async function uploadFiles(files) {
-  const targetSheet = activeSheet;
+async function uploadFiles(files, targetSheet = activeSheet) {
   fileInput.value = '';
+  if (!hasSheet(targetSheet)) return;
   const queue = [];
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) {
@@ -1955,12 +2329,57 @@ async function uploadFiles(files) {
   }
 }
 
+uploadBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => uploadFiles([...fileInput.files]));
-['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add('dragover'); }));
-['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.remove('dragover'); }));
-dropZone.addEventListener('drop', e => uploadFiles([...e.dataTransfer.files]));
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+// Dragging files from the computer: the files section becomes a drop target
+// only while a drag is in progress. Images dropped on the editor still go into
+// the text; drops anywhere else are ignored rather than opening the file.
+const draggingFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+let dragDepth = 0;
+
+function endFileDrag() {
+  dragDepth = 0;
+  document.body.classList.remove('dragging-files');
+  filesSection.classList.remove('drag-active');
+}
+
+window.addEventListener('dragenter', e => {
+  if (!draggingFiles(e) || selecting) return;
+  dragDepth++;
+  document.body.classList.add('dragging-files');
+});
+window.addEventListener('dragleave', e => {
+  if (!draggingFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) endFileDrag();
+});
+window.addEventListener('dragover', e => {
+  if (draggingFiles(e) && !pad.contains(e.target)) e.preventDefault();
+});
+window.addEventListener('drop', e => {
+  if (draggingFiles(e) && !pad.contains(e.target)) e.preventDefault();
+  endFileDrag();
+});
+window.addEventListener('dragend', endFileDrag);
+
+filesSection.addEventListener('dragover', e => {
+  if (!draggingFiles(e) || selecting) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  filesSection.classList.add('drag-active');
+});
+filesSection.addEventListener('dragleave', e => {
+  if (!filesSection.contains(e.relatedTarget)) filesSection.classList.remove('drag-active');
+});
+filesSection.addEventListener('drop', e => {
+  if (!draggingFiles(e) || selecting) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const files = [...e.dataTransfer.files];
+  endFileDrag();
+  if (files.length) uploadFiles(files);
+});
 
 // Leaving the page: save any pending edit right away.
 // Coming back: jump to whichever sheet was last opened on any device.
@@ -1994,17 +2413,25 @@ window.fetch = async (...args) => {
 };
 
 accountBtn.addEventListener('click', () => {
+  openMenu(accountBtn, [
+    { heading: account?.email || 'Account' },
+    account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
+    { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
+    'separator',
+    { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere }
+  ], 'Account');
+});
+
+function confirmSignOutEverywhere() {
   openSheet({
-    title: account?.email || 'Account',
-    text: 'You stay signed in on this device for a year, renewed each time you open Scratch Pad.',
+    title: 'Sign out everywhere?',
+    text: 'Every device signed in to this account, including this one, will need your password again. Your sheets and files stay.',
     actions: [
-      ...(account?.admin ? [{ label: 'Admin: accounts', kind: 'primary', full: true, run: openAdmin }] : []),
-      { label: 'Sign out', kind: 'secondary', run: () => signOut('logout') },
-      { label: 'Sign out everywhere', kind: 'danger-solid', run: () => signOut('logout-all') },
-      { label: 'Cancel', kind: 'secondary', full: true }
+      { label: 'Cancel', kind: 'secondary' },
+      { label: 'Sign out everywhere', kind: 'danger-solid', run: () => signOut('logout-all') }
     ]
   });
-});
+}
 
 // ---- Admin: accounts, data used, activity ----
 
@@ -2096,8 +2523,10 @@ async function changeLimit(a) {
 }
 
 async function openAdmin() {
+  rememberFocus();
   adminBody.textContent = 'Loading…';
   adminModal.hidden = false;
+  adminModal.querySelector('[data-close-admin]').focus({ preventScroll:true });
   document.body.classList.add('modal-open');
   try {
     const r = await fetch('/.netlify/functions/admin', { cache:'no-store' });
@@ -2109,8 +2538,10 @@ async function openAdmin() {
 }
 
 function closeAdmin() {
+  if (adminModal.hidden) return;
   adminModal.hidden = true;
   if (renameModal.hidden && previewModal.hidden) document.body.classList.remove('modal-open');
+  restoreFocus();
 }
 
 adminModal.querySelector('[data-close-admin]').addEventListener('click', closeAdmin);
@@ -2256,8 +2687,9 @@ authScreen.addEventListener('click', async e => {
 async function startApp() {
   document.body.classList.remove('signed-out');
   authScreen.hidden = true;
-  accountBtn.textContent = (account.email || '?').charAt(0);
+  avatarEl.textContent = (account.email || '?').charAt(0).toUpperCase();
   accountBtn.title = account.email;
+  accountBtn.setAttribute('aria-label', `Account: ${account.email}`);
   await fetchSheets();
   renderTabs();
   const startSheet = (await fetchCurrentSheet()) || rememberedSheet() || sheets[0].id;
@@ -2387,10 +2819,10 @@ async function checkForChanges() {
     }
     if (next.files !== revs.files) work.push(loadFiles(true, sheet).then(ok => settle(ok && sheet === activeSheet, () => { revs.files = next.files; })));
     await Promise.all(work);
-    if (!work.length && !saveTimer && !saving) setStatus('live', 'Live');
+    setConnection('live');
   } catch {
     behind = true;
-    setStatus('error', 'Offline');
+    setConnection('offline');
   } finally {
     checking = false;
     // Skipped mid-edit or failed: try again shortly rather than waiting a minute.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1020" />
+  <meta name="theme-color" content="#0b1220" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Scratch Pad" />
@@ -17,39 +17,41 @@
   <main class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <img src="/assets/icon-192.png" alt="" class="brand-icon" />
-        <div>
-          <h1>Scratch Pad</h1>
-          <p>Your sheets, on all your devices</p>
-        </div>
+        <img src="/assets/icon-192.png" alt="" class="brand-icon" width="28" height="28" />
+        <h1>Scratch Pad</h1>
       </div>
       <div class="topbar-right">
-        <div id="status" class="status" aria-live="polite"><span class="dot"></span><span>Connecting…</span></div>
-        <button id="accountBtn" class="account-btn" type="button" aria-label="Account">?</button>
+        <span id="status" class="conn" data-state="connecting" role="status" title="Connecting…"><span class="conn-dot" aria-hidden="true"></span><span class="conn-label">Connecting…</span></span>
+        <button id="accountBtn" class="account-btn" type="button" aria-label="Account" aria-haspopup="menu" aria-expanded="false"><span class="avatar" id="avatar" aria-hidden="true">?</span></button>
       </div>
     </header>
 
     <div class="sheet-bar">
-      <nav id="sheetTabs" class="sheet-tabs" aria-label="Scratch Pad sheets"></nav>
-      <button id="addSheetBtn" class="add-sheet-btn" type="button" aria-label="Add a sheet" title="Add a sheet">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-      </button>
-      <button id="renameSheetBtn" class="rename-sheet-btn" type="button" aria-label="Rename current sheet" title="Rename current sheet">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19 9.2 14.8 5 4 15.8V20Zm2-3.4 8.8-8.8 1.4 1.4L7.4 18H6v-1.4ZM17.9 3.3a1.4 1.4 0 0 1 2 0l.8.8a1.4 1.4 0 0 1 0 2l-1.4 1.4-2.8-2.8 1.4-1.4Z"/></svg>
-        <span>Rename</span>
+      <div id="tabsScroller" class="tabs-scroller">
+        <nav id="sheetTabs" class="sheet-tabs" role="tablist" aria-label="Sheets"></nav>
+      </div>
+      <button id="addSheetBtn" class="icon-btn add-sheet-btn" type="button" aria-label="Add a sheet" title="Add a sheet">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </div>
 
-    <section class="card pad-card">
-      <div class="card-toolbar">
-        <div class="timestamp" id="timestamp">Not saved yet</div>
-        <div class="actions">
-          <button id="copyBtn" class="btn secondary" type="button">Copy</button>
-          <button id="clearBtn" class="btn danger" type="button">Clear</button>
-          <button id="toolbarDeleteBtn" class="btn danger" type="button" title="Delete this sheet">Delete</button>
+    <section class="pad-card" aria-label="Sheet text">
+      <div class="pad-toolbar">
+        <div id="saveStatus" class="save-status" data-state="loading" role="status" aria-live="polite">
+          <span id="saveStatusText">Loading…</span>
+          <button id="retrySaveBtn" class="link-btn" type="button" hidden>Retry</button>
+        </div>
+        <div class="pad-actions">
+          <button id="copyBtn" class="ghost-btn" type="button" aria-label="Copy sheet text">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+            <span>Copy</span>
+          </button>
+          <button id="sheetMenuBtn" class="icon-btn" type="button" aria-label="Sheet actions" aria-haspopup="menu" aria-expanded="false">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/></svg>
+          </button>
         </div>
       </div>
-      <div id="scratchpad" class="editor is-empty" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Scratch pad" spellcheck="true" data-placeholder="Type or paste anything here, text or images…"></div>
+      <div id="scratchpad" class="editor is-empty" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Sheet text" spellcheck="true" data-placeholder="Type or paste anything, text or images…"></div>
       <div id="imageFrame" class="image-frame" hidden><span id="imageHandle" class="image-handle" title="Drag to resize"></span></div>
       <div id="imageTools" class="image-tools" role="toolbar" aria-label="Image" hidden>
         <button type="button" data-size="33" aria-label="Small">S</button>
@@ -60,30 +62,40 @@
         <button type="button" data-tool="view">View</button>
         <button type="button" data-tool="remove" class="danger">Remove</button>
       </div>
-      <div class="hint">Each sheet saves separately. Paste or drop images right into the text; tap one to resize it.</div>
+      <div class="pad-footer">
+        <button id="attachLink" class="link-btn attach-link" type="button" hidden>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>
+          <span id="attachText"></span>
+        </button>
+        <details id="tips" class="tips">
+          <summary>
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.4-2.5 2.4M12 16.5h.01"/></svg>
+            <span>Tips</span>
+          </summary>
+          <div class="tips-panel">
+            <ul>
+              <li><strong>Images:</strong> paste or drop them right into the text.</li>
+              <li><strong>Resize:</strong> tap an image, then pick a size or drag its corner.</li>
+              <li><strong>Sheets:</strong> rename, clear or delete from the ••• menu. On a computer, double-click a tab to rename it.</li>
+              <li><strong>Files:</strong> use Upload, or drag files onto the Files section on a computer.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
     </section>
 
-    <section class="card files-card">
-      <div class="section-heading">
-        <div>
-          <h2>Files — <span id="filesSheetLabel">Sheet 1</span></h2>
-          <p id="filesHint">Files are organized by sheet. Share any file up to 100 MB.</p>
-        </div>
-        <div class="files-head-actions">
-          <button id="selectBtn" class="btn secondary" type="button" hidden>Select</button>
-          <label id="uploadBtn" class="btn upload-btn">
-            Upload
-            <input id="fileInput" type="file" multiple hidden />
-          </label>
-        </div>
+    <section id="filesSection" class="files" aria-labelledby="filesHeading">
+      <div class="files-head">
+        <h2 id="filesHeading" class="files-title" tabindex="-1">Files <span class="sep" aria-hidden="true">·</span> <span id="filesSheetLabel">Sheet 1</span></h2>
+        <button id="uploadBtn" class="btn upload-btn" type="button">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Upload
+        </button>
+        <input id="fileInput" type="file" multiple hidden />
       </div>
-      <div id="storageMeter" class="storage-meter" hidden>
-        <div class="storage-bar"><div id="storageFill" class="storage-fill"></div></div>
-        <span id="storageText"></span>
-      </div>
-      <div id="dropZone" class="drop-zone" tabindex="0">
-        <strong>Drop files here</strong>
-        <span>or tap Upload</span>
+      <div class="files-subrow">
+        <p id="filesHint" class="files-sub">Up to 100 MB per file</p>
+        <button id="selectBtn" class="link-btn" type="button" hidden>Select</button>
       </div>
       <div id="transferList" class="transfer-list" aria-live="polite"></div>
       <div id="oldFilesNote" class="old-files-note" hidden>
@@ -98,11 +110,22 @@
         <button id="selectAllBtn" class="link-btn" type="button">Select all</button>
         <span id="selectTotal"></span>
       </div>
-      <div id="fileList" class="file-list"></div>
-      <div id="emptyFiles" class="empty-state">No shared files on this sheet yet.</div>
+      <div id="fileList" class="file-list" role="list" aria-label="Files"></div>
+      <div id="emptyFiles" class="empty-state">No files on this sheet yet.<span>Upload anything up to 100 MB. On a computer, you can drag files here.</span></div>
+      <div id="storageText" class="files-foot"></div>
+      <div class="drop-overlay" aria-hidden="true">
+        <div>
+          <svg class="i" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+          <strong>Drop to upload</strong>
+          <span id="dropTarget">to Sheet 1</span>
+        </div>
+      </div>
     </section>
 
-    <footer>Your sheets and files are private to your account.</footer>
+    <footer class="privacy">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      Private to your account
+    </footer>
   </main>
 
   <div id="adminModal" class="modal-backdrop" hidden>
@@ -217,7 +240,6 @@
         <label class="field-label" for="renameInput">Sheet name</label>
         <input id="renameInput" class="rename-input" type="text" maxlength="40" autocomplete="off" />
         <div class="modal-actions">
-          <button id="deleteSheetBtn" class="btn danger delete-sheet-btn" type="button">Delete sheet</button>
           <button class="btn secondary" type="button" data-close-rename>Cancel</button>
           <button class="btn" type="submit">Save name</button>
         </div>

@@ -34,6 +34,7 @@ const storageMeter = document.querySelector('#storageMeter');
 const storageFill = document.querySelector('#storageFill');
 const storageText = document.querySelector('#storageText');
 const oldFilesNote = document.querySelector('#oldFilesNote');
+const oldFilesTitle = document.querySelector('#oldFilesTitle');
 const oldFilesText = document.querySelector('#oldFilesText');
 const filesHint = document.querySelector('#filesHint');
 const selectBtn = document.querySelector('#selectBtn');
@@ -1161,7 +1162,7 @@ function renderFiles() {
         </div>
         <div class="file-actions">
           ${showKeep ? `<button class="icon-btn keep" type="button" data-keep="${id}" aria-pressed="${f.kept ? 'true' : 'false'}" title="${f.kept ? 'Kept: no reminders about this file' : 'Keep: stop reminders about this file'}">${f.kept ? 'Kept' : 'Keep'}</button>` : ''}
-          <button class="icon-btn" type="button" data-save="${id}">Save</button>
+          <button class="icon-btn" type="button" data-save="${id}">Download</button>
           <button class="icon-btn delete" type="button" data-delete="${id}">Delete</button>
         </div>
       </div>`;
@@ -1210,8 +1211,11 @@ function updateOldFilesNote() {
   oldFilesNote.hidden = !old.length || selecting || snoozed();
   if (oldFilesNote.hidden) return;
   const size = old.reduce((sum, f) => sum + (f.size || 0), 0);
-  const count = old.length === 1 ? '1 file here is' : `${old.length} files here are`;
-  oldFilesText.innerHTML = `${count} over a month old <span>(${escapeHtml(bytes(size))})</span>. Still need ${old.length === 1 ? 'it' : 'them'}? Clearing out what you’re done with keeps things tidy.`;
+  const one = old.length === 1;
+  oldFilesTitle.textContent = one ? '1 file is over a month old' : `${old.length} files are over a month old`;
+  oldFilesText.textContent = one
+    ? `Review it to see if you still need it. It uses ${bytes(size)}.`
+    : `Review them to see if you still need them. Together, they use ${bytes(size)}.`;
 }
 
 document.querySelector('#oldFilesReview').addEventListener('click', () => {
@@ -1259,7 +1263,7 @@ function updateSelectionUi() {
   bulkCount.textContent = `${files.length} selected`;
   bulkSize.textContent = files.length ? ` · ${bytes(total)}` : '';
   bulkSaveBtn.disabled = bulkDeleteBtn.disabled = !files.length;
-  bulkSaveBtn.textContent = files.length ? `Save ${files.length}` : 'Save';
+  bulkSaveBtn.textContent = files.length ? `Download ${files.length}` : 'Download';
   bulkDeleteBtn.textContent = files.length ? `Delete ${files.length}` : 'Delete';
 }
 
@@ -1406,7 +1410,7 @@ async function saveSharedFile(file) {
       previewFile = file;
       previewLoadedFile = prepared;
       previewTitle.textContent = file.name || 'File';
-      previewBody.innerHTML = '<div class="preview-fallback"><strong>File ready.</strong><span>Tap Save above, then choose Save to Files.</span></div>';
+      previewBody.innerHTML = '<div class="preview-fallback"><strong>File ready.</strong><span>Tap Download above, then choose Save to Files.</span></div>';
       previewModal.hidden = false;
       document.body.classList.add('modal-open');
       return;
@@ -1490,11 +1494,11 @@ async function openPreview(file) {
 
     const fallback = document.createElement('div');
     fallback.className = 'preview-fallback';
-    fallback.innerHTML = '<strong>Preview is not available for this file type.</strong><span>Use Save to open the iPhone share sheet or download the file.</span>';
+    fallback.innerHTML = '<strong>Preview is not available for this file type.</strong><span>Tap Download to get the file (on iPhone, it opens the share sheet).</span>';
     previewBody.replaceChildren(fallback);
   } catch (err) {
     if (err?.name === 'AbortError' || previewAbort !== controller) return;
-    previewBody.innerHTML = '<div class="preview-fallback"><strong>Could not load this file.</strong><span>Try Save instead.</span></div>';
+    previewBody.innerHTML = '<div class="preview-fallback"><strong>Could not load this file.</strong><span>Try Download instead.</span></div>';
   }
 }
 
@@ -1539,7 +1543,7 @@ async function saveOriginalImage(src) {
       transfer.fail(err?.name === 'AbortError' ? 'Download cancelled' : 'Download failed');
     }
   } catch {
-    showToast('Could not save image');
+    showToast('Could not download image');
   }
 }
 
@@ -1582,7 +1586,7 @@ previewSaveBtn.addEventListener('click', async () => {
     }
     await saveSharedFile(previewFile);
   } catch (err) {
-    if (err?.name !== 'AbortError') showToast('Could not save file');
+    if (err?.name !== 'AbortError') showToast('Could not download file');
   }
 });
 
@@ -1689,7 +1693,7 @@ async function deliverFiles(files, transfer, label) {
 async function saveFiles(files, asZip) {
   const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
   const count = `${files.length} file${files.length === 1 ? '' : 's'}`;
-  const transfer = createTransfer(`Saving ${count}${asZip ? ' as .zip' : ''}`, 'Downloading', total, files.map(f => f.name));
+  const transfer = createTransfer(`Downloading ${count}${asZip ? ' as .zip' : ''}`, 'Downloading', total, files.map(f => f.name));
   const prepared = [];
   let finishedBytes = 0;
   try {
@@ -1714,7 +1718,7 @@ async function saveFiles(files, asZip) {
     const zip = await makeZip(prepared, zipName);
     await deliverFiles([zip], transfer, zipName);
   } catch (err) {
-    transfer.fail(err?.name === 'AbortError' ? 'Save cancelled' : 'Save failed');
+    transfer.fail(err?.name === 'AbortError' ? 'Download cancelled' : 'Download failed');
   }
 }
 
@@ -1728,8 +1732,8 @@ bulkSaveBtn.addEventListener('click', () => {
   }
   const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
   openSheet({
-    title: `Save ${files.length} files`,
-    text: `${bytes(total)} total. Save them one by one, or bundled into a single .zip file.`,
+    title: `Download ${files.length} files`,
+    text: `${bytes(total)} total. Download them one by one, or bundled into a single .zip file.`,
     files,
     actions: [
       { label: 'Separate files', kind: 'primary', run: () => saveFiles(files, false) },

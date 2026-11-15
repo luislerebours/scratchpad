@@ -153,8 +153,8 @@ h2 { margin:0; font-size:1.15rem; }
 .storage-meter.full .storage-fill { background:var(--danger); }
 .old-files-note { margin-top:12px; padding:12px 14px; border-radius:14px; background:rgba(240,184,73,.08); border:1px solid rgba(240,184,73,.28); }
 .old-files-note[hidden] { display:none; }
-.old-files-note p { margin:0 0 10px; font-size:.9rem; line-height:1.45; color:var(--text); }
-.old-files-note p span { color:var(--muted); }
+.old-files-title { display:block; font-size:.98rem; font-weight:750; color:var(--text); }
+.old-files-note p { margin:4px 0 12px; font-size:.88rem; line-height:1.45; color:var(--muted); }
 .old-files-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .file-row.is-old .file-meta .age { color:#f0b849; }
 .icon-btn.keep[aria-pressed="true"] { color:var(--accent-2); border-color:rgba(67,227,156,.35); }

@@ -87,9 +87,10 @@
       </div>
       <div id="transferList" class="transfer-list" aria-live="polite"></div>
       <div id="oldFilesNote" class="old-files-note" hidden>
+        <strong id="oldFilesTitle" class="old-files-title"></strong>
         <p id="oldFilesText"></p>
         <div class="old-files-actions">
-          <button id="oldFilesReview" class="btn compact" type="button">Review</button>
+          <button id="oldFilesReview" class="btn compact" type="button">Review files</button>
           <button id="oldFilesLater" class="btn secondary compact" type="button">Not now</button>
         </div>
       </div>
@@ -186,7 +187,7 @@
   <div id="bulkBar" class="bulk-bar" hidden>
     <div class="bulk-summary"><strong id="bulkCount">0 selected</strong><span id="bulkSize"></span></div>
     <div class="bulk-actions">
-      <button id="bulkSaveBtn" class="btn bulk-save" type="button" disabled>Save</button>
+      <button id="bulkSaveBtn" class="btn bulk-save" type="button" disabled>Download</button>
       <button id="bulkDeleteBtn" class="btn bulk-delete" type="button" disabled>Delete</button>
     </div>
   </div>
@@ -233,7 +234,7 @@
         </div>
         <div class="preview-toolbar">
           <button id="previewRemoveBtn" class="btn danger compact" type="button" hidden>Remove</button>
-          <button id="previewSaveBtn" class="btn secondary compact" type="button">Save</button>
+          <button id="previewSaveBtn" class="btn secondary compact" type="button">Download</button>
           <button class="modal-close" type="button" data-close-preview aria-label="Close preview">×</button>
         </div>
       </div>

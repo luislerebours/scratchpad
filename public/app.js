@@ -5,6 +5,9 @@ const API_AUTH = '/.netlify/functions/auth';
 const API_SYNC = '/.netlify/functions/sync';
 const API_CHECK = '/api/check';
 const SAFETY_CHECK_MS = 60_000;
+const OLD_FILE_DAYS = 14;
+const VERY_OLD_FILE_DAYS = 30;
+const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 const PING_MS = 25_000;
 const POLL_MS = 2000;
 const SAVE_DELAY_MS = 450;
@@ -28,6 +31,11 @@ const toolbarDeleteBtn = document.querySelector('#toolbarDeleteBtn');
 const fileInput = document.querySelector('#fileInput');
 const fileList = document.querySelector('#fileList');
 const transferList = document.querySelector('#transferList');
+const storageMeter = document.querySelector('#storageMeter');
+const storageFill = document.querySelector('#storageFill');
+const storageText = document.querySelector('#storageText');
+const oldFilesNote = document.querySelector('#oldFilesNote');
+const oldFilesText = document.querySelector('#oldFilesText');
 const filesHint = document.querySelector('#filesHint');
 const selectBtn = document.querySelector('#selectBtn');
 const uploadBtn = document.querySelector('#uploadBtn');
@@ -604,9 +612,10 @@ async function uploadPadImage(img, blob) {
     delete img.dataset.pending;
     img.classList.remove('pending');
     transfer.done(`Image added · ${bytes(blob.size)}`);
+    loadUsage();
   } catch (err) {
     img.remove();
-    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : 'Image upload failed');
+    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota ? err.message : 'Image upload failed');
     else showToast(err?.message?.includes('over') ? err.message : 'Image upload failed');
   } finally {
     if (localUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
@@ -978,7 +987,8 @@ renameForm.addEventListener('submit', async e => {
 function bytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024*1024) return `${(n/1024).toFixed(1)} KB`;
-  return `${(n/1024/1024).toFixed(1)} MB`;
+  if (n < 1024*1024*1024) return `${(n/1024/1024).toFixed(1)} MB`;
+  return `${(n/1024/1024/1024).toFixed(1).replace(/\.0$/, '')} GB`;
 }
 
 function escapeHtml(s='') {
@@ -1115,6 +1125,7 @@ async function loadFiles(force = false, sheet = activeSheet) {
     for (const id of selectedIds) if (!fileIndex.has(id)) selectedIds.delete(id);
     if (!currentFiles.length) setSelecting(false);
     renderFiles();
+    loadUsage();
     return true;
   } catch (err) {
     // Keep text sync working even if file listing fails.
@@ -1122,10 +1133,16 @@ async function loadFiles(force = false, sheet = activeSheet) {
   }
 }
 
+const fileAgeDays = f => (Date.now() - (f.uploadedAt || Date.now())) / 86_400_000;
+const isOldFile = f => !f.kept && fileAgeDays(f) >= OLD_FILE_DAYS;
+
 function renderFiles() {
   fileList.innerHTML = currentFiles.map(f => {
     const id = escapeHtml(f.id);
-    const meta = `${bytes(f.size || 0)} · ${new Date(f.uploadedAt).toLocaleString()}`;
+    const old = isOldFile(f);
+    const showKeep = f.kept || fileAgeDays(f) >= OLD_FILE_DAYS;
+    const age = f.kept ? 'Kept' : timeAgo(f.uploadedAt);
+    const meta = `${bytes(f.size || 0)} · <span class="age">${escapeHtml(age)}</span>`;
     if (selecting) {
       const checked = selectedIds.has(f.id);
       return `
@@ -1138,12 +1155,13 @@ function renderFiles() {
       </label>`;
     }
     return `
-      <div class="file-row">
+      <div class="file-row${old ? ' is-old' : ''}">
         <div class="file-main">
           <button class="file-name" type="button" data-view="${id}">${escapeHtml(f.name)}</button>
-          <div class="file-meta">${meta}</div>
+          <div class="file-meta" title="${escapeHtml(new Date(f.uploadedAt).toLocaleString())}">${meta}</div>
         </div>
         <div class="file-actions">
+          ${showKeep ? `<button class="icon-btn keep" type="button" data-keep="${id}" aria-pressed="${f.kept ? 'true' : 'false'}" title="${f.kept ? 'Kept: no reminders about this file' : 'Keep: stop reminders about this file'}">${f.kept ? 'Kept' : 'Keep'}</button>` : ''}
           <button class="icon-btn" type="button" data-save="${id}">Save</button>
           <button class="icon-btn delete" type="button" data-delete="${id}">Delete</button>
         </div>
@@ -1152,7 +1170,68 @@ function renderFiles() {
   emptyFiles.hidden = currentFiles.length > 0;
   selectBtn.hidden = !currentFiles.length;
   updateSelectionUi();
+  updateOldFilesNote();
 }
+
+// ---- Storage meter ----
+
+async function loadUsage() {
+  try {
+    const r = await fetch(`${API_STATE}?meta=usage`, { cache:'no-store' });
+    if (!r.ok) return;
+    const { bytes: used, quota } = await r.json();
+    storageMeter.hidden = false;
+    const share = quota ? used / quota : 0;
+    storageFill.style.width = quota ? `${Math.min(100, share * 100)}%` : '0%';
+    storageMeter.querySelector('.storage-bar').hidden = !quota;
+    storageMeter.classList.toggle('near', share >= 0.8 && share < 1);
+    storageMeter.classList.toggle('full', share >= 1);
+    storageText.textContent = quota ? `${bytes(used)} of ${bytes(quota)} used` : `${bytes(used)} used`;
+  } catch {
+    // The meter is a nicety; uploads are still checked on the server.
+  }
+}
+
+// ---- Gentle nudge for forgotten files ----
+
+function snoozeKey(sheet = activeSheet) {
+  return `scratchpad:oldFilesSnooze:${account?.email || ''}:${sheet}`;
+}
+
+function snoozed() {
+  try {
+    return Date.now() - Number(localStorage.getItem(snoozeKey()) || 0) < SNOOZE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function updateOldFilesNote() {
+  const old = currentFiles.filter(isOldFile);
+  oldFilesNote.hidden = !old.length || selecting || snoozed();
+  if (oldFilesNote.hidden) return;
+  const veryOld = old.every(f => fileAgeDays(f) >= VERY_OLD_FILE_DAYS);
+  const size = old.reduce((sum, f) => sum + (f.size || 0), 0);
+  const count = old.length === 1 ? '1 file here is' : `${old.length} files here are`;
+  oldFilesText.innerHTML = `${count} over ${veryOld ? 'a month' : '2 weeks'} old <span>(${escapeHtml(bytes(size))})</span>. Still need ${old.length === 1 ? 'it' : 'them'}? Clearing out what you’re done with keeps things tidy.`;
+}
+
+document.querySelector('#oldFilesReview').addEventListener('click', () => {
+  const old = currentFiles.filter(isOldFile).map(f => f.id);
+  setSelecting(true);
+  selectedIds = new Set(old);
+  renderFiles();
+  showToast('Untick anything you still need, then tap Delete');
+});
+
+document.querySelector('#oldFilesLater').addEventListener('click', () => {
+  try {
+    localStorage.setItem(snoozeKey(), String(Date.now()));
+  } catch {
+    // Private browsing: the note just shows again next time.
+  }
+  oldFilesNote.hidden = true;
+});
 
 // ---- Select mode ----
 
@@ -1242,7 +1321,8 @@ sheetModal.addEventListener('click', e => { if (e.target === sheetModal) closeSh
 
 // Fetches one chunk, reporting bytes as they stream in.
 async function fetchChunk(url, signal, onBytes) {
-  const r = await fetch(url, { cache:'no-store', signal });
+  // Chunks never change, so the browser may keep them (opening again is free).
+  const r = await fetch(url, { signal });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   if (!r.body) {
     const buf = await r.arrayBuffer();
@@ -1535,6 +1615,22 @@ fileList.addEventListener('click', async (e) => {
     return;
   }
 
+  const keepBtn = e.target.closest('[data-keep]');
+  if (keepBtn) {
+    const file = fileIndex.get(keepBtn.dataset.keep);
+    if (!file) return;
+    keepBtn.disabled = true;
+    try {
+      await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
+      showToast(file.kept ? 'Reminders back on for this file' : 'Kept: no more reminders about this file');
+      await loadFiles(true, file.sheet);
+    } catch {
+      keepBtn.disabled = false;
+      showToast('Couldn’t update the file');
+    }
+    return;
+  }
+
   const deleteBtn = e.target.closest('[data-delete]');
   if (!deleteBtn) return;
   const file = fileIndex.get(deleteBtn.dataset.delete);
@@ -1790,7 +1886,13 @@ async function postJson(url, body) {
     headers:{ 'Content-Type':'application/json' },
     body:JSON.stringify(body || {})
   });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    const err = new Error(data.error || 'Request failed');
+    err.status = r.status;
+    err.quota = Boolean(data.quota);
+    throw err;
+  }
   return r.json();
 }
 
@@ -1824,7 +1926,7 @@ async function uploadFile(file, targetSheet, transfer) {
     return true;
   } catch (err) {
     if (id) fetch(filesUrl(targetSheet, `id=${encodeURIComponent(id)}`), { method:'DELETE' }).catch(() => {});
-    transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : 'Upload failed');
+    transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota ? err.message : 'Upload failed');
     return false;
   }
 }
@@ -1957,19 +2059,38 @@ function renderAdmin(data) {
     const facts = document.createElement('div');
     facts.className = 'admin-facts';
     facts.append(
-      adminFact('Data', `${bytes(a.bytes)} · ${a.files} file${a.files === 1 ? '' : 's'} · ${a.images} image${a.images === 1 ? '' : 's'}`),
+      adminFact('Storage', `${bytes(a.bytes)} of ${a.quota ? bytes(a.quota) : 'no limit'} · ${a.files} file${a.files === 1 ? '' : 's'} · ${a.images} image${a.images === 1 ? '' : 's'}`),
       adminFact('Active', a.activeDays30 === null ? '—' : `${a.activeDays30} of last 30 days`),
       adminFact('Last seen', timeAgo(a.lastSeenAt)),
       adminFact('Sign-ins', a.loginCount === null ? '—' : `${a.loginCount}, last ${timeAgo(a.lastLoginAt)}`),
       adminFact('Joined', a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '—')
     );
-    row.append(email, facts);
+    const change = document.createElement('button');
+    change.type = 'button';
+    change.className = 'link-btn admin-limit';
+    change.textContent = 'Change storage limit';
+    change.addEventListener('click', () => changeLimit(a));
+    row.append(email, facts, change);
     list.append(row);
   }
   const note = document.createElement('p');
   note.className = 'admin-note';
   note.textContent = '“Active” counts the days an account opened Scratch Pad. Sign-ins count password and email-code sign-ins.';
   adminBody.replaceChildren(summary, list, note);
+}
+
+async function changeLimit(a) {
+  const current = a.quota ? (a.quota / 1024 ** 3).toFixed(1).replace(/\.0$/, '') : '0';
+  const answer = prompt(`Storage limit for ${a.email}, in GB.\n0 = no limit. Leave empty for the default (5 GB).`, current);
+  if (answer === null) return;
+  try {
+    await postJson('/.netlify/functions/admin', { email: a.email, limitGb: answer.trim() === '' ? null : Number(answer) });
+    showToast('Storage limit updated');
+    openAdmin();
+    loadUsage();
+  } catch (err) {
+    showToast(err.message || 'Couldn’t change the limit');
+  }
 }
 
 async function openAdmin() {

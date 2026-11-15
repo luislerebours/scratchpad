@@ -1,4 +1,5 @@
 import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
 const FILE_KINDS = ['files', 'chunks', 'images', 'image-chunks', 'image-previews'];
@@ -37,6 +38,12 @@ export default async req => {
   const url = new URL(req.url);
   const store = userStore(ns, 'state');
   const meta = url.searchParams.get('meta');
+
+  // Storage used by the account and its limit (null: no limit).
+  if (meta === 'usage' && req.method === 'GET') {
+    const usage = await accountUsage(ns);
+    return json({ bytes: usage.bytes, quota: quotaFor(auth.user) });
+  }
 
   // The 2-second check: just the change markers for the tabs and one sheet.
   if (meta === 'poll' && req.method === 'GET') {

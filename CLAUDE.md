@@ -22,6 +22,11 @@ Pushes to `main` deploy straight to the live site.
     used, sign-ins and active days
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB)
   - `images.mjs`: images in the text (chunked original plus a display copy)
+- Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
+  Default limit 5 GB per account (`quotaBytes` on the account: -1 = none; the
+  admin has none by default), enforced when an upload starts; the admin can
+  change it from Admin. Files show their age; ones over 14 days (not "Kept")
+  prompt a gentle "still need them?" card. Nothing is deleted automatically.
 - Netlify functions take about 4.5 MB per request, so anything larger travels
   in chunks.
 - `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,

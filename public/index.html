@@ -77,11 +77,22 @@
           </label>
         </div>
       </div>
+      <div id="storageMeter" class="storage-meter" hidden>
+        <div class="storage-bar"><div id="storageFill" class="storage-fill"></div></div>
+        <span id="storageText"></span>
+      </div>
       <div id="dropZone" class="drop-zone" tabindex="0">
         <strong>Drop files here</strong>
         <span>or tap Upload</span>
       </div>
       <div id="transferList" class="transfer-list" aria-live="polite"></div>
+      <div id="oldFilesNote" class="old-files-note" hidden>
+        <p id="oldFilesText"></p>
+        <div class="old-files-actions">
+          <button id="oldFilesReview" class="btn compact" type="button">Review</button>
+          <button id="oldFilesLater" class="btn secondary compact" type="button">Not now</button>
+        </div>
+      </div>
       <div id="selectBar" class="select-bar" hidden>
         <button id="selectAllBtn" class="link-btn" type="button">Select all</button>
         <span id="selectTotal"></span>

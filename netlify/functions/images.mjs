@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { overQuota } from '../lib/usage.mjs';
 
 // Images pasted into a sheet's text. Netlify functions take about 4.5 MB per
 // request, so each image is kept twice: the untouched original in 4 MB chunks
@@ -81,6 +82,8 @@ export default async (req, context) => {
     if (!TYPES.has(type)) return json({ error: 'Unsupported image type' }, 415);
     if (!Number.isInteger(size) || size <= 0) return json({ error: 'Invalid size' }, 400);
     if (size > MAX_IMAGE_BYTES) return json({ error: 'Image is over 100 MB' }, 413);
+    const full = await overQuota(auth.user, ns, size);
+    if (full) return json({ error: full, quota: true }, 413);
 
     const record = {
       id: randomUUID(),

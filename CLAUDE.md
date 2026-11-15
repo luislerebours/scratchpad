@@ -17,7 +17,8 @@ Pushes to `main` deploy straight to the live site.
 - `netlify/functions/` holds the API, backed by Netlify Blobs:
   - `auth.mjs`: accounts (emailed animal+4-digit code, then a password),
     one-year session cookie renewed on each visit
-  - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet
+  - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
+    and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin.mjs`: admin-only (the `OWNER_EMAIL` account) list of accounts with data
     used, sign-ins and active days
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB)

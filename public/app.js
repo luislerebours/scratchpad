@@ -185,6 +185,61 @@ function formatSavedTime(ts) {
   return `${day}, ${time}`;
 }
 
+// ---- Copies of each sheet kept in memory, so a tab shows its text at once ----
+// sheetCache: sheet -> { html, updatedAt } as last saved or fetched.
+// filesCache: sheet -> its file list as last fetched.
+const sheetCache = new Map();
+const filesCache = new Map();
+const ownRevs = new Map();
+const otherRefreshTimers = new Map();
+
+function cacheSheet(sheet, html, updatedAt) {
+  const known = sheetCache.get(sheet);
+  if (known && known.updatedAt > updatedAt) return;
+  sheetCache.set(sheet, { html, updatedAt });
+}
+
+// One request for every sheet's text, made when the app opens.
+async function prefetchSheets() {
+  try {
+    const r = await fetch(`${API_STATE}?meta=all`, { cache:'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const s of data.sheets || []) {
+      const html = typeof s.html === 'string' ? s.html : textToHtml(s.text || '');
+      cacheSheet(Number(s.id), html, Number(s.updatedAt || 0));
+    }
+  } catch {
+    // Tabs just load the way they did before.
+  }
+}
+
+// Another device changed a sheet that isn't open here: refresh its copy shortly.
+function refreshOtherSheet(sheet, kind) {
+  const key = `${kind}-${sheet}`;
+  clearTimeout(otherRefreshTimers.get(key));
+  otherRefreshTimers.set(key, setTimeout(async () => {
+    otherRefreshTimers.delete(key);
+    if (sheet === activeSheet || !hasSheet(sheet)) return;
+    const cache = kind === 'files' ? filesCache : sheetCache;
+    try {
+      const r = await fetch(kind === 'files' ? filesUrl(sheet) : stateUrl(sheet), { cache:'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      if (kind === 'files') filesCache.set(sheet, Array.isArray(data.files) ? data.files : []);
+      else cacheSheet(sheet, typeof data.html === 'string' ? data.html : textToHtml(data.text || ''), Number(data.updatedAt || 0));
+    } catch {
+      // A stale copy is worse than none: that tab will load normally instead.
+      cache.delete(sheet);
+    }
+  }, 1500));
+}
+
+function forgetSheet(sheet) {
+  sheetCache.delete(sheet);
+  filesCache.delete(sheet);
+}
+
 function stateUrl(sheet = activeSheet) {
   return `${API_STATE}?sheet=${validSheet(sheet)}`;
 }
@@ -467,6 +522,7 @@ function applySheets(data) {
   if (signature === sheetsSignature) return;
   sheetsSignature = signature;
   sheets = data.sheets.map(s => ({ id: Number(s.id), name: String(s.name || `Sheet ${s.id}`) }));
+  for (const id of [...sheetCache.keys(), ...filesCache.keys()]) if (!hasSheet(id)) forgetSheet(id);
   renderTabs();
   // The open sheet was deleted on another device.
   if (!hasSheet(activeSheet)) switchSheet(sheets[0].id, { remember:false, force:true });
@@ -510,6 +566,7 @@ async function fetchState(sheet = activeSheet) {
 
     const busy = saving || recentlyTyping || resizingImage || pendingImageUploads > 0;
     const remoteHtml = typeof data.html === 'string' ? data.html : textToHtml(data.text || '');
+    cacheSheet(requestedSheet, remoteHtml, remoteTs);
 
     if (remoteTs > localUpdatedAt && !busy) {
       renderEditor(remoteHtml);
@@ -546,6 +603,8 @@ async function saveState(sheet = activeSheet) {
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
+    cacheSheet(targetSheet, htmlToSave, Number(data.updatedAt || Date.now()));
+    if (data.rev) ownRevs.set(`text-${targetSheet}`, data.rev);
     if (targetSheet === activeSheet) {
       // Our own save: no need to fetch it back on the next check.
       if (data.rev && !saveTimer) revs.text = data.rev;
@@ -1130,38 +1189,71 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
     showToast('Wait for images to finish uploading');
     return;
   }
-  if (remember) rememberCurrentSheet(nextSheet);
 
-  if (saveTimer) {
+  // Edits not yet saved would be lost by switching: save them first, and stay
+  // on this sheet if that fails.
+  if ((saveTimer || saveStateName === 'failed') && hasSheet(activeSheet)) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    if (hasSheet(activeSheet)) await saveState(activeSheet);
+    await saveState(activeSheet);
+    if (saveStateName === 'failed' && !force) {
+      showToast('Couldn’t save this sheet. Check your connection and try again.');
+      return;
+    }
   }
+  if (remember) rememberCurrentSheet(nextSheet);
 
   pad.contentEditable = 'false';
   activeSheet = nextSheet;
   revs = { sheets: revs.sheets };
-  localUpdatedAt = 0;
   lastInputAt = 0;
   lastFileRefresh = 0;
   deselectImage();
-  pad.replaceChildren();
-  updateEmptyState();
   setSelecting(false);
-  fileList.innerHTML = '';
-  fileIndex = new Map();
-  currentFiles = [];
-  filesSignature = '';
-  emptyFiles.hidden = false;
-  updateAttachLink();
+
+  // Show the sheet as last saved or fetched right away; the fetch below
+  // brings in anything newer. Without a copy, show a blank page (not the
+  // "type here" hint) until it arrives.
+  const cached = sheetCache.get(nextSheet);
+  localUpdatedAt = cached ? cached.updatedAt : 0;
+  if (cached) renderEditor(cached.html);
+  else pad.replaceChildren();
+  pad.classList.toggle('is-loading', !cached);
+  updateEmptyState();
+  showCachedFiles(nextSheet);
   filesSheetLabel.textContent = currentSheetName();
 
   renderTabs();
   revealActiveTab(true);
 
-  setSaveState('loading');
-  await Promise.all([fetchState(activeSheet), loadFiles(true, activeSheet)]);
+  setSaveState(cached ? 'saved' : 'loading');
+  let [loaded] = await Promise.all([fetchState(nextSheet), loadFiles(true, nextSheet)]);
+  // Not loaded and nothing to show: wait for the connection rather than offer
+  // an empty page whose first keystroke would replace the saved text.
+  for (let delay = 1000; !loaded && !cached && nextSheet === activeSheet; delay = Math.min(delay * 2, 8000)) {
+    await new Promise(resolve => setTimeout(resolve, delay));
+    if (nextSheet === activeSheet) loaded = await fetchState(nextSheet);
+  }
+  if (nextSheet !== activeSheet) return;
+  pad.classList.remove('is-loading');
   pad.contentEditable = 'true';
+}
+
+// The file list as last seen, or nothing (rather than "No files") until it loads.
+function showCachedFiles(sheet) {
+  const files = filesCache.get(sheet);
+  filesSignature = files ? JSON.stringify(files) : '';
+  currentFiles = (files || []).map(f => ({ ...f, sheet }));
+  fileIndex = new Map(currentFiles.map(f => [f.id, f]));
+  if (files) {
+    renderFiles();
+    return;
+  }
+  fileList.innerHTML = '';
+  emptyFiles.hidden = true;
+  selectBtn.hidden = true;
+  updateOldFilesNote();
+  updateAttachLink();
 }
 
 sheetTabsEl.addEventListener('click', e => {
@@ -1182,6 +1274,10 @@ addSheetBtn.addEventListener('click', async () => {
   addSheetBtn.disabled = true;
   try {
     const data = await postSheets({ action:'add' });
+    // A new sheet starts empty: no need to wait for it.
+    forgetSheet(data.added);
+    cacheSheet(data.added, '', 0);
+    filesCache.set(data.added, []);
     await switchSheet(data.added);
     openRenameModal();
   } catch (err) {
@@ -1213,6 +1309,7 @@ function confirmDeleteSheet() {
           saveTimer = null;
           try {
             await postSheets({ action:'delete', sheet });
+            forgetSheet(sheet);
             showToast(`Deleted ${name}`);
           } catch (err) {
             showToast(err.message || 'Delete failed');
@@ -1414,9 +1511,10 @@ async function loadFiles(force = false, sheet = activeSheet) {
     const r = await fetch(filesUrl(requestedSheet), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    const files = Array.isArray(data.files) ? data.files : [];
+    filesCache.set(requestedSheet, files);
     if (requestedSheet !== activeSheet) return false;
 
-    const files = Array.isArray(data.files) ? data.files : [];
     lastFileRefresh = Date.now();
     const signature = JSON.stringify(files);
     if (signature === filesSignature) return true;
@@ -2383,8 +2481,11 @@ filesSection.addEventListener('drop', e => {
 
 // Leaving the page: save any pending edit right away.
 // Coming back: jump to whichever sheet was last opened on any device.
+let hiddenAt = 0;
+
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now();
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
@@ -2395,6 +2496,11 @@ document.addEventListener('visibilitychange', async () => {
   if (!appStarted) return;
   checkForChanges();
   connectSync();
+  // Away for a while, changes from other devices may have been missed.
+  if (Date.now() - hiddenAt > 60_000) {
+    for (const id of [...filesCache.keys()]) if (id !== activeSheet) filesCache.delete(id);
+    prefetchSheets();
+  }
   await fetchSheets();
   const sheet = await fetchCurrentSheet();
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
@@ -2693,12 +2799,8 @@ async function startApp() {
   await fetchSheets();
   renderTabs();
   const startSheet = (await fetchCurrentSheet()) || rememberedSheet() || sheets[0].id;
-  if (startSheet !== activeSheet || !hasSheet(activeSheet)) {
-    await switchSheet(startSheet, { remember:false, force:true });
-  } else {
-    await fetchState(activeSheet);
-    await loadFiles(true, activeSheet);
-  }
+  prefetchSheets();
+  await switchSheet(startSheet, { remember:false, force:true });
   appStarted = true;
   connectSync();
   // Every 2 seconds while the relay is down; once a minute as a safety net otherwise.
@@ -2779,6 +2881,11 @@ function onSyncNotice(notice) {
   // Signed out elsewhere: the check gets a 401 and goes back to sign-in.
   if (notice.part === 'session') {
     checkForChanges();
+    return;
+  }
+  const other = /^(text|files)-(\d+)$/.exec(String(notice.part || ''));
+  if (other && Number(other[2]) !== activeSheet) {
+    if (ownRevs.get(notice.part) !== notice.rev) refreshOtherSheet(Number(other[2]), other[1]);
     return;
   }
   const known =

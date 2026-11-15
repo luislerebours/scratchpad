@@ -126,6 +126,7 @@ body.selecting .app-shell { padding-bottom: 170px; }
 .editor:focus-visible { outline: none; }
 .pad-card:focus-within { border-color: var(--line-strong); }
 .editor.is-empty::before { content: attr(data-placeholder); position: absolute; top: 22px; left: 24px; right: 24px; color: var(--faint); pointer-events: none; }
+.editor.is-empty.is-loading::before { content: none; }
 .editor[contenteditable="false"] { opacity: .6; }
 
 .pad-image { display: block; max-width: 100%; max-height: min(480px, 60vh); height: auto; margin: 12px 0; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); cursor: zoom-in; }

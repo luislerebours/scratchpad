@@ -45,6 +45,25 @@ export default async req => {
     return json({ bytes: usage.bytes, quota: quotaFor(auth.user) });
   }
 
+  // Every sheet's text in one request, so the page can switch tabs without
+  // waiting. Very large sheets are left out; the page fetches those on their own.
+  if (meta === 'all' && req.method === 'GET') {
+    const { sheets } = await readSheets(store);
+    const docs = await Promise.all(sheets.map(s => store.get(`sheets/${s.id}`, { type: 'json' })));
+    let room = 3_000_000;
+    const out = [];
+    sheets.forEach((s, i) => {
+      const doc = docs[i];
+      const html = typeof doc?.html === 'string' ? doc.html : null;
+      const text = html === null ? String(doc?.text || '') : null;
+      const size = (html ?? text).length;
+      if (size > room) return;
+      room -= size;
+      out.push({ id: s.id, html, text, updatedAt: Number(doc?.updatedAt || 0) });
+    });
+    return json({ sheets: out });
+  }
+
   // The 2-second check: just the change markers for the tabs and one sheet.
   if (meta === 'poll' && req.method === 'GET') {
     const sheet = parseSheet(url.searchParams.get('sheet'));

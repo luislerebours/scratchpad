@@ -2,7 +2,7 @@ import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '.
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
-const FILE_KINDS = ['files', 'chunks', 'images', 'image-chunks', 'image-previews'];
+const FILE_KINDS = ['files', 'chunks', 'file-thumbs', 'images', 'image-chunks', 'image-previews'];
 
 const cleanName = value => String(value ?? '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 40);
 

@@ -21,7 +21,8 @@ Pushes to `main` deploy straight to the live site.
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin.mjs`: admin-only (the `OWNER_EMAIL` account) list of accounts with data
     used, sign-ins and active days
-  - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB)
+  - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
+    plus a small thumbnail for images (made in the browser, `thumb=1`)
   - `images.mjs`: images in the text (chunked original plus a display copy)
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none; the

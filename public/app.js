@@ -1588,10 +1588,92 @@ function fileKind(f) {
   return ['file', ext && ext.length <= 4 ? ext.toUpperCase() : 'FILE'];
 }
 
-function fileIconHtml(f) {
+function fileIconHtml(f, { view = false } = {}) {
   const [kind, label] = fileKind(f);
-  return `<span class="file-icon kind-${kind}" aria-hidden="true">${kind === 'img' ? icon('image') : escapeHtml(label)}</span>`;
+  const opens = view ? ` data-view="${escapeHtml(f.id)}"` : '';
+  if (kind === 'img' && f.thumb) {
+    const src = escapeHtml(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&thumb=1`));
+    return `<span class="file-icon kind-img has-thumb" aria-hidden="true"${opens}><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
+  }
+  return `<span class="file-icon kind-${kind}" aria-hidden="true"${opens}>${kind === 'img' ? icon('image') : escapeHtml(label)}</span>`;
 }
+
+// ---- Thumbnails for image files ----
+// A 120px square made in the browser and stored with the file, so the list
+// never downloads a whole photo just to show it small.
+
+const THUMB_PX = 120;
+const THUMB_BACKFILL_MAX = 12 * 1000 * 1000;
+const thumbTried = new Set();
+let thumbBackfillTimer = null;
+
+async function makeThumb(blob) {
+  try {
+    const source = await loadBitmap(blob);
+    const scale = Math.max(THUMB_PX / source.width, THUMB_PX / source.height);
+    const w = source.width * scale;
+    const h = source.height * scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = THUMB_PX;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#19263b';
+    ctx.fillRect(0, 0, THUMB_PX, THUMB_PX);
+    ctx.drawImage(source, (THUMB_PX - w) / 2, (THUMB_PX - h) / 2, w, h);
+    source.close?.();
+    const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    return out && out.size <= 64 * 1024 ? out : null;
+  } catch {
+    // Unreadable here (HEIC outside Safari, say): the row keeps its icon.
+    return null;
+  }
+}
+
+function sendThumb(sheet, id, thumb) {
+  return fetch(filesUrl(sheet, `id=${encodeURIComponent(id)}&thumb=1`), {
+    method: 'PUT',
+    headers: { 'Content-Type': thumb.type },
+    body: thumb
+  }).then(r => r.ok).catch(() => false);
+}
+
+// Images uploaded before thumbnails existed: make theirs once, on whichever
+// device shows them first (small images only; big ones keep the icon).
+function scheduleThumbBackfill() {
+  clearTimeout(thumbBackfillTimer);
+  thumbBackfillTimer = setTimeout(backfillThumbs, 800);
+}
+
+async function backfillThumbs() {
+  const sheet = activeSheet;
+  const todo = currentFiles.filter(f => fileKind(f)[0] === 'img' && !f.thumb && !thumbTried.has(f.id) && (f.size || 0) <= THUMB_BACKFILL_MAX);
+  let made = 0;
+  for (const f of todo) {
+    if (sheet !== activeSheet || document.visibilityState !== 'visible') break;
+    thumbTried.add(f.id);
+    try {
+      const parts = [];
+      for (let i = 0; i < f.chunks; i++) {
+        const r = await fetch(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&chunk=${i}`));
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        parts.push(await r.arrayBuffer());
+      }
+      const thumb = await makeThumb(new Blob(parts, { type: f.type || 'image/jpeg' }));
+      if (thumb && await sendThumb(f.sheet, f.id, thumb)) made++;
+    } catch {
+      // Try again next time the app opens.
+    }
+  }
+  if (made && sheet === activeSheet) loadFiles(true, sheet);
+}
+
+// A thumbnail that won't load falls back to the icon.
+fileList.addEventListener('error', e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.closest('.file-icon')) return;
+  const span = img.parentElement;
+  span.classList.remove('has-thumb');
+  span.innerHTML = icon('image');
+}, true);
 
 function renderFiles() {
   fileList.innerHTML = currentFiles.map(f => {
@@ -1616,7 +1698,7 @@ function renderFiles() {
       <div class="file-row${isOldFile(f) ? ' is-old' : ''}" role="listitem" data-id="${id}">
         <button class="swipe-delete" type="button" tabindex="-1" aria-hidden="true">Delete</button>
         <div class="file-row-inner">
-          ${fileIconHtml(f)}
+          ${fileIconHtml(f, { view:true })}
           <div class="file-main">
             <button class="file-name" type="button" data-view="${id}" title="${name}">${name}</button>
             <div class="file-meta" title="${metaTitle}">${meta}</div>
@@ -1633,6 +1715,7 @@ function renderFiles() {
   updateSelectionUi();
   updateOldFilesNote();
   updateAttachLink();
+  if (!selecting && currentFiles.some(f => !f.thumb && !thumbTried.has(f.id) && fileKind(f)[0] === 'img')) scheduleThumbBackfill();
 }
 
 // "2 attachments" at the foot of the editor, counting this sheet's files.
@@ -2268,6 +2351,8 @@ function openFileMenu(trigger, file) {
 fileList.addEventListener('click', async (e) => {
   const viewBtn = e.target.closest('[data-view]');
   if (viewBtn) {
+    // The thumbnail can't hold focus; the name can, so focus returns there.
+    if (viewBtn.classList.contains('file-icon')) viewBtn.closest('.file-row')?.querySelector('.file-name')?.focus({ preventScroll:true });
     const file = fileIndex.get(viewBtn.dataset.view);
     if (file) await openPreview(file);
     return;
@@ -2543,6 +2628,7 @@ async function uploadFile(file, targetSheet, transfer) {
   try {
     const start = await postJson(filesUrl(targetSheet, 'action=start'), { name:file.name, type:file.type, size:file.size });
     id = start.id;
+    const thumbPromise = fileKind({ name: file.name, type: file.type })[0] === 'img' ? makeThumb(file) : Promise.resolve(null);
     const loaded = new Array(start.chunks).fill(0);
     const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
     transfer.update(0);
@@ -2563,6 +2649,8 @@ async function uploadFile(file, targetSheet, transfer) {
     });
 
     transfer.status('Finishing…');
+    const thumb = await thumbPromise;
+    if (thumb) await sendThumb(targetSheet, id, thumb);
     await postJson(filesUrl(targetSheet, `id=${encodeURIComponent(id)}&action=finish`));
     transfer.done(`Uploaded to ${currentSheetName(targetSheet)} · ${bytes(file.size)}`);
     return true;

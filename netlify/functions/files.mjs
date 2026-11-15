@@ -6,6 +6,9 @@ import { overQuota } from '../lib/usage.mjs';
 // travel in chunks: each upload/download request carries one chunk.
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const CHUNK_BYTES = 4 * 1000 * 1000;
+// A small square the page makes from an image, shown in the file list.
+const MAX_THUMB_BYTES = 64 * 1024;
+const THUMB_TYPES = new Set(['image/jpeg', 'image/webp', 'image/png']);
 const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
 
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
@@ -14,7 +17,8 @@ const chunkKey = (id, index) => `${id}-${index}`;
 // Records are kept in their own store so listing never touches chunk data.
 const stores = (ns, sheet) => ({
   records: userStore(ns, 'files', sheet),
-  chunks: userStore(ns, 'chunks', sheet)
+  chunks: userStore(ns, 'chunks', sheet),
+  thumbs: userStore(ns, 'file-thumbs', sheet)
 });
 
 const publicRecord = (record, sheet) => ({
@@ -25,13 +29,15 @@ const publicRecord = (record, sheet) => ({
   size: record.size,
   chunks: record.chunks,
   uploadedAt: record.uploadedAt,
-  kept: Boolean(record.kept)
+  kept: Boolean(record.kept),
+  thumb: Boolean(record.thumb)
 });
 
-async function deleteFile({ records, chunks }, record) {
-  await Promise.all(
-    Array.from({ length: record.chunks }, (_, i) => chunks.delete(chunkKey(record.id, i)))
-  );
+async function deleteFile({ records, chunks, thumbs }, record) {
+  await Promise.all([
+    ...Array.from({ length: record.chunks }, (_, i) => chunks.delete(chunkKey(record.id, i))),
+    record.thumb ? thumbs.delete(record.id) : null
+  ]);
   await records.delete(record.id);
 }
 
@@ -101,6 +107,30 @@ export default async req => {
     if (data.byteLength !== expected) return json({ error: 'Wrong chunk size' }, 400);
     await store.chunks.set(chunkKey(id, chunkIndex), data);
     return json({ ok: true });
+  }
+
+  // A thumbnail for an image: sent while uploading, or later for older files.
+  // An id always names the same file, so a device may keep it for good.
+  if (url.searchParams.get('thumb') === '1') {
+    if (req.method === 'PUT') {
+      const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!THUMB_TYPES.has(type)) return json({ error: 'Unsupported thumbnail type' }, 415);
+      const data = await req.arrayBuffer();
+      if (!data.byteLength || data.byteLength > MAX_THUMB_BYTES) return json({ error: 'Thumbnail too large' }, 413);
+      await store.thumbs.set(id, data);
+      // Re-read: the upload may have finished meanwhile.
+      const latest = (await store.records.get(id, { type: 'json' })) || record;
+      await store.records.setJSON(id, { ...latest, thumb: { type, size: data.byteLength } });
+      if (latest.complete) await bumpRev(auth.ns, `files-${sheet}`);
+      return json({ ok: true });
+    }
+    if (req.method === 'GET') {
+      const data = record.thumb ? await store.thumbs.get(id, { type: 'arrayBuffer' }) : null;
+      if (!data) return json({ error: 'No thumbnail' }, 404);
+      return new Response(data, {
+        headers: { 'Content-Type': record.thumb.type, 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' }
+      });
+    }
   }
 
   // Finish an upload once every chunk has arrived.

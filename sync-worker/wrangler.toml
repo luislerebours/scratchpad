@@ -16,4 +16,4 @@ new_sqlite_classes = ["Room"]
 
 [vars]
 # Netlify's sync public key: GET https://scratchpadx.netlify.app/.netlify/functions/sync?action=key
-PUBLIC_KEY = ""
+PUBLIC_KEY = "M7dqzUBr/6KCRGsNpqJLTCFQJgaHgd6TtcHoAtPp86A="

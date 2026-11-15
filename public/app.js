@@ -115,6 +115,13 @@ let pendingImageUploads = 0;
 let viewedImage = null;
 let selectedImage = null;
 let resizingImage = false;
+// Swipe-to-delete on file rows (see "Swipe a file left").
+const SWIPE_OPEN = 88;
+const UNDO_MS = 5000;
+const pendingDeletes = new Map();
+let swipe = null;
+let openSwipeRow = null;
+let swipeClickBlockedUntil = 0;
 
 function validSheet(value) {
   const n = Number(value);
@@ -168,11 +175,25 @@ function renderSaveStatus() {
   if (localUpdatedAt) saveStatusEl.title = new Date(localUpdatedAt).toLocaleString();
 }
 
-function showToast(text) {
-  toastEl.textContent = text;
+function showToast(text, { action, run, duration = 1800 } = {}) {
+  const label = document.createElement('span');
+  label.textContent = text;
+  toastEl.replaceChildren(label);
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action;
+    btn.addEventListener('click', () => {
+      toastEl.classList.remove('show');
+      run();
+    });
+    toastEl.append(btn);
+  }
+  toastEl.classList.toggle('has-action', Boolean(action));
   toastEl.classList.add('show');
   clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  showToast.timer = setTimeout(() => toastEl.classList.remove('show'), duration);
 }
 
 function formatSavedTime(ts) {
@@ -1243,7 +1264,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
 function showCachedFiles(sheet) {
   const files = filesCache.get(sheet);
   filesSignature = files ? JSON.stringify(files) : '';
-  currentFiles = (files || []).map(f => ({ ...f, sheet }));
+  currentFiles = (files || []).filter(f => !pendingDeletes.has(f.id)).map(f => ({ ...f, sheet }));
   fileIndex = new Map(currentFiles.map(f => [f.id, f]));
   if (files) {
     renderFiles();
@@ -1519,7 +1540,7 @@ async function loadFiles(force = false, sheet = activeSheet) {
     const signature = JSON.stringify(files);
     if (signature === filesSignature) return true;
     filesSignature = signature;
-    currentFiles = files.map(f => ({ ...f, sheet: requestedSheet }));
+    currentFiles = files.filter(f => !pendingDeletes.has(f.id)).map(f => ({ ...f, sheet: requestedSheet }));
     fileIndex = new Map(currentFiles.map(f => [f.id, f]));
     for (const id of selectedIds) if (!fileIndex.has(id)) selectedIds.delete(id);
     if (!currentFiles.length) setSelecting(false);
@@ -1592,16 +1613,21 @@ function renderFiles() {
       </label>`;
     }
     return `
-      <div class="file-row${isOldFile(f) ? ' is-old' : ''}" role="listitem">
-        ${fileIconHtml(f)}
-        <div class="file-main">
-          <button class="file-name" type="button" data-view="${id}" title="${name}">${name}</button>
-          <div class="file-meta" title="${metaTitle}">${meta}</div>
+      <div class="file-row${isOldFile(f) ? ' is-old' : ''}" role="listitem" data-id="${id}">
+        <button class="swipe-delete" type="button" tabindex="-1" aria-hidden="true">Delete</button>
+        <div class="file-row-inner">
+          ${fileIconHtml(f)}
+          <div class="file-main">
+            <button class="file-name" type="button" data-view="${id}" title="${name}">${name}</button>
+            <div class="file-meta" title="${metaTitle}">${meta}</div>
+          </div>
+          <button class="icon-btn" type="button" data-save="${id}" aria-label="Download ${name}" title="Download">${icon('download')}</button>
+          <button class="icon-btn" type="button" data-file-menu="${id}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button>
         </div>
-        <button class="icon-btn" type="button" data-save="${id}" aria-label="Download ${name}" title="Download">${icon('download')}</button>
-        <button class="icon-btn" type="button" data-file-menu="${id}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button>
       </div>`;
   }).join('');
+  openSwipeRow = null;
+  swipe = null;
   emptyFiles.hidden = currentFiles.length > 0;
   selectBtn.hidden = !currentFiles.length;
   updateSelectionUi();
@@ -2051,6 +2077,150 @@ document.addEventListener('keydown', e => {
   else if (selecting) setSelecting(false);
 });
 
+// ---- Swipe a file left to delete it (touch), with Undo ----
+// A short swipe reveals Delete; a long one deletes straight away. Either way
+// the file is removed on the server only after the Undo message has gone.
+
+
+function setRowOffset(row, x, dragging = false) {
+  row.classList.toggle('swiping', dragging);
+  row.querySelector('.file-row-inner').style.transform = x ? `translateX(${x}px)` : '';
+}
+
+function closeSwipeRow(row = openSwipeRow) {
+  if (!row) return;
+  row.classList.remove('open');
+  setRowOffset(row, 0);
+  if (row === openSwipeRow) openSwipeRow = null;
+}
+
+fileList.addEventListener('pointerdown', e => {
+  if (selecting || e.pointerType === 'mouse' || !e.isPrimary) return;
+  const inner = e.target.closest('.file-row-inner');
+  if (!inner) return;
+  const row = inner.parentElement;
+  if (openSwipeRow && openSwipeRow !== row) closeSwipeRow();
+  swipe = { row, id: e.pointerId, x0: e.clientX, y0: e.clientY, base: row.classList.contains('open') ? -SWIPE_OPEN : 0, x: 0, active: false };
+});
+
+fileList.addEventListener('pointermove', e => {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  if (!swipe.row.isConnected) {
+    swipe = null;
+    return;
+  }
+  const dx = e.clientX - swipe.x0;
+  const dy = e.clientY - swipe.y0;
+  if (!swipe.active) {
+    // Mostly up or down: that's a scroll, not a swipe.
+    if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+      swipe = null;
+      return;
+    }
+    if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    swipe.active = true;
+    swipe.row.querySelector('.file-row-inner').setPointerCapture?.(e.pointerId);
+  }
+  swipe.x = Math.max(-swipe.row.offsetWidth, Math.min(0, swipe.base + dx));
+  setRowOffset(swipe.row, swipe.x, true);
+});
+
+function endSwipe(e) {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const { row, active, x, base } = swipe;
+  swipe = null;
+  if (!active) return;
+  swipeClickBlockedUntil = Date.now() + 400;
+  if (e.type === 'pointercancel') {
+    setRowOffset(row, base);
+    return;
+  }
+  if (x <= -row.offsetWidth * 0.55) {
+    swipeDelete(row);
+  } else if (x <= -SWIPE_OPEN / 2) {
+    row.classList.add('open');
+    setRowOffset(row, -SWIPE_OPEN);
+    openSwipeRow = row;
+  } else {
+    closeSwipeRow(row);
+  }
+}
+
+fileList.addEventListener('pointerup', endSwipe);
+fileList.addEventListener('pointercancel', endSwipe);
+
+// A swipe ends without opening the file; a tap on an open row just closes it.
+fileList.addEventListener('click', e => {
+  const row = e.target.closest('.file-row');
+  if (!row) return;
+  if (e.target.closest('.swipe-delete')) {
+    e.stopPropagation();
+    swipeDelete(row);
+    return;
+  }
+  if (Date.now() < swipeClickBlockedUntil || row === openSwipeRow) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSwipeRow(row);
+  }
+}, true);
+
+document.addEventListener('pointerdown', e => {
+  if (openSwipeRow && !openSwipeRow.contains(e.target)) closeSwipeRow();
+});
+
+function swipeDelete(row) {
+  const file = fileIndex.get(row.dataset.id);
+  if (!file || pendingDeletes.has(file.id)) return;
+  if (row === openSwipeRow) openSwipeRow = null;
+  row.classList.add('removing');
+  setRowOffset(row, -row.offsetWidth);
+  setTimeout(() => queueFileDelete(file), prefersReducedMotion() ? 0 : 200);
+}
+
+function queueFileDelete(file) {
+  const timer = setTimeout(() => commitFileDelete(file.id), UNDO_MS);
+  pendingDeletes.set(file.id, { file, timer });
+  currentFiles = currentFiles.filter(f => !pendingDeletes.has(f.id));
+  fileIndex = new Map(currentFiles.map(f => [f.id, f]));
+  renderFiles();
+  showToast(`Deleted ${file.name}`, { action: 'Undo', run: () => undoFileDelete(file.id), duration: UNDO_MS });
+}
+
+function undoFileDelete(id) {
+  const entry = pendingDeletes.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingDeletes.delete(id);
+  if (entry.file.sheet === activeSheet) {
+    showCachedFiles(activeSheet);
+    loadFiles(true, activeSheet);
+  }
+  showToast('File kept');
+}
+
+async function commitFileDelete(id, { keepalive = false } = {}) {
+  const entry = pendingDeletes.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  const { file } = entry;
+  const r = await fetch(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}`), { method:'DELETE', keepalive }).catch(() => null);
+  pendingDeletes.delete(id);
+  if (!r?.ok) showToast(`Couldn’t delete ${file.name}`);
+  if (file.sheet === activeSheet) {
+    if (!r?.ok) filesSignature = '';
+    loadFiles(true, file.sheet);
+  } else {
+    filesCache.delete(file.sheet);
+  }
+}
+
+// Leaving the page: finish deletes now rather than leave them undone.
+function flushFileDeletes() {
+  for (const id of [...pendingDeletes.keys()]) commitFileDelete(id, { keepalive:true });
+}
+window.addEventListener('pagehide', flushFileDeletes);
+
 async function toggleKeep(file) {
   try {
     await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
@@ -2486,6 +2656,7 @@ let hiddenAt = 0;
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'hidden') {
     hiddenAt = Date.now();
+    flushFileDeletes();
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;

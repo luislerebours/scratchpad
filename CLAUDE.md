@@ -51,3 +51,7 @@ Pushes to `main` deploy straight to the live site.
   (clear/delete always confirm in a bottom sheet). The header dot is the
   server connection; the toolbar text is the save state, which shows
   "Saved" only after the server confirms.
+- Icons: `public/assets/icon-source.png` is the 1024px master; the other
+  sizes and the header's see-through `mark.png` are made from it.
+- Files can be swiped left to delete (touch only). The server delete waits
+  5 s for Undo, and happens at once if the page is closed.

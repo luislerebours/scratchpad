@@ -92,6 +92,19 @@
     <footer>Your sheets and files are private to your account.</footer>
   </main>
 
+  <div id="adminModal" class="modal-backdrop" hidden>
+    <section class="modal-card admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
+      <div class="modal-header">
+        <div>
+          <div class="modal-kicker">Admin</div>
+          <h2 id="adminTitle">Accounts</h2>
+        </div>
+        <button class="modal-close" type="button" data-close-admin aria-label="Close">×</button>
+      </div>
+      <div id="adminBody" class="admin-body"></div>
+    </section>
+  </div>
+
   <section id="authScreen" class="auth-screen" hidden>
     <div class="auth-card">
       <div class="auth-brand">

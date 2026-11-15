@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
-  allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, json,
+  allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json,
   makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify
 } from '../lib/auth.mjs';
 
@@ -38,7 +38,19 @@ async function sendCodeEmail(to, code, link) {
 }
 
 async function signedIn(user, body = {}) {
-  return json({ email: user.email, ...body }, 200, { 'Set-Cookie': await sessionCookie(user) });
+  return json({ email: user.email, admin: isAdmin(user), ...body }, 200, { 'Set-Cookie': await sessionCookie(user) });
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+// Activity for the admin view: sign-ins, and the days the pad was opened.
+function withSignIn(user) {
+  return { ...user, loginCount: (user.loginCount || 0) + 1, lastLoginAt: Date.now(), ...withVisit(user) };
+}
+
+function withVisit(user) {
+  const days = (user.visitDays || []).filter(day => day !== today());
+  return { lastSeenAt: Date.now(), visitDays: [...days, today()].slice(-60) };
 }
 
 export default async (req, context) => {
@@ -50,7 +62,13 @@ export default async (req, context) => {
   if (req.method === 'GET') {
     const auth = await requireUser(req);
     if (auth.error) return auth.error;
-    return signedIn(auth.user);
+    let user = auth.user;
+    // Record at most one visit an hour, to keep writes down.
+    if (Date.now() - (user.lastSeenAt || 0) > 60 * 60 * 1000 || user.visitDays?.at(-1) !== today()) {
+      user = { ...user, ...withVisit(user) };
+      await store.setJSON(`users/${emailKey(user.email)}`, user);
+    }
+    return signedIn(user);
   }
 
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -140,6 +158,7 @@ export default async (req, context) => {
       }
       user = { uid, ns, email: pass.email, hash, salt, version: 1, createdAt: Date.now() };
     }
+    user = withSignIn(user);
     await store.setJSON(`users/${pass.ek}`, user);
     return signedIn(user, { created: !existing });
   }
@@ -154,7 +173,9 @@ export default async (req, context) => {
     if (!user || !(await checkPassword(password, user))) {
       return json({ error: 'Wrong email or password.' }, 401);
     }
-    return signedIn(user);
+    const updated = withSignIn(user);
+    await store.setJSON(`users/${ek}`, updated);
+    return signedIn(updated);
   }
 
   return json({ error: 'Unknown action' }, 400);

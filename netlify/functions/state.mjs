@@ -15,7 +15,7 @@ async function readSheets(store) {
     const names = Array.from({ length: 5 }, (_, i) => cleanName(legacy.names?.[i]) || `Sheet ${i + 1}`);
     return { sheets: names.map((name, i) => ({ id: i + 1, name })), updatedAt: Number(legacy.updatedAt || 0) };
   }
-  return { sheets: [{ id: 1, name: 'Sheet 1' }], updatedAt: 0 };
+  return { sheets: Array.from({ length: 5 }, (_, i) => ({ id: i + 1, name: `Sheet ${i + 1}` })), updatedAt: 0 };
 }
 
 async function writeSheets(store, sheets) {

@@ -47,6 +47,8 @@ const addSheetBtn = document.querySelector('#addSheetBtn');
 const deleteSheetBtn = document.querySelector('#deleteSheetBtn');
 const accountBtn = document.querySelector('#accountBtn');
 const authScreen = document.querySelector('#authScreen');
+const adminModal = document.querySelector('#adminModal');
+const adminBody = document.querySelector('#adminBody');
 const filesSheetLabel = document.querySelector('#filesSheetLabel');
 const renameSheetBtn = document.querySelector('#renameSheetBtn');
 const renameModal = document.querySelector('#renameModal');
@@ -1475,6 +1477,7 @@ previewSaveBtn.addEventListener('click', async () => {
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!sheetModal.hidden) closeSheet();
+  else if (!adminModal.hidden) closeAdmin();
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
   else if (selecting) setSelecting(false);
@@ -1855,12 +1858,104 @@ accountBtn.addEventListener('click', () => {
     title: account?.email || 'Account',
     text: 'You stay signed in on this device for a year, renewed each time you open Scratch Pad.',
     actions: [
+      ...(account?.admin ? [{ label: 'Admin: accounts', kind: 'primary', full: true, run: openAdmin }] : []),
       { label: 'Sign out', kind: 'secondary', run: () => signOut('logout') },
       { label: 'Sign out everywhere', kind: 'danger-solid', run: () => signOut('logout-all') },
       { label: 'Cancel', kind: 'secondary', full: true }
     ]
   });
 });
+
+// ---- Admin: accounts, data used, activity ----
+
+function timeAgo(ts) {
+  if (!ts) return '—';
+  const minutes = Math.round((Date.now() - ts) / 60000);
+  if (minutes < 2) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 45) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function adminFact(label, value) {
+  const el = document.createElement('div');
+  el.append(`${label}: `);
+  const b = document.createElement('b');
+  b.textContent = value;
+  el.append(b);
+  return el;
+}
+
+function renderAdmin(data) {
+  const stat = (value, label) => {
+    const el = document.createElement('div');
+    el.className = 'admin-stat';
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    const span = document.createElement('span');
+    span.textContent = label;
+    el.append(strong, span);
+    return el;
+  };
+  const summary = document.createElement('div');
+  summary.className = 'admin-summary';
+  summary.append(stat(String(data.count), data.count === 1 ? 'account' : 'accounts'), stat(bytes(data.totalBytes), 'data stored in total'));
+
+  const list = document.createElement('div');
+  list.className = 'admin-list';
+  for (const a of data.accounts) {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    const email = document.createElement('div');
+    email.className = 'admin-email';
+    email.textContent = a.email;
+    if (a.owner) {
+      const badge = document.createElement('span');
+      badge.className = 'admin-badge';
+      badge.textContent = 'You';
+      email.append(badge);
+    }
+    const facts = document.createElement('div');
+    facts.className = 'admin-facts';
+    facts.append(
+      adminFact('Data', `${bytes(a.bytes)} · ${a.files} file${a.files === 1 ? '' : 's'} · ${a.images} image${a.images === 1 ? '' : 's'}`),
+      adminFact('Active', a.activeDays30 === null ? '—' : `${a.activeDays30} of last 30 days`),
+      adminFact('Last seen', timeAgo(a.lastSeenAt)),
+      adminFact('Sign-ins', a.loginCount === null ? '—' : `${a.loginCount}, last ${timeAgo(a.lastLoginAt)}`),
+      adminFact('Joined', a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '—')
+    );
+    row.append(email, facts);
+    list.append(row);
+  }
+  const note = document.createElement('p');
+  note.className = 'admin-note';
+  note.textContent = '“Active” counts the days an account opened Scratch Pad. Sign-ins count password and email-code sign-ins.';
+  adminBody.replaceChildren(summary, list, note);
+}
+
+async function openAdmin() {
+  adminBody.textContent = 'Loading…';
+  adminModal.hidden = false;
+  document.body.classList.add('modal-open');
+  try {
+    const r = await fetch('/.netlify/functions/admin', { cache:'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    renderAdmin(await r.json());
+  } catch {
+    adminBody.textContent = 'Couldn’t load accounts. Try again.';
+  }
+}
+
+function closeAdmin() {
+  adminModal.hidden = true;
+  if (renameModal.hidden && previewModal.hidden) document.body.classList.remove('modal-open');
+}
+
+adminModal.querySelector('[data-close-admin]').addEventListener('click', closeAdmin);
+adminModal.addEventListener('click', e => { if (e.target === adminModal) closeAdmin(); });
 
 async function signOut(action) {
   if (saveTimer) {

@@ -34,6 +34,12 @@ export function userStore(ns, kind, sheet = null) {
 }
 
 export const normalizeEmail = email => String(email || '').trim().toLowerCase();
+
+// The OWNER_EMAIL account is the admin.
+export function isAdmin(user) {
+  const owner = normalizeEmail(env('OWNER_EMAIL'));
+  return Boolean(owner) && user?.email === owner;
+}
 export const validEmail = email => email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 export const emailKey = email => createHash('sha256').update(email).digest('hex').slice(0, 32);
 

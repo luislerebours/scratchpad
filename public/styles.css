@@ -34,6 +34,19 @@ h1 { margin:0; font-size: clamp(1.55rem, 4vw, 2rem); letter-spacing:-.03em; }
 .topbar-right { display:flex; align-items:center; gap:12px; }
 .account-btn { appearance:none; width:40px; height:40px; border-radius:50%; border:1px solid var(--line); background:rgba(255,255,255,.08); color:var(--text); font:inherit; font-weight:800; font-size:1rem; text-transform:uppercase; cursor:pointer; flex:0 0 auto; }
 .delete-sheet-btn { margin-right:auto; }
+.admin-modal { width:min(720px, 100%); max-height:min(88dvh, 900px); display:flex; flex-direction:column; }
+.admin-body { overflow:auto; padding:16px 18px 20px; }
+.admin-summary { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+.admin-stat { padding:12px 14px; border-radius:14px; background:rgba(255,255,255,.05); border:1px solid var(--line); }
+.admin-stat strong { display:block; font-size:1.5rem; font-weight:800; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.admin-stat span { color:var(--muted); font-size:.82rem; }
+.admin-list { display:grid; gap:9px; }
+.admin-row { padding:12px 14px; border-radius:14px; background:var(--panel-2); border:1px solid var(--line); }
+.admin-email { display:flex; align-items:center; gap:8px; font-weight:700; overflow-wrap:anywhere; }
+.admin-badge { flex:0 0 auto; padding:2px 8px; border-radius:999px; background:rgba(44,199,255,.16); color:var(--accent); font-size:.72rem; font-weight:800; }
+.admin-facts { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:6px 14px; margin-top:8px; font-size:.84rem; color:var(--muted); }
+.admin-facts b { color:var(--text); font-weight:650; font-variant-numeric:tabular-nums; }
+.admin-note { margin:14px 0 0; color:var(--muted); font-size:.8rem; }
 body.signed-out .app-shell { display:none; }
 .auth-screen { min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); box-sizing:border-box; }
 .auth-screen[hidden] { display:none; }

@@ -32,7 +32,7 @@ export async function accountUsage(ns) {
     const sheet = i + 1;
     const [doc, files, images] = await Promise.all([
       state.get(`sheets/${sheet}`, { type: 'json' }),
-      recordsSize(userStore(ns, 'files', sheet), r => r.size || 0),
+      recordsSize(userStore(ns, 'files', sheet), r => (r.size || 0) + (r.thumb?.size || 0)),
       recordsSize(userStore(ns, 'images', sheet), r => (r.size || 0) + (r.preview?.size || 0))
     ]);
     const text = doc ? Buffer.byteLength(doc.text || '') + Buffer.byteLength(doc.html || '') : 0;

@@ -115,6 +115,13 @@ let pendingImageUploads = 0;
 let viewedImage = null;
 let selectedImage = null;
 let resizingImage = false;
+// Swipe-to-delete on file rows (see "Swipe a file left").
+const SWIPE_OPEN = 88;
+const UNDO_MS = 5000;
+const pendingDeletes = new Map();
+let swipe = null;
+let openSwipeRow = null;
+let swipeClickBlockedUntil = 0;
 
 function validSheet(value) {
   const n = Number(value);
@@ -168,11 +175,25 @@ function renderSaveStatus() {
   if (localUpdatedAt) saveStatusEl.title = new Date(localUpdatedAt).toLocaleString();
 }
 
-function showToast(text) {
-  toastEl.textContent = text;
+function showToast(text, { action, run, duration = 1800 } = {}) {
+  const label = document.createElement('span');
+  label.textContent = text;
+  toastEl.replaceChildren(label);
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action;
+    btn.addEventListener('click', () => {
+      toastEl.classList.remove('show');
+      run();
+    });
+    toastEl.append(btn);
+  }
+  toastEl.classList.toggle('has-action', Boolean(action));
   toastEl.classList.add('show');
   clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  showToast.timer = setTimeout(() => toastEl.classList.remove('show'), duration);
 }
 
 function formatSavedTime(ts) {
@@ -183,6 +204,61 @@ function formatSavedTime(ts) {
   const sameYear = date.getFullYear() === now.getFullYear();
   const day = new Intl.DateTimeFormat(undefined, sameYear ? { month:'short', day:'numeric' } : { month:'short', day:'numeric', year:'numeric' }).format(date);
   return `${day}, ${time}`;
+}
+
+// ---- Copies of each sheet kept in memory, so a tab shows its text at once ----
+// sheetCache: sheet -> { html, updatedAt } as last saved or fetched.
+// filesCache: sheet -> its file list as last fetched.
+const sheetCache = new Map();
+const filesCache = new Map();
+const ownRevs = new Map();
+const otherRefreshTimers = new Map();
+
+function cacheSheet(sheet, html, updatedAt) {
+  const known = sheetCache.get(sheet);
+  if (known && known.updatedAt > updatedAt) return;
+  sheetCache.set(sheet, { html, updatedAt });
+}
+
+// One request for every sheet's text, made when the app opens.
+async function prefetchSheets() {
+  try {
+    const r = await fetch(`${API_STATE}?meta=all`, { cache:'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const s of data.sheets || []) {
+      const html = typeof s.html === 'string' ? s.html : textToHtml(s.text || '');
+      cacheSheet(Number(s.id), html, Number(s.updatedAt || 0));
+    }
+  } catch {
+    // Tabs just load the way they did before.
+  }
+}
+
+// Another device changed a sheet that isn't open here: refresh its copy shortly.
+function refreshOtherSheet(sheet, kind) {
+  const key = `${kind}-${sheet}`;
+  clearTimeout(otherRefreshTimers.get(key));
+  otherRefreshTimers.set(key, setTimeout(async () => {
+    otherRefreshTimers.delete(key);
+    if (sheet === activeSheet || !hasSheet(sheet)) return;
+    const cache = kind === 'files' ? filesCache : sheetCache;
+    try {
+      const r = await fetch(kind === 'files' ? filesUrl(sheet) : stateUrl(sheet), { cache:'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      if (kind === 'files') filesCache.set(sheet, Array.isArray(data.files) ? data.files : []);
+      else cacheSheet(sheet, typeof data.html === 'string' ? data.html : textToHtml(data.text || ''), Number(data.updatedAt || 0));
+    } catch {
+      // A stale copy is worse than none: that tab will load normally instead.
+      cache.delete(sheet);
+    }
+  }, 1500));
+}
+
+function forgetSheet(sheet) {
+  sheetCache.delete(sheet);
+  filesCache.delete(sheet);
 }
 
 function stateUrl(sheet = activeSheet) {
@@ -467,6 +543,7 @@ function applySheets(data) {
   if (signature === sheetsSignature) return;
   sheetsSignature = signature;
   sheets = data.sheets.map(s => ({ id: Number(s.id), name: String(s.name || `Sheet ${s.id}`) }));
+  for (const id of [...sheetCache.keys(), ...filesCache.keys()]) if (!hasSheet(id)) forgetSheet(id);
   renderTabs();
   // The open sheet was deleted on another device.
   if (!hasSheet(activeSheet)) switchSheet(sheets[0].id, { remember:false, force:true });
@@ -510,6 +587,7 @@ async function fetchState(sheet = activeSheet) {
 
     const busy = saving || recentlyTyping || resizingImage || pendingImageUploads > 0;
     const remoteHtml = typeof data.html === 'string' ? data.html : textToHtml(data.text || '');
+    cacheSheet(requestedSheet, remoteHtml, remoteTs);
 
     if (remoteTs > localUpdatedAt && !busy) {
       renderEditor(remoteHtml);
@@ -546,6 +624,8 @@ async function saveState(sheet = activeSheet) {
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
+    cacheSheet(targetSheet, htmlToSave, Number(data.updatedAt || Date.now()));
+    if (data.rev) ownRevs.set(`text-${targetSheet}`, data.rev);
     if (targetSheet === activeSheet) {
       // Our own save: no need to fetch it back on the next check.
       if (data.rev && !saveTimer) revs.text = data.rev;
@@ -1130,38 +1210,71 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
     showToast('Wait for images to finish uploading');
     return;
   }
-  if (remember) rememberCurrentSheet(nextSheet);
 
-  if (saveTimer) {
+  // Edits not yet saved would be lost by switching: save them first, and stay
+  // on this sheet if that fails.
+  if ((saveTimer || saveStateName === 'failed') && hasSheet(activeSheet)) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    if (hasSheet(activeSheet)) await saveState(activeSheet);
+    await saveState(activeSheet);
+    if (saveStateName === 'failed' && !force) {
+      showToast('Couldn’t save this sheet. Check your connection and try again.');
+      return;
+    }
   }
+  if (remember) rememberCurrentSheet(nextSheet);
 
   pad.contentEditable = 'false';
   activeSheet = nextSheet;
   revs = { sheets: revs.sheets };
-  localUpdatedAt = 0;
   lastInputAt = 0;
   lastFileRefresh = 0;
   deselectImage();
-  pad.replaceChildren();
-  updateEmptyState();
   setSelecting(false);
-  fileList.innerHTML = '';
-  fileIndex = new Map();
-  currentFiles = [];
-  filesSignature = '';
-  emptyFiles.hidden = false;
-  updateAttachLink();
+
+  // Show the sheet as last saved or fetched right away; the fetch below
+  // brings in anything newer. Without a copy, show a blank page (not the
+  // "type here" hint) until it arrives.
+  const cached = sheetCache.get(nextSheet);
+  localUpdatedAt = cached ? cached.updatedAt : 0;
+  if (cached) renderEditor(cached.html);
+  else pad.replaceChildren();
+  pad.classList.toggle('is-loading', !cached);
+  updateEmptyState();
+  showCachedFiles(nextSheet);
   filesSheetLabel.textContent = currentSheetName();
 
   renderTabs();
   revealActiveTab(true);
 
-  setSaveState('loading');
-  await Promise.all([fetchState(activeSheet), loadFiles(true, activeSheet)]);
+  setSaveState(cached ? 'saved' : 'loading');
+  let [loaded] = await Promise.all([fetchState(nextSheet), loadFiles(true, nextSheet)]);
+  // Not loaded and nothing to show: wait for the connection rather than offer
+  // an empty page whose first keystroke would replace the saved text.
+  for (let delay = 1000; !loaded && !cached && nextSheet === activeSheet; delay = Math.min(delay * 2, 8000)) {
+    await new Promise(resolve => setTimeout(resolve, delay));
+    if (nextSheet === activeSheet) loaded = await fetchState(nextSheet);
+  }
+  if (nextSheet !== activeSheet) return;
+  pad.classList.remove('is-loading');
   pad.contentEditable = 'true';
+}
+
+// The file list as last seen, or nothing (rather than "No files") until it loads.
+function showCachedFiles(sheet) {
+  const files = filesCache.get(sheet);
+  filesSignature = files ? JSON.stringify(files) : '';
+  currentFiles = (files || []).filter(f => !pendingDeletes.has(f.id)).map(f => ({ ...f, sheet }));
+  fileIndex = new Map(currentFiles.map(f => [f.id, f]));
+  if (files) {
+    renderFiles();
+    return;
+  }
+  fileList.innerHTML = '';
+  emptyFiles.hidden = true;
+  selectBtn.hidden = true;
+  updateOldFilesNote();
+  updateAttachLink();
 }
 
 sheetTabsEl.addEventListener('click', e => {
@@ -1182,6 +1295,10 @@ addSheetBtn.addEventListener('click', async () => {
   addSheetBtn.disabled = true;
   try {
     const data = await postSheets({ action:'add' });
+    // A new sheet starts empty: no need to wait for it.
+    forgetSheet(data.added);
+    cacheSheet(data.added, '', 0);
+    filesCache.set(data.added, []);
     await switchSheet(data.added);
     openRenameModal();
   } catch (err) {
@@ -1213,6 +1330,7 @@ function confirmDeleteSheet() {
           saveTimer = null;
           try {
             await postSheets({ action:'delete', sheet });
+            forgetSheet(sheet);
             showToast(`Deleted ${name}`);
           } catch (err) {
             showToast(err.message || 'Delete failed');
@@ -1414,14 +1532,15 @@ async function loadFiles(force = false, sheet = activeSheet) {
     const r = await fetch(filesUrl(requestedSheet), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    const files = Array.isArray(data.files) ? data.files : [];
+    filesCache.set(requestedSheet, files);
     if (requestedSheet !== activeSheet) return false;
 
-    const files = Array.isArray(data.files) ? data.files : [];
     lastFileRefresh = Date.now();
     const signature = JSON.stringify(files);
     if (signature === filesSignature) return true;
     filesSignature = signature;
-    currentFiles = files.map(f => ({ ...f, sheet: requestedSheet }));
+    currentFiles = files.filter(f => !pendingDeletes.has(f.id)).map(f => ({ ...f, sheet: requestedSheet }));
     fileIndex = new Map(currentFiles.map(f => [f.id, f]));
     for (const id of selectedIds) if (!fileIndex.has(id)) selectedIds.delete(id);
     if (!currentFiles.length) setSelecting(false);
@@ -1469,10 +1588,92 @@ function fileKind(f) {
   return ['file', ext && ext.length <= 4 ? ext.toUpperCase() : 'FILE'];
 }
 
-function fileIconHtml(f) {
+function fileIconHtml(f, { view = false } = {}) {
   const [kind, label] = fileKind(f);
-  return `<span class="file-icon kind-${kind}" aria-hidden="true">${kind === 'img' ? icon('image') : escapeHtml(label)}</span>`;
+  const opens = view ? ` data-view="${escapeHtml(f.id)}"` : '';
+  if (kind === 'img' && f.thumb) {
+    const src = escapeHtml(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&thumb=1`));
+    return `<span class="file-icon kind-img has-thumb" aria-hidden="true"${opens}><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
+  }
+  return `<span class="file-icon kind-${kind}" aria-hidden="true"${opens}>${kind === 'img' ? icon('image') : escapeHtml(label)}</span>`;
 }
+
+// ---- Thumbnails for image files ----
+// A 120px square made in the browser and stored with the file, so the list
+// never downloads a whole photo just to show it small.
+
+const THUMB_PX = 120;
+const THUMB_BACKFILL_MAX = 12 * 1000 * 1000;
+const thumbTried = new Set();
+let thumbBackfillTimer = null;
+
+async function makeThumb(blob) {
+  try {
+    const source = await loadBitmap(blob);
+    const scale = Math.max(THUMB_PX / source.width, THUMB_PX / source.height);
+    const w = source.width * scale;
+    const h = source.height * scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = THUMB_PX;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#19263b';
+    ctx.fillRect(0, 0, THUMB_PX, THUMB_PX);
+    ctx.drawImage(source, (THUMB_PX - w) / 2, (THUMB_PX - h) / 2, w, h);
+    source.close?.();
+    const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    return out && out.size <= 64 * 1024 ? out : null;
+  } catch {
+    // Unreadable here (HEIC outside Safari, say): the row keeps its icon.
+    return null;
+  }
+}
+
+function sendThumb(sheet, id, thumb) {
+  return fetch(filesUrl(sheet, `id=${encodeURIComponent(id)}&thumb=1`), {
+    method: 'PUT',
+    headers: { 'Content-Type': thumb.type },
+    body: thumb
+  }).then(r => r.ok).catch(() => false);
+}
+
+// Images uploaded before thumbnails existed: make theirs once, on whichever
+// device shows them first (small images only; big ones keep the icon).
+function scheduleThumbBackfill() {
+  clearTimeout(thumbBackfillTimer);
+  thumbBackfillTimer = setTimeout(backfillThumbs, 800);
+}
+
+async function backfillThumbs() {
+  const sheet = activeSheet;
+  const todo = currentFiles.filter(f => fileKind(f)[0] === 'img' && !f.thumb && !thumbTried.has(f.id) && (f.size || 0) <= THUMB_BACKFILL_MAX);
+  let made = 0;
+  for (const f of todo) {
+    if (sheet !== activeSheet || document.visibilityState !== 'visible') break;
+    thumbTried.add(f.id);
+    try {
+      const parts = [];
+      for (let i = 0; i < f.chunks; i++) {
+        const r = await fetch(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&chunk=${i}`));
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        parts.push(await r.arrayBuffer());
+      }
+      const thumb = await makeThumb(new Blob(parts, { type: f.type || 'image/jpeg' }));
+      if (thumb && await sendThumb(f.sheet, f.id, thumb)) made++;
+    } catch {
+      // Try again next time the app opens.
+    }
+  }
+  if (made && sheet === activeSheet) loadFiles(true, sheet);
+}
+
+// A thumbnail that won't load falls back to the icon.
+fileList.addEventListener('error', e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.closest('.file-icon')) return;
+  const span = img.parentElement;
+  span.classList.remove('has-thumb');
+  span.innerHTML = icon('image');
+}, true);
 
 function renderFiles() {
   fileList.innerHTML = currentFiles.map(f => {
@@ -1494,21 +1695,27 @@ function renderFiles() {
       </label>`;
     }
     return `
-      <div class="file-row${isOldFile(f) ? ' is-old' : ''}" role="listitem">
-        ${fileIconHtml(f)}
-        <div class="file-main">
-          <button class="file-name" type="button" data-view="${id}" title="${name}">${name}</button>
-          <div class="file-meta" title="${metaTitle}">${meta}</div>
+      <div class="file-row${isOldFile(f) ? ' is-old' : ''}" role="listitem" data-id="${id}">
+        <button class="swipe-delete" type="button" tabindex="-1" aria-hidden="true">Delete</button>
+        <div class="file-row-inner">
+          ${fileIconHtml(f, { view:true })}
+          <div class="file-main">
+            <button class="file-name" type="button" data-view="${id}" title="${name}">${name}</button>
+            <div class="file-meta" title="${metaTitle}">${meta}</div>
+          </div>
+          <button class="icon-btn" type="button" data-save="${id}" aria-label="Download ${name}" title="Download">${icon('download')}</button>
+          <button class="icon-btn" type="button" data-file-menu="${id}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button>
         </div>
-        <button class="icon-btn" type="button" data-save="${id}" aria-label="Download ${name}" title="Download">${icon('download')}</button>
-        <button class="icon-btn" type="button" data-file-menu="${id}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button>
       </div>`;
   }).join('');
+  openSwipeRow = null;
+  swipe = null;
   emptyFiles.hidden = currentFiles.length > 0;
   selectBtn.hidden = !currentFiles.length;
   updateSelectionUi();
   updateOldFilesNote();
   updateAttachLink();
+  if (!selecting && currentFiles.some(f => !f.thumb && !thumbTried.has(f.id) && fileKind(f)[0] === 'img')) scheduleThumbBackfill();
 }
 
 // "2 attachments" at the foot of the editor, counting this sheet's files.
@@ -1953,6 +2160,150 @@ document.addEventListener('keydown', e => {
   else if (selecting) setSelecting(false);
 });
 
+// ---- Swipe a file left to delete it (touch), with Undo ----
+// A short swipe reveals Delete; a long one deletes straight away. Either way
+// the file is removed on the server only after the Undo message has gone.
+
+
+function setRowOffset(row, x, dragging = false) {
+  row.classList.toggle('swiping', dragging);
+  row.querySelector('.file-row-inner').style.transform = x ? `translateX(${x}px)` : '';
+}
+
+function closeSwipeRow(row = openSwipeRow) {
+  if (!row) return;
+  row.classList.remove('open');
+  setRowOffset(row, 0);
+  if (row === openSwipeRow) openSwipeRow = null;
+}
+
+fileList.addEventListener('pointerdown', e => {
+  if (selecting || e.pointerType === 'mouse' || !e.isPrimary) return;
+  const inner = e.target.closest('.file-row-inner');
+  if (!inner) return;
+  const row = inner.parentElement;
+  if (openSwipeRow && openSwipeRow !== row) closeSwipeRow();
+  swipe = { row, id: e.pointerId, x0: e.clientX, y0: e.clientY, base: row.classList.contains('open') ? -SWIPE_OPEN : 0, x: 0, active: false };
+});
+
+fileList.addEventListener('pointermove', e => {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  if (!swipe.row.isConnected) {
+    swipe = null;
+    return;
+  }
+  const dx = e.clientX - swipe.x0;
+  const dy = e.clientY - swipe.y0;
+  if (!swipe.active) {
+    // Mostly up or down: that's a scroll, not a swipe.
+    if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+      swipe = null;
+      return;
+    }
+    if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    swipe.active = true;
+    swipe.row.querySelector('.file-row-inner').setPointerCapture?.(e.pointerId);
+  }
+  swipe.x = Math.max(-swipe.row.offsetWidth, Math.min(0, swipe.base + dx));
+  setRowOffset(swipe.row, swipe.x, true);
+});
+
+function endSwipe(e) {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const { row, active, x, base } = swipe;
+  swipe = null;
+  if (!active) return;
+  swipeClickBlockedUntil = Date.now() + 400;
+  if (e.type === 'pointercancel') {
+    setRowOffset(row, base);
+    return;
+  }
+  if (x <= -row.offsetWidth * 0.55) {
+    swipeDelete(row);
+  } else if (x <= -SWIPE_OPEN / 2) {
+    row.classList.add('open');
+    setRowOffset(row, -SWIPE_OPEN);
+    openSwipeRow = row;
+  } else {
+    closeSwipeRow(row);
+  }
+}
+
+fileList.addEventListener('pointerup', endSwipe);
+fileList.addEventListener('pointercancel', endSwipe);
+
+// A swipe ends without opening the file; a tap on an open row just closes it.
+fileList.addEventListener('click', e => {
+  const row = e.target.closest('.file-row');
+  if (!row) return;
+  if (e.target.closest('.swipe-delete')) {
+    e.stopPropagation();
+    swipeDelete(row);
+    return;
+  }
+  if (Date.now() < swipeClickBlockedUntil || row === openSwipeRow) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSwipeRow(row);
+  }
+}, true);
+
+document.addEventListener('pointerdown', e => {
+  if (openSwipeRow && !openSwipeRow.contains(e.target)) closeSwipeRow();
+});
+
+function swipeDelete(row) {
+  const file = fileIndex.get(row.dataset.id);
+  if (!file || pendingDeletes.has(file.id)) return;
+  if (row === openSwipeRow) openSwipeRow = null;
+  row.classList.add('removing');
+  setRowOffset(row, -row.offsetWidth);
+  setTimeout(() => queueFileDelete(file), prefersReducedMotion() ? 0 : 200);
+}
+
+function queueFileDelete(file) {
+  const timer = setTimeout(() => commitFileDelete(file.id), UNDO_MS);
+  pendingDeletes.set(file.id, { file, timer });
+  currentFiles = currentFiles.filter(f => !pendingDeletes.has(f.id));
+  fileIndex = new Map(currentFiles.map(f => [f.id, f]));
+  renderFiles();
+  showToast(`Deleted ${file.name}`, { action: 'Undo', run: () => undoFileDelete(file.id), duration: UNDO_MS });
+}
+
+function undoFileDelete(id) {
+  const entry = pendingDeletes.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingDeletes.delete(id);
+  if (entry.file.sheet === activeSheet) {
+    showCachedFiles(activeSheet);
+    loadFiles(true, activeSheet);
+  }
+  showToast('File kept');
+}
+
+async function commitFileDelete(id, { keepalive = false } = {}) {
+  const entry = pendingDeletes.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  const { file } = entry;
+  const r = await fetch(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}`), { method:'DELETE', keepalive }).catch(() => null);
+  pendingDeletes.delete(id);
+  if (!r?.ok) showToast(`Couldn’t delete ${file.name}`);
+  if (file.sheet === activeSheet) {
+    if (!r?.ok) filesSignature = '';
+    loadFiles(true, file.sheet);
+  } else {
+    filesCache.delete(file.sheet);
+  }
+}
+
+// Leaving the page: finish deletes now rather than leave them undone.
+function flushFileDeletes() {
+  for (const id of [...pendingDeletes.keys()]) commitFileDelete(id, { keepalive:true });
+}
+window.addEventListener('pagehide', flushFileDeletes);
+
 async function toggleKeep(file) {
   try {
     await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
@@ -2000,6 +2351,8 @@ function openFileMenu(trigger, file) {
 fileList.addEventListener('click', async (e) => {
   const viewBtn = e.target.closest('[data-view]');
   if (viewBtn) {
+    // The thumbnail can't hold focus; the name can, so focus returns there.
+    if (viewBtn.classList.contains('file-icon')) viewBtn.closest('.file-row')?.querySelector('.file-name')?.focus({ preventScroll:true });
     const file = fileIndex.get(viewBtn.dataset.view);
     if (file) await openPreview(file);
     return;
@@ -2275,6 +2628,7 @@ async function uploadFile(file, targetSheet, transfer) {
   try {
     const start = await postJson(filesUrl(targetSheet, 'action=start'), { name:file.name, type:file.type, size:file.size });
     id = start.id;
+    const thumbPromise = fileKind({ name: file.name, type: file.type })[0] === 'img' ? makeThumb(file) : Promise.resolve(null);
     const loaded = new Array(start.chunks).fill(0);
     const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
     transfer.update(0);
@@ -2295,6 +2649,8 @@ async function uploadFile(file, targetSheet, transfer) {
     });
 
     transfer.status('Finishing…');
+    const thumb = await thumbPromise;
+    if (thumb) await sendThumb(targetSheet, id, thumb);
     await postJson(filesUrl(targetSheet, `id=${encodeURIComponent(id)}&action=finish`));
     transfer.done(`Uploaded to ${currentSheetName(targetSheet)} · ${bytes(file.size)}`);
     return true;
@@ -2383,8 +2739,12 @@ filesSection.addEventListener('drop', e => {
 
 // Leaving the page: save any pending edit right away.
 // Coming back: jump to whichever sheet was last opened on any device.
+let hiddenAt = 0;
+
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now();
+    flushFileDeletes();
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
@@ -2395,6 +2755,11 @@ document.addEventListener('visibilitychange', async () => {
   if (!appStarted) return;
   checkForChanges();
   connectSync();
+  // Away for a while, changes from other devices may have been missed.
+  if (Date.now() - hiddenAt > 60_000) {
+    for (const id of [...filesCache.keys()]) if (id !== activeSheet) filesCache.delete(id);
+    prefetchSheets();
+  }
   await fetchSheets();
   const sheet = await fetchCurrentSheet();
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
@@ -2693,12 +3058,8 @@ async function startApp() {
   await fetchSheets();
   renderTabs();
   const startSheet = (await fetchCurrentSheet()) || rememberedSheet() || sheets[0].id;
-  if (startSheet !== activeSheet || !hasSheet(activeSheet)) {
-    await switchSheet(startSheet, { remember:false, force:true });
-  } else {
-    await fetchState(activeSheet);
-    await loadFiles(true, activeSheet);
-  }
+  prefetchSheets();
+  await switchSheet(startSheet, { remember:false, force:true });
   appStarted = true;
   connectSync();
   // Every 2 seconds while the relay is down; once a minute as a safety net otherwise.
@@ -2779,6 +3140,11 @@ function onSyncNotice(notice) {
   // Signed out elsewhere: the check gets a 401 and goes back to sign-in.
   if (notice.part === 'session') {
     checkForChanges();
+    return;
+  }
+  const other = /^(text|files)-(\d+)$/.exec(String(notice.part || ''));
+  if (other && Number(other[2]) !== activeSheet) {
+    if (ownRevs.get(notice.part) !== notice.rev) refreshOtherSheet(Number(other[2]), other[1]);
     return;
   }
   const known =

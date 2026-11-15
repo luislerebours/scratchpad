@@ -17,10 +17,12 @@ Pushes to `main` deploy straight to the live site.
 - `netlify/functions/` holds the API, backed by Netlify Blobs:
   - `auth.mjs`: accounts (emailed animal+4-digit code, then a password),
     one-year session cookie renewed on each visit
-  - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet
+  - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
+    and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin.mjs`: admin-only (the `OWNER_EMAIL` account) list of accounts with data
     used, sign-ins and active days
-  - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB)
+  - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
+    plus a small thumbnail for images (made in the browser, `thumb=1`)
   - `images.mjs`: images in the text (chunked original plus a display copy)
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none; the
@@ -50,3 +52,7 @@ Pushes to `main` deploy straight to the live site.
   (clear/delete always confirm in a bottom sheet). The header dot is the
   server connection; the toolbar text is the save state, which shows
   "Saved" only after the server confirms.
+- Icons: `public/assets/icon-source.png` is the 1024px master; the other
+  sizes and the header's see-through `mark.png` are made from it.
+- Files can be swiped left to delete (touch only). The server delete waits
+  5 s for Undo, and happens at once if the page is closed.

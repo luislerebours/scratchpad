@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { overQuota } from '../lib/usage.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
@@ -23,7 +24,8 @@ const publicRecord = (record, sheet) => ({
   type: record.type,
   size: record.size,
   chunks: record.chunks,
-  uploadedAt: record.uploadedAt
+  uploadedAt: record.uploadedAt,
+  kept: Boolean(record.kept)
 });
 
 async function deleteFile({ records, chunks }, record) {
@@ -65,6 +67,8 @@ export default async req => {
     const size = Number(body?.size);
     if (!Number.isInteger(size) || size < 0) return json({ error: 'Invalid size' }, 400);
     if (size > MAX_FILE_BYTES) return json({ error: 'File is over 100 MB' }, 413);
+    const full = await overQuota(auth.user, auth.ns, size);
+    if (full) return json({ error: full, quota: true }, 413);
 
     const record = {
       id: randomUUID(),
@@ -118,8 +122,20 @@ export default async req => {
     const data = await store.chunks.get(chunkKey(id, chunkIndex), { type: 'arrayBuffer' });
     if (!data) return json({ error: 'Chunk missing' }, 404);
     return new Response(data, {
-      headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' }
+      // A file's chunks never change, so a device can keep them: opening the
+      // same file again on that device downloads nothing.
+      headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'private, max-age=31536000, immutable' }
     });
+  }
+
+  // "Keep": the owner still needs this file, so no reminders about its age.
+  if (req.method === 'POST' && action === 'keep') {
+    if (!record.complete) return json({ error: 'Upload not finished' }, 409);
+    const body = await req.json().catch(() => ({}));
+    const updated = { ...record, kept: Boolean(body.kept) };
+    await store.records.setJSON(id, updated);
+    await bumpRev(auth.ns, `files-${sheet}`);
+    return json(publicRecord(updated, sheet));
   }
 
   if (req.method === 'DELETE') {

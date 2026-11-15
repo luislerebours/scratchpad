@@ -1,48 +1,31 @@
-import { MAX_SHEETS, authStore, isAdmin, json, requireUser, userStore } from '../lib/auth.mjs';
+import { authStore, emailKey, isAdmin, json, normalizeEmail, requireUser } from '../lib/auth.mjs';
+import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 // Admin only (the OWNER_EMAIL account): every account, its data use and activity.
 const DAY = 24 * 60 * 60 * 1000;
-
-async function recordsSize(store, sizeOf) {
-  const { blobs } = await store.list();
-  const records = await Promise.all(blobs.map(({ key }) => store.get(key, { type: 'json' }).catch(() => null)));
-  let bytes = 0;
-  let count = 0;
-  for (const record of records) {
-    if (!record?.complete) continue;
-    bytes += sizeOf(record);
-    count++;
-  }
-  return { bytes, count };
-}
-
-// Text, files and images across all of an account's sheets.
-async function usage(ns) {
-  const state = userStore(ns, 'state');
-  const perSheet = await Promise.all(Array.from({ length: MAX_SHEETS }, async (_, i) => {
-    const sheet = i + 1;
-    const [doc, files, images] = await Promise.all([
-      state.get(`sheets/${sheet}`, { type: 'json' }),
-      recordsSize(userStore(ns, 'files', sheet), r => r.size || 0),
-      recordsSize(userStore(ns, 'images', sheet), r => (r.size || 0) + (r.preview?.size || 0))
-    ]);
-    const text = doc ? Buffer.byteLength(doc.text || '') + Buffer.byteLength(doc.html || '') : 0;
-    return { text, files, images };
-  }));
-  return perSheet.reduce((sum, s) => ({
-    bytes: sum.bytes + s.text + s.files.bytes + s.images.bytes,
-    files: sum.files + s.files.count,
-    images: sum.images + s.images.count
-  }), { bytes: 0, files: 0, images: 0 });
-}
 
 export default async req => {
   const auth = await requireUser(req);
   if (auth.error) return auth.error;
   if (!isAdmin(auth.user)) return json({ error: 'Not allowed' }, 403);
+  const store = authStore();
+
+  // Change an account's storage limit: limitGb null = default, 0 = no limit.
+  if (req.method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const key = `users/${emailKey(normalizeEmail(body.email))}`;
+    const user = await store.get(key, { type: 'json' });
+    if (!user) return json({ error: 'No such account' }, 404);
+    const gb = body.limitGb === null || body.limitGb === '' ? null : Number(body.limitGb);
+    if (gb !== null && !(Number.isFinite(gb) && gb >= 0 && gb <= 10_000)) return json({ error: 'Enter a number of GB' }, 400);
+    const quotaBytes = gb === null ? undefined : gb === 0 ? -1 : Math.round(gb * 1024 ** 3);
+    const updated = { ...user, quotaBytes };
+    if (quotaBytes === undefined) delete updated.quotaBytes;
+    await store.setJSON(key, updated);
+    return json({ ok: true, quota: quotaFor(updated) });
+  }
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
 
-  const store = authStore();
   const { blobs } = await store.list();
   const users = (await Promise.all(
     blobs.filter(({ key }) => key.startsWith('users/')).map(({ key }) => store.get(key, { type: 'json' }))
@@ -57,7 +40,8 @@ export default async req => {
     lastLoginAt: user.lastLoginAt || null,
     lastSeenAt: user.lastSeenAt || null,
     activeDays30: user.visitDays ? user.visitDays.filter(day => day > since).length : null,
-    ...(await usage(user.ns))
+    quota: quotaFor(user),
+    ...(await accountUsage(user.ns))
   })));
   accounts.sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
   return json({

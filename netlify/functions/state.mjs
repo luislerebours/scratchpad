@@ -1,4 +1,4 @@
-import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
 const FILE_KINDS = ['files', 'chunks', 'images', 'image-chunks', 'image-previews'];
@@ -18,9 +18,10 @@ async function readSheets(store) {
   return { sheets: Array.from({ length: 5 }, (_, i) => ({ id: i + 1, name: `Sheet ${i + 1}` })), updatedAt: 0 };
 }
 
-async function writeSheets(store, sheets) {
+async function writeSheets(ns, store, sheets) {
   const next = { sheets, updatedAt: Date.now() };
   await store.setJSON('meta/sheets', next);
+  await bumpRev(ns, 'sheets');
   return next;
 }
 
@@ -37,6 +38,16 @@ export default async req => {
   const store = userStore(ns, 'state');
   const meta = url.searchParams.get('meta');
 
+  // The 2-second check: just the change markers for the tabs and one sheet.
+  if (meta === 'poll' && req.method === 'GET') {
+    const sheet = parseSheet(url.searchParams.get('sheet'));
+    if (!sheet) return json({ error: 'Invalid sheet' }, 400);
+    const [sheets, text, files] = await Promise.all(
+      ['sheets', `text-${sheet}`, `files-${sheet}`].map(part => store.get(`rev/${part}`))
+    );
+    return json({ sheets: sheets || '0', text: text || '0', files: files || '0' });
+  }
+
   if (meta === 'sheets') {
     if (req.method === 'GET') return json(await readSheets(store));
     if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -49,7 +60,8 @@ export default async req => {
       const id = Array.from({ length: MAX_SHEETS }, (_, i) => i + 1).find(n => !used.has(n));
       // A freed slot may hold leftovers from a deleted sheet; start it clean.
       await store.delete(`sheets/${id}`);
-      return json({ ...(await writeSheets(store, [...sheets, { id, name: cleanName(body.name) || `Sheet ${id}` }])), added: id });
+      await Promise.all([bumpRev(ns, `text-${id}`), bumpRev(ns, `files-${id}`)]);
+      return json({ ...(await writeSheets(ns, store, [...sheets, { id, name: cleanName(body.name) || `Sheet ${id}` }])), added: id });
     }
 
     const sheet = parseSheet(body.sheet);
@@ -58,14 +70,15 @@ export default async req => {
     if (body.action === 'rename') {
       const name = cleanName(body.name);
       if (!name) return json({ error: 'Enter a name' }, 400);
-      return json(await writeSheets(store, sheets.map(s => (s.id === sheet ? { ...s, name } : s))));
+      return json(await writeSheets(ns, store, sheets.map(s => (s.id === sheet ? { ...s, name } : s))));
     }
 
     if (body.action === 'delete') {
       if (sheets.length === 1) return json({ error: 'You need at least one sheet.' }, 400);
-      const next = await writeSheets(store, sheets.filter(s => s.id !== sheet));
+      const next = await writeSheets(ns, store, sheets.filter(s => s.id !== sheet));
       await store.delete(`sheets/${sheet}`);
       await Promise.all(FILE_KINDS.map(kind => emptyStore(userStore(ns, kind, sheet))));
+      await Promise.all([bumpRev(ns, `text-${sheet}`), bumpRev(ns, `files-${sheet}`)]);
       return json(next);
     }
 
@@ -107,7 +120,8 @@ export default async req => {
     if (html && html.length > MAX_TEXT_CHARS * 2) return json({ error: 'Text too long' }, 413);
     const next = { text: body.text, html, updatedAt: Date.now() };
     await store.setJSON(key, next);
-    return json({ updatedAt: next.updatedAt });
+    const rev = await bumpRev(ns, `text-${sheet}`);
+    return json({ updatedAt: next.updatedAt, rev });
   }
 
   return json({ error: 'Method not allowed' }, 405);

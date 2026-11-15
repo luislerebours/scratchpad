@@ -33,6 +33,14 @@ export function userStore(ns, kind, sheet = null) {
   return getStore({ name, consistency: 'strong' });
 }
 
+// Change markers: every write sets one, so the page's 2-second check reads
+// only these tiny values and fetches text, tabs or files when one changed.
+// Separate keys per part avoid lost updates between devices.
+export function bumpRev(ns, part) {
+  const rev = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+  return userStore(ns, 'state').set(`rev/${part}`, rev).then(() => rev);
+}
+
 export const normalizeEmail = email => String(email || '').trim().toLowerCase();
 
 // The OWNER_EMAIL account is the admin.

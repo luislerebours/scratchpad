@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
@@ -108,6 +108,7 @@ export default async req => {
     if (missing !== -1) return json({ error: `Chunk ${missing} missing` }, 400);
     const done = { ...record, complete: true, uploadedAt: Date.now() };
     await store.records.setJSON(id, done);
+    await bumpRev(auth.ns, `files-${sheet}`);
     return json(publicRecord(done, sheet));
   }
 
@@ -123,6 +124,7 @@ export default async req => {
 
   if (req.method === 'DELETE') {
     await deleteFile(store, record);
+    await bumpRev(auth.ns, `files-${sheet}`);
     return json({ ok: true });
   }
 

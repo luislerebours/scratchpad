@@ -74,6 +74,9 @@ let lastFileRefresh = 0;
 let sheets = [{ id: 1, name: 'Sheet 1' }];
 let sheetsSignature = '';
 let account = null;
+// Last change markers seen; the 2-second check compares against these.
+let revs = {};
+let checking = false;
 let previewObjectUrl = null;
 let previewFile = null;
 let previewLoadedFile = null;
@@ -206,8 +209,10 @@ async function fetchSheets() {
     const r = await fetch(sheetsUrl(), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     applySheets(await r.json());
+    return true;
   } catch {
     // Keep the tabs we have if the list is briefly unavailable.
+    return false;
   }
 }
 
@@ -230,7 +235,7 @@ async function fetchState(sheet = activeSheet) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
 
-    if (requestedSheet !== activeSheet) return;
+    if (requestedSheet !== activeSheet) return false;
 
     const remoteTs = Number(data.updatedAt || 0);
     const recentlyTyping = Date.now() - lastInputAt < 850;
@@ -246,10 +251,15 @@ async function fetchState(sheet = activeSheet) {
       renderEditor(remoteHtml);
       localUpdatedAt = remoteTs;
       timestampEl.textContent = formatDate(localUpdatedAt);
+    } else if (remoteTs > localUpdatedAt) {
+      // Mid-edit: not applied yet, so the next check fetches it again.
+      return false;
     }
     setStatus('live', 'Live');
+    return true;
   } catch (err) {
     if (requestedSheet === activeSheet) setStatus('error', 'Offline');
+    return false;
   }
 }
 
@@ -268,6 +278,8 @@ async function saveState(sheet = activeSheet) {
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     if (targetSheet === activeSheet) {
+      // Our own save: no need to fetch it back on the next check.
+      if (data.rev && !saveTimer) revs.text = data.rev;
       localUpdatedAt = Number(data.updatedAt || Date.now());
       timestampEl.textContent = formatDate(localUpdatedAt);
       setStatus('live', 'Saved');
@@ -828,6 +840,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
 
   pad.contentEditable = 'false';
   activeSheet = nextSheet;
+  revs = { sheets: revs.sheets };
   localUpdatedAt = 0;
   lastInputAt = 0;
   lastFileRefresh = 0;
@@ -1072,25 +1085,27 @@ function createTransfer(name, verb, total, items = null) {
 
 async function loadFiles(force = false, sheet = activeSheet) {
   const requestedSheet = validSheet(sheet);
-  if (!force && requestedSheet === activeSheet && Date.now() - lastFileRefresh < 1800) return;
+  if (!force && requestedSheet === activeSheet && Date.now() - lastFileRefresh < 1800) return true;
   try {
     const r = await fetch(filesUrl(requestedSheet), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
-    if (requestedSheet !== activeSheet) return;
+    if (requestedSheet !== activeSheet) return false;
 
     const files = Array.isArray(data.files) ? data.files : [];
     lastFileRefresh = Date.now();
     const signature = JSON.stringify(files);
-    if (signature === filesSignature) return;
+    if (signature === filesSignature) return true;
     filesSignature = signature;
     currentFiles = files.map(f => ({ ...f, sheet: requestedSheet }));
     fileIndex = new Map(currentFiles.map(f => [f.id, f]));
     for (const id of selectedIds) if (!fileIndex.has(id)) selectedIds.delete(id);
     if (!currentFiles.length) setSelecting(false);
     renderFiles();
+    return true;
   } catch (err) {
     // Keep text sync working even if file listing fails.
+    return false;
   }
 }
 
@@ -1842,6 +1857,7 @@ document.addEventListener('visibilitychange', async () => {
     return;
   }
   if (!appStarted) return;
+  checkForChanges();
   await fetchSheets();
   const sheet = await fetchCurrentSheet();
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
@@ -2115,12 +2131,32 @@ async function startApp() {
     await loadFiles(true, activeSheet);
   }
   appStarted = true;
+  setInterval(checkForChanges, POLL_MS);
+}
 
-  setInterval(() => {
-    fetchState(activeSheet);
-    fetchSheets();
-    loadFiles(false, activeSheet);
-  }, POLL_MS);
+// One small request every 2 seconds while Scratch Pad is on screen; the
+// text, tabs or file list are fetched only when their marker changed.
+async function checkForChanges() {
+  if (!appStarted || checking || document.visibilityState !== 'visible') return;
+  checking = true;
+  const sheet = activeSheet;
+  try {
+    const r = await fetch(`${API_STATE}?meta=poll&sheet=${sheet}`, { cache:'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const next = await r.json();
+    if (sheet !== activeSheet) return;
+    const work = [];
+    if (next.sheets !== revs.sheets) work.push(fetchSheets().then(ok => { if (ok) revs.sheets = next.sheets; }));
+    // Mid-save the marker may already be our own save's; compare next time.
+    if (next.text !== revs.text && !saving) work.push(fetchState(sheet).then(ok => { if (ok && sheet === activeSheet) revs.text = next.text; }));
+    if (next.files !== revs.files) work.push(loadFiles(true, sheet).then(ok => { if (ok && sheet === activeSheet) revs.files = next.files; }));
+    await Promise.all(work);
+    if (!work.length && !saveTimer && !saving) setStatus('live', 'Live');
+  } catch {
+    setStatus('error', 'Offline');
+  } finally {
+    checking = false;
+  }
 }
 
 // Checking who is signed in also renews the one-year cookie.

@@ -30,4 +30,13 @@ Pushes to `main` deploy straight to the live site.
   stores from before accounts existed.
 - Email goes through Resend: `RESEND_API_KEY` and `MAIL_FROM` env vars on Netlify.
   Locally, `SCRATCHPAD_DEV_MAIL=1` logs codes instead of sending them.
+- Sync is real-time: every write sets a change marker (`bumpRev`) and posts a
+  signed notice to the relay in `sync-worker/` (a Cloudflare Worker with one
+  Durable Object room per account, at `SYNC_URL`). Devices hold a WebSocket to
+  their room and fetch only what changed. Netlify signs passes and notices with
+  an Ed25519 key kept in Blobs; the Worker has only the public key (`PUBLIC_KEY`).
+  `netlify/edge-functions/check.js` (`/api/check`) is the safety-net check: once
+  a minute, on return to the page, and every 2 s while the relay is unreachable.
+  Without `SYNC_URL`, devices just use the 2-second check.
+- Deploy the relay from `sync-worker/` with `npx wrangler deploy`.
 - Stored html is sanitized on every load and save.

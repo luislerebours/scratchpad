@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
-  allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json,
+  allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
   makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify
 } from '../lib/auth.mjs';
 
@@ -84,6 +84,8 @@ export default async (req, context) => {
     if (auth.error) return auth.error;
     const ek = emailKey(auth.user.email);
     await store.setJSON(`users/${ek}`, { ...auth.user, version: auth.user.version + 1 });
+    // Open devices re-check right away and find themselves signed out.
+    await notifySync(auth.user.ns, 'session', String(Date.now()));
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 
@@ -160,6 +162,7 @@ export default async (req, context) => {
     }
     user = withSignIn(user);
     await store.setJSON(`users/${pass.ek}`, user);
+    if (existing) await notifySync(user.ns, 'session', String(Date.now()));
     return signedIn(user, { created: !existing });
   }
 

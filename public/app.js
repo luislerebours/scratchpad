@@ -2,6 +2,10 @@ const API_STATE = '/.netlify/functions/state';
 const API_FILES = '/.netlify/functions/files';
 const API_IMAGES = '/.netlify/functions/images';
 const API_AUTH = '/.netlify/functions/auth';
+const API_SYNC = '/.netlify/functions/sync';
+const API_CHECK = '/api/check';
+const SAFETY_CHECK_MS = 60_000;
+const PING_MS = 25_000;
 const POLL_MS = 2000;
 const SAVE_DELAY_MS = 450;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -77,6 +81,15 @@ let account = null;
 // Last change markers seen; the 2-second check compares against these.
 let revs = {};
 let checking = false;
+let lastCheckAt = 0;
+let retryCheckTimer = null;
+// Live connection to the relay; while it's healthy the 2-second check is off.
+let socket = null;
+let socketHealthy = false;
+let reconnectDelay = 1000;
+let reconnectTimer = null;
+let pingTimer = null;
+let pongTimer = null;
 let previewObjectUrl = null;
 let previewFile = null;
 let previewLoadedFile = null;
@@ -1858,6 +1871,7 @@ document.addEventListener('visibilitychange', async () => {
   }
   if (!appStarted) return;
   checkForChanges();
+  connectSync();
   await fetchSheets();
   const sheet = await fetchCurrentSheet();
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
@@ -2131,31 +2145,136 @@ async function startApp() {
     await loadFiles(true, activeSheet);
   }
   appStarted = true;
-  setInterval(checkForChanges, POLL_MS);
+  connectSync();
+  // Every 2 seconds while the relay is down; once a minute as a safety net otherwise.
+  setInterval(() => {
+    if (!socketHealthy || Date.now() - lastCheckAt > SAFETY_CHECK_MS) checkForChanges();
+  }, POLL_MS);
+}
+
+// ---- Real-time sync: the relay tells this device when something changed ----
+
+async function connectSync() {
+  if (!appStarted || socket || reconnectTimer || document.visibilityState !== 'visible') return;
+  try {
+    const r = await fetch(`${API_SYNC}?action=ticket`, { cache:'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { url, ticket } = await r.json();
+    if (!url) return; // Relay not set up: the 2-second check carries on.
+    const ws = new WebSocket(`${url}?ticket=${encodeURIComponent(ticket)}`);
+    socket = ws;
+    ws.onopen = () => {
+      if (socket !== ws) return;
+      socketHealthy = true;
+      reconnectDelay = 1000;
+      startPings(ws);
+      checkForChanges(); // Catch anything missed while disconnected.
+    };
+    ws.onmessage = e => {
+      if (e.data === 'pong') {
+        clearTimeout(pongTimer);
+        return;
+      }
+      try {
+        onSyncNotice(JSON.parse(e.data));
+      } catch {
+        // Ignore anything unexpected.
+      }
+    };
+    ws.onclose = () => dropSocket(ws);
+    ws.onerror = () => dropSocket(ws);
+  } catch {
+    scheduleReconnect();
+  }
+}
+
+function dropSocket(ws) {
+  if (socket !== ws) return;
+  socket = null;
+  socketHealthy = false;
+  clearInterval(pingTimer);
+  clearTimeout(pongTimer);
+  try { ws.close(); } catch { /* already closed */ }
+  scheduleReconnect();
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectSync();
+  }, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+}
+
+// A connection can die silently (sleeping phone, changed network): no pong
+// within 10 seconds means reconnect.
+function startPings(ws) {
+  clearInterval(pingTimer);
+  pingTimer = setInterval(() => {
+    if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send('ping');
+    clearTimeout(pongTimer);
+    pongTimer = setTimeout(() => dropSocket(ws), 10_000);
+  }, PING_MS);
+}
+
+function onSyncNotice(notice) {
+  if (notice?.type !== 'changed') return;
+  // Signed out elsewhere: the check gets a 401 and goes back to sign-in.
+  if (notice.part === 'session') {
+    checkForChanges();
+    return;
+  }
+  const known =
+    notice.part === 'sheets' ? revs.sheets :
+    notice.part === `text-${activeSheet}` ? revs.text :
+    notice.part === `files-${activeSheet}` ? revs.files :
+    undefined;
+  if (notice.part !== 'sheets' && known === undefined && !notice.part.endsWith(`-${activeSheet}`)) return;
+  if (notice.rev !== known) checkForChanges();
 }
 
 // One small request every 2 seconds while Scratch Pad is on screen; the
 // text, tabs or file list are fetched only when their marker changed.
 async function checkForChanges() {
-  if (!appStarted || checking || document.visibilityState !== 'visible') return;
+  if (!appStarted || document.visibilityState !== 'visible') return;
+  if (checking) {
+    // A notice arrived mid-check: look again right after.
+    clearTimeout(retryCheckTimer);
+    retryCheckTimer = setTimeout(checkForChanges, 300);
+    return;
+  }
   checking = true;
+  lastCheckAt = Date.now();
   const sheet = activeSheet;
+  let behind = false;
   try {
-    const r = await fetch(`${API_STATE}?meta=poll&sheet=${sheet}`, { cache:'no-store' });
+    const r = await fetch(`${API_CHECK}?sheet=${sheet}`, { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const next = await r.json();
     if (sheet !== activeSheet) return;
     const work = [];
-    if (next.sheets !== revs.sheets) work.push(fetchSheets().then(ok => { if (ok) revs.sheets = next.sheets; }));
+    const settle = (ok, apply) => { if (ok) apply(); else behind = true; };
+    if (next.sheets !== revs.sheets) work.push(fetchSheets().then(ok => settle(ok, () => { revs.sheets = next.sheets; })));
     // Mid-save the marker may already be our own save's; compare next time.
-    if (next.text !== revs.text && !saving) work.push(fetchState(sheet).then(ok => { if (ok && sheet === activeSheet) revs.text = next.text; }));
-    if (next.files !== revs.files) work.push(loadFiles(true, sheet).then(ok => { if (ok && sheet === activeSheet) revs.files = next.files; }));
+    if (next.text !== revs.text) {
+      if (saving) behind = true;
+      else work.push(fetchState(sheet).then(ok => settle(ok && sheet === activeSheet, () => { revs.text = next.text; })));
+    }
+    if (next.files !== revs.files) work.push(loadFiles(true, sheet).then(ok => settle(ok && sheet === activeSheet, () => { revs.files = next.files; })));
     await Promise.all(work);
     if (!work.length && !saveTimer && !saving) setStatus('live', 'Live');
   } catch {
+    behind = true;
     setStatus('error', 'Offline');
   } finally {
     checking = false;
+    // Skipped mid-edit or failed: try again shortly rather than waiting a minute.
+    if (behind) {
+      clearTimeout(retryCheckTimer);
+      retryCheckTimer = setTimeout(checkForChanges, POLL_MS);
+    }
   }
 }
 

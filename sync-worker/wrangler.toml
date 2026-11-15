@@ -1,0 +1,19 @@
+# Real-time relay for Scratch Pad (see src/index.js).
+name = "scratchpad-sync"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+routes = [{ pattern = "sync.sector809labs.com", custom_domain = true }]
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed Durable Objects work on the Workers free plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[vars]
+# Netlify's sync public key: GET https://scratchpadx.netlify.app/.netlify/functions/sync?action=key
+PUBLIC_KEY = ""

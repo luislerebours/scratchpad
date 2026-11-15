@@ -1,5 +1,8 @@
 import { getStore } from '@netlify/blobs';
-import { createHash, createHmac, randomBytes, randomInt, scrypt, timingSafeEqual } from 'node:crypto';
+import {
+  createHash, createHmac, createPrivateKey, generateKeyPairSync, randomBytes, randomInt, scrypt,
+  sign as signBytes, timingSafeEqual
+} from 'node:crypto';
 import { promisify } from 'node:util';
 
 // Shared by the functions: accounts, sessions and where each account's data lives.
@@ -36,9 +39,75 @@ export function userStore(ns, kind, sheet = null) {
 // Change markers: every write sets one, so the page's 2-second check reads
 // only these tiny values and fetches text, tabs or files when one changed.
 // Separate keys per part avoid lost updates between devices.
-export function bumpRev(ns, part) {
+export async function bumpRev(ns, part) {
   const rev = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
-  return userStore(ns, 'state').set(`rev/${part}`, rev).then(() => rev);
+  await userStore(ns, 'state').set(`rev/${part}`, rev);
+  await notifySync(ns, part, rev);
+  return rev;
+}
+
+// ---- Real-time sync relay (a Cloudflare Worker at SYNC_URL) ----
+// Netlify signs connection passes and change notices with an Ed25519 key
+// made once and kept in Blobs; the relay holds only the public half.
+
+export const syncRoom = ns => ns || 'owner';
+
+let syncKeysPromise = null;
+function syncKeys() {
+  syncKeysPromise ??= (async () => {
+    const store = authStore();
+    let keys = await store.get('sync-keypair', { type: 'json' });
+    if (!keys) {
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+      await store.setJSON('sync-keypair', {
+        privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+        // The raw 32-byte key is the end of the SPKI encoding.
+        publicKey: publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64')
+      }, { onlyIfNew: true });
+      keys = await store.get('sync-keypair', { type: 'json' });
+    }
+    if (!keys) throw new Error('No sync key');
+    return {
+      privateKey: createPrivateKey({ key: Buffer.from(keys.privateKey, 'base64'), format: 'der', type: 'pkcs8' }),
+      publicKey: keys.publicKey
+    };
+  })().catch(err => {
+    syncKeysPromise = null;
+    throw err;
+  });
+  return syncKeysPromise;
+}
+
+export async function syncPublicKey() {
+  return (await syncKeys()).publicKey;
+}
+
+export async function signForSync(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = signBytes(null, Buffer.from(body), (await syncKeys()).privateKey).toString('base64url');
+  return `${body}.${sig}`;
+}
+
+const syncUrl = () => (env('SYNC_URL') || '').replace(/\/$/, '');
+
+// Tells the account's open devices that a part changed. Never fails the write:
+// devices also check on their own as a safety net.
+export async function notifySync(ns, part, rev) {
+  const base = syncUrl();
+  if (!base) return;
+  try {
+    const token = await signForSync({ k: 'notify', r: syncRoom(ns), part, rev, exp: Date.now() + 60_000 });
+    await fetch(`${base}/notify`, { method: 'POST', body: token, signal: AbortSignal.timeout(1500) });
+  } catch (err) {
+    console.error('Sync notify failed:', err.message);
+  }
+}
+
+export async function syncTicket(ns) {
+  const base = syncUrl();
+  if (!base) return null;
+  const ticket = await signForSync({ k: 'ticket', r: syncRoom(ns), exp: Date.now() + 5 * 60_000 });
+  return { url: `${base.replace(/^http/, 'ws')}/connect`, ticket };
 }
 
 export const normalizeEmail = email => String(email || '').trim().toLowerCase();

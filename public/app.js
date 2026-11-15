@@ -20,6 +20,7 @@ const statusEl = document.querySelector('#status');
 const timestampEl = document.querySelector('#timestamp');
 const copyBtn = document.querySelector('#copyBtn');
 const clearBtn = document.querySelector('#clearBtn');
+const toolbarDeleteBtn = document.querySelector('#toolbarDeleteBtn');
 const fileInput = document.querySelector('#fileInput');
 const fileList = document.querySelector('#fileList');
 const transferList = document.querySelector('#transferList');
@@ -185,6 +186,7 @@ function renderTabs() {
     return tab;
   }));
   addSheetBtn.hidden = sheets.length >= MAX_SHEETS;
+  toolbarDeleteBtn.hidden = sheets.length <= 1;
   filesSheetLabel.textContent = currentSheetName();
 }
 
@@ -875,7 +877,8 @@ addSheetBtn.addEventListener('click', async () => {
   }
 });
 
-deleteSheetBtn.addEventListener('click', () => {
+// From the rename dialog or the toolbar next to Copy and Clear.
+function confirmDeleteSheet() {
   const sheet = activeSheet;
   const name = currentSheetName(sheet);
   closeRenameModal();
@@ -904,7 +907,10 @@ deleteSheetBtn.addEventListener('click', () => {
       }
     ]
   });
-});
+}
+
+deleteSheetBtn.addEventListener('click', confirmDeleteSheet);
+toolbarDeleteBtn.addEventListener('click', confirmDeleteSheet);
 
 function openRenameModal() {
   renameInput.value = currentSheetName();

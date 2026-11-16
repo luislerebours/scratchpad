@@ -3,6 +3,7 @@ import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/aut
 import { isSealed } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { overQuota } from '../lib/usage.mjs';
+import { withErrors } from '../lib/errors.mjs';
 
 // Images pasted into a sheet's text. Netlify functions take about 4.5 MB per
 // request, so each image is kept twice: the untouched original in 4 MB chunks
@@ -68,7 +69,7 @@ async function removeUnusedImages(ns, sheet) {
   }));
 }
 
-export default async (req, context) => {
+export default withErrors('images', async (req, context) => {
   const auth = await requireUser(req);
   if (auth.error) return auth.error;
   const { ns } = auth;
@@ -192,4 +193,4 @@ export default async (req, context) => {
   const data = await store.chunks.get(chunkKey(id, 0), { type: 'arrayBuffer' });
   if (!data) return json({ error: 'Image missing' }, 404);
   return new Response(data, { headers: imageHeaders(record.enc ? 'application/octet-stream' : record.type, record.enc ? record.type : null) });
-};
+});

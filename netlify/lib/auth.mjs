@@ -110,6 +110,8 @@ export async function syncTicket(ns) {
   return { url: `${base.replace(/^http/, 'ws')}/connect`, ticket };
 }
 
+export const DEACTIVATED = 'This account is deactivated. Contact support@sector809labs.com.';
+
 export const normalizeEmail = email => String(email || '').trim().toLowerCase();
 
 // The OWNER_EMAIL account is the admin.
@@ -235,7 +237,8 @@ export async function requireUser(req) {
   const session = await verify(readCookie(req));
   if (!session || session.t !== 's') return { error: json({ error: 'Sign in required' }, 401) };
   const user = await authStore().get(`users/${session.ek}`, { type: 'json' });
-  if (!user || user.version !== session.v) {
+  // A deactivated account (admin dashboard) can't use its sessions.
+  if (!user || user.version !== session.v || user.disabledAt) {
     return { error: json({ error: 'Sign in required' }, 401, { 'Set-Cookie': clearedCookie() }) };
   }
   return { user, ns: user.ns };

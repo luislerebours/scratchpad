@@ -6,6 +6,7 @@ import { cleanName, isSealed, isWrappedKey, readSheets } from '../lib/sheets.mjs
 import { liveShares } from '../lib/shares.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
+import { withErrors } from '../lib/errors.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
 
@@ -16,7 +17,7 @@ async function writeSheets(ns, store, sheets) {
   return next;
 }
 
-export default async req => {
+export default withErrors('state', async req => {
   const auth = await requireUser(req);
   if (auth.error) return auth.error;
   const { ns } = auth;
@@ -262,4 +263,4 @@ export default async req => {
   }
 
   return json({ error: 'Method not allowed' }, 405);
-};
+});

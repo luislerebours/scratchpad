@@ -27,8 +27,9 @@ Pushes to `main` deploy straight to the live site.
     one-year session cookie renewed on each visit
   - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
-  - `admin.mjs`: admin-only (the `OWNER_EMAIL` account) list of accounts with data
-    used, sign-ins and active days
+  - `admin-api.mjs`: the admin dashboard's API (see "Admin dashboard" below)
+  - `admin.mjs`: LEGACY in-app admin (the `OWNER_EMAIL` account). Being retired:
+    don't add to it
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
     plus a small thumbnail for images (made in the browser, `thumb=1`)
   - `images.mjs`: images in the text (chunked original plus a display copy)
@@ -65,6 +66,29 @@ Pushes to `main` deploy straight to the live site.
   as the sign-in secret; cancels an active Stripe subscription first (stops if
   that fails), then erases every sheet, file, image, share link and the account;
   other devices are signed out. The owner account can't be deleted this way.
+- Admin dashboard at `/admin` (`public/admin.html`/`admin.js`/`admin.css`,
+  `netlify/functions/admin-api.mjs`, `netlify/lib/admin.mjs`). Admins are their
+  own records in the `scratchpad-admin` store, never ScrapSheet accounts: email,
+  scrypt password (12+ chars), TOTP authenticator (RFC 6238, replay-protected)
+  and ten one-time recovery codes (hashed). Cookie `ss_admin` (12 h, HttpOnly,
+  SameSite=Strict); `requireAdmin` checks origin, cookie, admin active and
+  session version on every request. Admin rights never touch plans: Free/Pro
+  come only from the account. The first admin enrolls with the
+  `ADMIN_SETUP_TOKEN` env var (works once); more admins by one-time invite link.
+  Tabs: Overview, Accounts (plan, storage limit, refresh from Stripe, sign out
+  devices, deactivate/reactivate), Errors, Audit log, Admins, Settings
+  (sign-ups open/closed, which services are set up). Every admin action and
+  sign-in (also failed ones) goes to the audit log (`audit/…`). Admins never see
+  content: only emails, plans, billing status, sizes, counts and activity.
+- Deactivating an account (`disabledAt` on the user) keeps all its data: it bumps
+  `version` (every session ends), stops sign-in, codes and password resets, and
+  turns its share links off. `requireUser` and `/api/check` refuse it.
+- Errors: every function is wrapped in `withErrors` (`netlify/lib/errors.mjs`):
+  thrown errors and 5xx responses are kept 30 days in `scratchpad-admin`
+  (`errors/…`): function, method, path, action, status, message. Never bodies,
+  query values or cookies.
+- New features support the standard user experience and the admin dashboard
+  only: no special cases for particular accounts.
 - Netlify functions take about 4.5 MB per request, so anything larger travels
   in chunks.
 - `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,

@@ -576,6 +576,14 @@ body.dragging-files .files.drag-active
 .admin-facts b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .admin-limit { min-height: 36px; margin-top: 4px; font-size: .8125rem; }
 .admin-actions { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+
+/* Delete account */
+.delete-modal { width: min(460px, 100%); }
+.delete-account-body { display: grid; gap: 4px; padding: 18px 20px 20px; }
+.delete-account-text { margin-bottom: 12px; color: var(--muted); font-size: .9375rem; line-height: 1.5; }
+.delete-account-text strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.delete-account-body .rename-input { margin-top: 6px; }
+.delete-account-body .auth-error { min-height: 1.2em; margin: 8px 0 4px; }
 .admin-note { margin-top: 14px; color: var(--faint); font-size: .8125rem; }
 
 /* ---------- Sign-in ---------- */

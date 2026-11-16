@@ -5,6 +5,7 @@ import {
 } from '../lib/auth.mjs';
 import { wipeSheet } from '../lib/files.mjs';
 import { planInfo } from '../lib/plans.mjs';
+import { customerKey, stripe, stripeReady } from '../lib/stripe.mjs';
 import { readShares, sharesStore } from '../lib/shares.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
@@ -187,6 +188,38 @@ export default async (req, context) => {
   }
 
   // Everything from before encryption is now locked.
+  // Delete the account and everything in it. Needs the password (as the sign-in
+  // secret); a paid Pro subscription is cancelled first so it never bills again.
+  if (action === 'delete-account') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const { user, ns } = auth;
+    if (isAdmin(user) || !ns) return json({ error: 'The owner account can’t be deleted from here.' }, 403);
+    const ek = emailKey(user.email);
+    if (!(await allow(`delete-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
+    // 400, not 401: a 401 would send the page back to sign-in.
+    if (!(await checkSecret(user, body))) return json({ error: 'That password isn’t right.' }, 400);
+    const sub = user.stripe?.subscription;
+    if (sub && !['canceled', 'incomplete_expired'].includes(user.stripe.status)) {
+      if (!stripeReady()) return json({ error: 'Couldn’t cancel your Pro subscription. Try again later, or email support.' }, 503);
+      try {
+        await stripe('DELETE', `subscriptions/${sub}`);
+      } catch (err) {
+        // Already gone at Stripe is fine; anything else stops the deletion so nobody keeps paying for nothing.
+        if (err.status !== 404) {
+          console.error('Cancel on delete', err.status, err.message);
+          return json({ error: 'Couldn’t cancel your Pro subscription. Try again in a minute, or email support.' }, 502);
+        }
+      }
+    }
+    await deleteAccountData(ns);
+    await Promise.all([`users/${ek}`, `codes/${ek}`, `pending/${ek}`].map(key => store.delete(key)));
+    if (user.stripe?.customer) await store.delete(customerKey(user.stripe.customer));
+    // Other devices check in and find the account gone.
+    await notifySync(ns, 'session', String(Date.now()));
+    return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
+  }
+
   if (action === 'migrated') {
     const auth = await requireUser(req);
     if (auth.error) return auth.error;

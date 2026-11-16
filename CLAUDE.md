@@ -61,6 +61,10 @@ Pushes to `main` deploy straight to the live site.
   keep Pro). REST via fetch, API version 2026-04-22.dahlia. Env:
   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`; `NEW_ACCOUNT_PLAN=pro` is for
   local tests only.
+- Delete account (account menu, `auth?action=delete-account`): needs the password
+  as the sign-in secret; cancels an active Stripe subscription first (stops if
+  that fails), then erases every sheet, file, image, share link and the account;
+  other devices are signed out. The owner account can't be deleted this way.
 - Netlify functions take about 4.5 MB per request, so anything larger travels
   in chunks.
 - `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,

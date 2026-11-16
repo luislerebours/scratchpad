@@ -52,6 +52,9 @@ const selectAllBox = document.querySelector('#selectAllBox');
 const bulkBar = document.querySelector('#bulkBar');
 const bulkCount = document.querySelector('#bulkCount');
 const bulkSaveBtn = document.querySelector('#bulkSaveBtn');
+const bulkShareBtn = document.querySelector('#bulkShareBtn');
+// Share sends the files themselves to the system share menu, where there is one.
+bulkShareBtn.hidden = bulkShareBtn.nextElementSibling.hidden = typeof navigator.share !== 'function';
 const bulkDeleteBtn = document.querySelector('#bulkDeleteBtn');
 const sheetModal = document.querySelector('#sheetModal');
 const sheetTitle = document.querySelector('#sheetTitle');
@@ -2089,7 +2092,7 @@ function updateSelectionUi() {
   const all = currentFiles.length > 0 && files.length === currentFiles.length;
   selectAllBox.checked = all;
   bulkCount.textContent = `${files.length} selected`;
-  bulkSaveBtn.disabled = bulkDeleteBtn.disabled = !files.length;
+  bulkSaveBtn.disabled = bulkShareBtn.disabled = bulkDeleteBtn.disabled = !files.length;
   bulkDeleteBtn.setAttribute('aria-label', files.length ? `Delete ${files.length} selected file${files.length === 1 ? '' : 's'}` : 'Delete selected files');
 }
 
@@ -2753,6 +2756,68 @@ bulkSaveBtn.addEventListener('click', () => {
       { label: 'Cancel', kind: 'secondary', full: true }
     ]
   });
+});
+
+// The selected files, unlocked here, then handed to the system share menu
+// (Messages, Mail, AirDrop, WhatsApp…). Phones only open it right after a tap,
+// so if fetching took too long the row offers a Share button.
+async function shareSelected(files) {
+  const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
+  const count = `${files.length} file${files.length === 1 ? '' : 's'}`;
+  const transfer = createTransfer(`Sharing ${count}`, 'Preparing', total, files.map(f => f.name));
+  transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
+  const prepared = [];
+  let finishedBytes = 0;
+  try {
+    for (const [i, file] of files.entries()) {
+      transfer.item(i, '0%');
+      prepared.push(await fetchSharedFile(file, {
+        signal: transfer.signal,
+        onProgress: loaded => {
+          transfer.update(finishedBytes + loaded);
+          transfer.item(i, `${file.size ? Math.floor((loaded / file.size) * 100) : 100}%`);
+        }
+      }));
+      finishedBytes += file.size || 0;
+      transfer.item(i, 'Done', 'done');
+    }
+  } catch (err) {
+    transfer.fail(err?.name === 'AbortError' ? 'Cancelled' : 'Couldn’t get the files. Try again.');
+    return;
+  }
+  if (navigator.canShare && !navigator.canShare({ files: prepared })) {
+    transfer.fail(files.length > 1 ? 'This device can’t share these files together. Try fewer, or Download.' : 'This device can’t share this file. Try Download.');
+    return;
+  }
+  const open = async () => {
+    try {
+      await navigator.share({ files: prepared });
+      return true;
+    } catch (err) {
+      if (err?.name === 'AbortError') return true; // closed without sharing
+      throw err;
+    }
+  };
+  try {
+    await open();
+    transfer.done(`${count} shared`);
+  } catch {
+    transfer.ready(`${count} ready`, 'Share', async () => {
+      try {
+        return await open();
+      } catch {
+        showToast('Couldn’t open Share');
+        return false;
+      }
+    });
+  }
+}
+
+bulkShareBtn.addEventListener('click', () => {
+  const files = selectedFiles();
+  if (!files.length) return;
+  setSelecting(false);
+  shareSelected(files);
 });
 
 bulkDeleteBtn.addEventListener('click', () => {

@@ -272,7 +272,11 @@ async function prefetchSheets() {
     const r = await fetch(`${API_STATE}?meta=all`, { cache:'no-store' });
     if (!r.ok) return;
     const data = await r.json();
-    for (const s of data.status || []) sheetStatus.set(Number(s.id), { content: Boolean(s.content), files: Number(s.files) || 0 });
+    for (const s of data.status || []) {
+      const id = Number(s.id);
+      sheetStatus.set(id, { content: Boolean(s.content), files: Number(s.files) || 0 });
+      if (id !== activeSheet && Array.isArray(s.fileList)) filesCache.set(id, s.fileList);
+    }
     for (const s of data.sheets || []) {
       const html = typeof s.html === 'string' ? s.html : textToHtml(s.text || '');
       cacheSheet(Number(s.id), html, Number(s.updatedAt || 0));
@@ -371,6 +375,7 @@ const ICON_PATHS = {
   pin: '<path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
   lines: '<path d="M5 7h14M5 12h14M5 17h14"/>',
+  restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4v4.5h4.5"/>',
   clip: '<path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/>',
   landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5L5 20"/>',
@@ -383,17 +388,25 @@ const icon = name => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${IC
 
 // ---- Returning focus after a dialog closes ----
 
-let returnFocusTo = null;
+// Each dialog keeps its own place to return to, so one opened on top of
+// another (a confirmation over Recently Deleted) doesn't lose the first.
+const returnFocusTo = new Map();
 
-function rememberFocus() {
+function rememberFocus(dialog) {
   const el = document.activeElement;
-  if (el && el !== document.body) returnFocusTo = el;
+  returnFocusTo.set(dialog, el && el !== document.body ? el : null);
 }
 
-function restoreFocus() {
-  const el = returnFocusTo;
-  returnFocusTo = null;
+function restoreFocus(dialog) {
+  const el = returnFocusTo.get(dialog);
+  returnFocusTo.delete(dialog);
   if (el?.isConnected) el.focus({ preventScroll:true });
+}
+
+// Pages behind a dialog don't scroll while any dialog is open.
+function updateModalOpen() {
+  const open = [...document.querySelectorAll('.modal-backdrop')].some(el => !el.hidden);
+  document.body.classList.toggle('modal-open', open);
 }
 
 // ---- Menus (sheet, file and account actions) ----
@@ -622,7 +635,7 @@ async function postSheets(body) {
     body:JSON.stringify(body)
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Something went wrong');
+  if (!r.ok) throw Object.assign(new Error(data.error || 'Something went wrong'), { data });
   applySheets(data);
   return data;
 }
@@ -1347,10 +1360,12 @@ sheetTabsEl.addEventListener('dblclick', e => {
   else openRenameModal();
 });
 
-addSheetBtn.addEventListener('click', async () => {
+addSheetBtn.addEventListener('click', () => addSheet());
+
+async function addSheet(purge) {
   addSheetBtn.disabled = true;
   try {
-    const data = await postSheets({ action:'add' });
+    const data = await postSheets(purge ? { action:'add', purge } : { action:'add' });
     // A new sheet starts empty: no need to wait for it.
     forgetSheet(data.added);
     cacheSheet(data.added, '', 0);
@@ -1358,11 +1373,23 @@ addSheetBtn.addEventListener('click', async () => {
     await switchSheet(data.added);
     openRenameModal();
   } catch (err) {
-    showToast(err.message || 'Could not add a sheet');
+    const held = err.data?.purge;
+    if (held) {
+      openSheet({
+        title: 'Make room for a new sheet?',
+        text: `All 10 sheets are in use, counting ${held.name} in Recently Deleted. To add a sheet, ${held.name} has to be deleted for good. This can’t be undone.`,
+        actions: [
+          { label: 'Cancel', kind: 'secondary' },
+          { label: `Delete ${held.name} for good`, kind: 'danger-solid', run: () => addSheet(held.id) }
+        ]
+      });
+    } else {
+      showToast(err.message || 'Could not add a sheet');
+    }
   } finally {
     addSheetBtn.disabled = false;
   }
-});
+}
 
 // From the sheet menu (••• in the editor toolbar).
 function confirmDeleteSheet() {
@@ -1375,7 +1402,7 @@ function confirmDeleteSheet() {
   }
   openSheet({
     title: `Delete ${name}?`,
-    text: 'Its text, images and files are deleted on all your devices. This can’t be undone.',
+    text: 'It moves to Recently Deleted with its text and files, on all your devices. You can restore it for 30 days.',
     actions: [
       { label: 'Cancel', kind: 'secondary' },
       {
@@ -1387,7 +1414,7 @@ function confirmDeleteSheet() {
           try {
             await postSheets({ action:'delete', sheet });
             forgetSheet(sheet);
-            showToast(`Deleted ${name}`);
+            showToast(`Deleted ${name}`, { action: 'Undo', run: () => restoreSheet(sheet), duration: 6000 });
           } catch (err) {
             showToast(err.message || 'Delete failed');
           }
@@ -1398,7 +1425,7 @@ function confirmDeleteSheet() {
 }
 
 function openRenameModal() {
-  rememberFocus();
+  rememberFocus('rename');
   renameInput.value = currentSheetName();
   renameModal.hidden = false;
   document.body.classList.add('modal-open');
@@ -1411,8 +1438,8 @@ function openRenameModal() {
 function closeRenameModal() {
   if (renameModal.hidden) return;
   renameModal.hidden = true;
-  if (previewModal.hidden) document.body.classList.remove('modal-open');
-  restoreFocus();
+  updateModalOpen();
+  restoreFocus('rename');
 }
 
 renameModal.querySelectorAll('[data-close-rename]').forEach(btn => btn.addEventListener('click', closeRenameModal));
@@ -1921,7 +1948,7 @@ function openSheet({ title, text, files = [], actions }) {
     return btn;
   }));
   sheetActions.dataset.count = String(actions.length);
-  rememberFocus();
+  rememberFocus('sheet');
   sheetModal.hidden = false;
   document.body.classList.add('modal-open');
   sheetActions.querySelector('.btn.secondary')?.focus({ preventScroll:true });
@@ -1930,8 +1957,8 @@ function openSheet({ title, text, files = [], actions }) {
 function closeSheet() {
   if (sheetModal.hidden) return;
   sheetModal.hidden = true;
-  if (renameModal.hidden && previewModal.hidden && adminModal.hidden) document.body.classList.remove('modal-open');
-  restoreFocus();
+  updateModalOpen();
+  restoreFocus('sheet');
 }
 
 sheetModal.addEventListener('click', e => { if (e.target === sheetModal) closeSheet(); });
@@ -2055,7 +2082,7 @@ async function openPreview(file) {
   previewAbort = controller;
   previewFile = file;
   previewLoadedFile = null;
-  if (previewModal.hidden) rememberFocus();
+  if (previewModal.hidden) rememberFocus('preview');
   previewTitle.textContent = file.name || 'File';
   previewBody.innerHTML = `
     <div class="preview-loading">
@@ -2184,8 +2211,8 @@ function closePreview() {
   previewFile = null;
   previewLoadedFile = null;
   clearPreviewObjectUrl();
-  if (renameModal.hidden) document.body.classList.remove('modal-open');
-  restoreFocus();
+  updateModalOpen();
+  restoreFocus('preview');
 }
 
 previewModal.querySelectorAll('[data-close-preview]').forEach(btn => btn.addEventListener('click', closePreview));
@@ -2211,7 +2238,9 @@ previewSaveBtn.addEventListener('click', async () => {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (!sheetModal.hidden) closeSheet();
+  if (!searchModal.hidden) closeSearch();
+  else if (!sheetModal.hidden) closeSheet();
+  else if (!trashModal.hidden) closeTrash();
   else if (!adminModal.hidden) closeAdmin();
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
@@ -2375,7 +2404,7 @@ async function toggleKeep(file) {
 function confirmDeleteFile(file) {
   openSheet({
     title: 'Delete this file?',
-    text: `It’ll be removed from ${currentSheetName(file.sheet)} on every device. This can’t be undone.`,
+    text: `It moves to Recently Deleted on every device. You can restore it for 30 days.`,
     files: [file],
     actions: [
       { label: 'Cancel', kind: 'secondary' },
@@ -2385,7 +2414,7 @@ function confirmDeleteFile(file) {
         run: async () => {
           const r = await fetch(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}`), { method:'DELETE' }).catch(() => null);
           if (r?.ok) {
-            showToast('File deleted');
+            showToast(`Deleted ${file.name}`, { action: 'Undo', run: () => restoreFiles([file]), duration: 6000 });
             if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
           } else {
             showToast('Couldn’t delete the file');
@@ -2534,7 +2563,7 @@ bulkDeleteBtn.addEventListener('click', () => {
   const sheetName = currentSheetName(files[0].sheet);
   openSheet({
     title: `Delete ${files.length} file${files.length === 1 ? '' : 's'}?`,
-    text: `They’ll be removed from ${sheetName} on every device. This can’t be undone.`,
+    text: `They move to Recently Deleted on every device. You can restore them from ${sheetName} for 30 days.`,
     files,
     actions: [
       { label: 'Cancel', kind: 'secondary' },
@@ -2547,7 +2576,9 @@ bulkDeleteBtn.addEventListener('click', () => {
             fetch(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}`), { method:'DELETE' }).then(r => r.ok).catch(() => false)
           ));
           const failed = results.filter(ok => !ok).length;
-          showToast(failed ? `${failed} file${failed === 1 ? '' : 's'} could not be deleted` : `Deleted ${files.length} file${files.length === 1 ? '' : 's'}`);
+          const done = files.filter((f, i) => results[i]);
+          if (failed) showToast(`${failed} file${failed === 1 ? '' : 's'} could not be deleted`);
+          else showToast(`Deleted ${files.length} file${files.length === 1 ? '' : 's'}`, { action: 'Undo', run: () => restoreFiles(done), duration: 6000 });
           await loadFiles(true, files[0].sheet);
         }
       }
@@ -2823,6 +2854,500 @@ document.addEventListener('visibilitychange', async () => {
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
 });
 
+// ---- Search: sheet names, their text and file names, across every sheet ----
+// Everything searched is already on this device (kept copies of each sheet
+// and its file list), so typing makes no requests.
+
+const searchModal = document.querySelector('#searchModal');
+const searchInput = document.querySelector('#searchInput');
+const searchResults = document.querySelector('#searchResults');
+const searchBtn = document.querySelector('#searchBtn');
+const plainTextCache = new Map();
+let searchItems = [];
+let searchActive = -1;
+let searchHitTimer = null;
+
+// Lower case, without moving any character (so positions still line up).
+function foldCase(text) {
+  let out = '';
+  for (const ch of text) {
+    const low = ch.toLowerCase();
+    out += low.length === ch.length ? low : ch;
+  }
+  return out;
+}
+
+const tidyQuery = value => value.trim().replace(/\s+/g, ' ');
+
+// The text of an editor or stored sheet as one string, line breaks as \n,
+// with where each piece of text starts (to highlight a match later).
+function textIndex(root) {
+  let text = '';
+  const parts = [];
+  const blocks = /^(DIV|P|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|TR)$/;
+  const walk = node => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        parts.push({ node: child, start: text.length });
+        text += child.data;
+      } else if (child.nodeName === 'BR') {
+        text += '\n';
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const block = blocks.test(child.nodeName);
+        if (block && text && !text.endsWith('\n')) text += '\n';
+        walk(child);
+        if (block && text && !text.endsWith('\n')) text += '\n';
+      }
+    }
+  };
+  walk(root);
+  return { text, parts };
+}
+
+function sheetPlainText(id) {
+  if (id === activeSheet && !pad.classList.contains('is-loading')) return textIndex(pad).text;
+  const cached = sheetCache.get(id);
+  if (!cached) return null;
+  const known = plainTextCache.get(id);
+  if (known?.html === cached.html) return known.text;
+  // An inert copy: read this way, no images load.
+  const doc = new DOMParser().parseFromString(`<!doctype html><body>${cached.html}`, 'text/html');
+  const text = textIndex(doc.body).text;
+  plainTextCache.set(id, { html: cached.html, text });
+  return text;
+}
+
+function sheetFilesFor(id) {
+  const list = id === activeSheet && (currentFiles.length || !emptyFiles.hidden) ? currentFiles : filesCache.get(id) || [];
+  return list.filter(f => !pendingDeletes.has(f.id));
+}
+
+function findMatches(query) {
+  const q = foldCase(query);
+  const named = [];
+  const texts = [];
+  const files = [];
+  for (const sheet of sheets) {
+    if (foldCase(sheet.name).includes(q)) named.push({ kind: 'sheet', sheet: sheet.id });
+    const text = sheetPlainText(sheet.id);
+    if (text) {
+      const low = foldCase(text);
+      const hits = [];
+      for (let at = low.indexOf(q); at !== -1 && hits.length < 100; at = low.indexOf(q, at + q.length)) hits.push(at);
+      hits.slice(0, 3).forEach((at, n) => texts.push({ kind: 'text', sheet: sheet.id, at, n, text, more: n === 2 ? hits.length - 3 : 0 }));
+    }
+    for (const file of sheetFilesFor(sheet.id)) {
+      if (foldCase(file.name).includes(q)) files.push({ kind: 'file', sheet: sheet.id, file });
+    }
+  }
+  return [...named, ...texts, ...files].slice(0, 80);
+}
+
+// Escaped text with every match of the query marked.
+function markHtml(text, query) {
+  const low = foldCase(text);
+  const q = foldCase(query);
+  let html = '';
+  let from = 0;
+  for (let at = low.indexOf(q); at !== -1 && q; at = low.indexOf(q, from)) {
+    html += escapeHtml(text.slice(from, at)) + `<mark>${escapeHtml(text.slice(at, at + q.length))}</mark>`;
+    from = at + q.length;
+  }
+  return html + escapeHtml(text.slice(from));
+}
+
+function snippetHtml(text, at, length, query) {
+  let start = Math.max(0, at - 40);
+  if (start > 0) {
+    const gap = text.slice(start, at).search(/\s/);
+    if (gap !== -1) start += gap + 1;
+  }
+  const end = Math.min(text.length, at + length + 100);
+  const piece = text.slice(start, end).replace(/\s+/g, ' ');
+  return (start > 0 ? '…' : '') + markHtml(piece, query) + (end < text.length ? '…' : '');
+}
+
+function sheetSummary(id) {
+  const { content, files } = statusFor(id);
+  const parts = [content ? 'Has text' : files ? '' : 'Empty', files ? `${files} file${files === 1 ? '' : 's'}` : ''].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function renderSearch() {
+  const query = tidyQuery(searchInput.value);
+  searchActive = -1;
+  searchInput.removeAttribute('aria-activedescendant');
+  if (!query) {
+    searchItems = [];
+    const tip = matchMedia('(hover: hover) and (pointer: fine)').matches ? '<br>Press <kbd>/</kbd> or <kbd>Ctrl K</kbd> to search from anywhere.' : '';
+    searchResults.innerHTML = `<p class="search-empty">Search the text and file names in all your sheets.${tip}</p>`;
+    return;
+  }
+  searchItems = findMatches(query);
+  if (!searchItems.length) {
+    searchResults.innerHTML = `<p class="search-empty">No matches for “${escapeHtml(query)}”.</p>`;
+    return;
+  }
+  const groups = { sheet: 'Sheets', text: 'In text', file: 'Files' };
+  let last = '';
+  searchResults.innerHTML = searchItems.map((item, i) => {
+    const group = item.kind !== last ? `<div class="search-group" role="presentation">${groups[item.kind]}</div>` : '';
+    last = item.kind;
+    const name = currentSheetName(item.sheet);
+    let mark;
+    let body;
+    if (item.kind === 'sheet') {
+      mark = `<span class="search-mark" aria-hidden="true">${icon('lines')}</span>`;
+      body = `<div class="search-title">${markHtml(name, query)}</div><div class="search-meta">${escapeHtml(sheetSummary(item.sheet))}</div>`;
+    } else if (item.kind === 'text') {
+      mark = `<span class="search-mark" aria-hidden="true">${icon('lines')}</span>`;
+      const more = item.more ? ` · ${item.more} more in this sheet` : '';
+      body = `<div class="search-meta">${escapeHtml(name)}${more}</div><div class="search-snippet">${snippetHtml(item.text, item.at, query.length, query)}</div>`;
+    } else {
+      mark = fileIconHtml(item.file);
+      body = `<div class="search-title">${markHtml(item.file.name, query)}</div><div class="search-meta">${escapeHtml(name)} · ${bytes(item.file.size || 0)}</div>`;
+    }
+    return `${group}<div class="search-item" role="option" id="search-opt-${i}" data-i="${i}" aria-selected="false">${mark}<div class="search-main">${body}</div></div>`;
+  }).join('');
+  setSearchActive(0);
+}
+
+function setSearchActive(i) {
+  if (!searchItems.length) return;
+  searchActive = (i + searchItems.length) % searchItems.length;
+  for (const el of searchResults.querySelectorAll('.search-item')) {
+    const on = Number(el.dataset.i) === searchActive;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', String(on));
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  }
+  searchInput.setAttribute('aria-activedescendant', `search-opt-${searchActive}`);
+}
+
+function openSearch() {
+  if (!appStarted || !searchModal.hidden) return;
+  closeMenu({ focusTrigger: false });
+  rememberFocus('search');
+  searchModal.hidden = false;
+  updateModalOpen();
+  searchInput.focus();
+  searchInput.select();
+  renderSearch();
+}
+
+function closeSearch({ restore = true } = {}) {
+  if (searchModal.hidden) return;
+  searchModal.hidden = true;
+  updateModalOpen();
+  if (restore) restoreFocus('search');
+  else returnFocusTo.delete('search');
+}
+
+async function openSearchResult(item) {
+  const query = tidyQuery(searchInput.value);
+  closeSearch({ restore: false });
+  if (selecting) setSelecting(false);
+  if (item.sheet !== activeSheet) {
+    await switchSheet(item.sheet);
+    // Still on the old sheet: an unsaved edit there couldn't be saved.
+    if (activeSheet !== item.sheet) return;
+  }
+  if (item.kind === 'text') showTextMatch(query, item.n);
+  else if (item.kind === 'file') showFileRow(item.file.id);
+  else window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
+// Highlights the nth match in the editor (without opening the keyboard) and scrolls to it.
+function showTextMatch(query, n) {
+  const { text, parts } = textIndex(pad);
+  const low = foldCase(text);
+  const q = foldCase(query);
+  let at = -1;
+  for (let i = 0, from = 0; i <= n; i++) {
+    const next = low.indexOf(q, from);
+    if (next === -1) break;
+    at = next;
+    from = next + q.length;
+  }
+  const end = at + q.length;
+  const first = parts.find(p => at >= p.start && at < p.start + p.node.data.length);
+  const last = parts.find(p => end > p.start && end <= p.start + p.node.data.length);
+  if (at === -1 || !first || !last) {
+    padCard.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    return;
+  }
+  const range = document.createRange();
+  range.setStart(first.node, at - first.start);
+  range.setEnd(last.node, end - last.start);
+  if (window.CSS?.highlights && window.Highlight) {
+    CSS.highlights.set('search-hit', new Highlight(range));
+    clearTimeout(searchHitTimer);
+    searchHitTimer = setTimeout(clearSearchHit, 8000);
+  } else {
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  const rect = range.getBoundingClientRect();
+  window.scrollTo({ top: Math.max(0, scrollY + rect.top - innerHeight * 0.35), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
+function clearSearchHit() {
+  clearTimeout(searchHitTimer);
+  window.CSS?.highlights?.delete('search-hit');
+}
+
+function showFileRow(id) {
+  const row = fileList.querySelector(`.file-row[data-id="${CSS.escape(id)}"]`);
+  if (!row) {
+    filesSection.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    return;
+  }
+  row.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  row.classList.remove('flash');
+  void row.offsetWidth;
+  row.classList.add('flash');
+  setTimeout(() => row.classList.remove('flash'), 2400);
+  row.querySelector('.file-name')?.focus({ preventScroll: true });
+}
+
+pad.addEventListener('input', clearSearchHit);
+pad.addEventListener('pointerdown', clearSearchHit);
+searchBtn.addEventListener('click', openSearch);
+document.querySelector('#searchCloseBtn').addEventListener('click', () => closeSearch());
+searchModal.addEventListener('click', e => { if (e.target === searchModal) closeSearch(); });
+searchInput.addEventListener('input', renderSearch);
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    setSearchActive(searchActive + (e.key === 'ArrowDown' ? 1 : -1));
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (searchItems[searchActive]) openSearchResult(searchItems[searchActive]);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSearch();
+  }
+});
+searchResults.addEventListener('click', e => {
+  const el = e.target.closest('.search-item');
+  if (el) openSearchResult(searchItems[Number(el.dataset.i)]);
+});
+
+// Ctrl K / ⌘K anywhere, or / when not typing.
+document.addEventListener('keydown', e => {
+  if (!appStarted || document.querySelector('.modal-backdrop:not([hidden])')) return;
+  const typing = e.target.closest?.('input, textarea, [contenteditable="true"]');
+  if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') || (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey)) {
+    e.preventDefault();
+    openSearch();
+  }
+});
+
+// ---- Recently Deleted: sheets and files kept 30 days before going for good ----
+
+const trashModal = document.querySelector('#trashModal');
+const trashBody = document.querySelector('#trashBody');
+const trashFoot = document.querySelector('#trashFoot');
+const trashEmptyBtn = document.querySelector('#trashEmptyBtn');
+let trashData = null;
+
+async function trashPost(body) {
+  const r = await fetch(`${API_STATE}?meta=trash`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  return data;
+}
+
+async function openTrash() {
+  rememberFocus('trash');
+  trashModal.hidden = false;
+  updateModalOpen();
+  trashModal.querySelector('[data-close-trash]').focus({ preventScroll: true });
+  trashBody.innerHTML = '<p class="trash-empty">Loading…</p>';
+  trashFoot.hidden = true;
+  await loadTrash();
+}
+
+function closeTrash() {
+  if (trashModal.hidden) return;
+  trashModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('trash');
+}
+
+async function loadTrash() {
+  try {
+    const r = await fetch(`${API_STATE}?meta=trash`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    trashData = await r.json();
+    renderTrash();
+  } catch {
+    trashBody.innerHTML = '<p class="trash-empty">Couldn’t load Recently Deleted. Check your connection and try again.</p>';
+  }
+}
+
+function trashWhen(item) {
+  const days = trashData?.days || 30;
+  const left = Math.max(0, Math.ceil((item.deletedAt + days * 86_400_000 - Date.now()) / 86_400_000));
+  const leftText = left <= 1 ? 'Goes within a day' : `${left} days left`;
+  const deleted = escapeHtml(`Deleted ${new Date(item.deletedAt).toLocaleString()}`);
+  return `<span title="${deleted}"${left <= 3 ? ' class="soon"' : ''}>${leftText}</span>`;
+}
+
+function renderTrash() {
+  const gone = trashData?.sheets || [];
+  const files = trashData?.files || [];
+  trashFoot.hidden = !gone.length && !files.length;
+  if (!gone.length && !files.length) {
+    trashBody.innerHTML = '<div class="trash-empty"><strong>Nothing here</strong>Deleted sheets and files stay here for 30 days, then they’re deleted for good.</div>';
+    keepFocusInTrash();
+    return;
+  }
+  let html = '';
+  if (gone.length) {
+    html += '<div class="trash-group">Sheets</div>' + gone.map(s => {
+      const name = escapeHtml(s.name);
+      const holds = s.files ? `${s.files} file${s.files === 1 ? '' : 's'} · ${bytes(s.bytes)}` : 'No files';
+      return `<div class="trash-row">
+        <span class="search-mark" aria-hidden="true">${icon('lines')}</span>
+        <div class="search-main"><div class="trash-name" title="${name}">${name}</div><div class="trash-meta">${holds}</div><div class="trash-meta">${trashWhen(s)}</div></div>
+        <button class="link-btn" type="button" data-restore-sheet="${s.id}">Restore</button>
+        <button class="icon-btn" type="button" data-delete-sheet="${s.id}" aria-label="Delete ${name} for good" title="Delete for good">${icon('trash')}</button>
+      </div>`;
+    }).join('');
+  }
+  if (files.length) {
+    html += '<div class="trash-group">Files</div>' + files.map((f, i) => {
+      const name = escapeHtml(f.name);
+      return `<div class="trash-row">
+        ${fileIconHtml(f)}
+        <div class="search-main"><div class="trash-name" title="${name}">${name}</div><div class="trash-meta">${escapeHtml(f.sheetName)} · ${bytes(f.size || 0)}</div><div class="trash-meta">${trashWhen(f)}</div></div>
+        <button class="link-btn" type="button" data-restore-file="${i}">Restore</button>
+        <button class="icon-btn" type="button" data-delete-file="${i}" aria-label="Delete ${name} for good" title="Delete for good">${icon('trash')}</button>
+      </div>`;
+    }).join('');
+  }
+  trashBody.innerHTML = html;
+  keepFocusInTrash();
+}
+
+// A redraw can remove the button that had focus; keep focus inside the panel.
+function keepFocusInTrash() {
+  if (!trashModal.hidden && !trashModal.contains(document.activeElement)) {
+    (trashBody.querySelector('button') || trashModal.querySelector('[data-close-trash]')).focus({ preventScroll: true });
+  }
+}
+
+// File lists for one sheet, after something came back or went for good.
+async function refreshFilesFor(sheet) {
+  if (sheet === activeSheet) return loadFiles(true, sheet);
+  try {
+    const r = await fetch(filesUrl(sheet), { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    filesCache.set(sheet, Array.isArray(data.files) ? data.files : []);
+    scheduleTabStatus();
+  } catch {
+    filesCache.delete(sheet);
+  }
+}
+
+async function restoreSheet(id, { open = true } = {}) {
+  try {
+    const data = await trashPost({ action: 'restore-sheet', sheet: id });
+    applySheets(data);
+    prefetchSheets();
+    showToast(`Restored ${currentSheetName(id)}`);
+    if (open) await switchSheet(id);
+    return true;
+  } catch (err) {
+    showToast(err.message);
+    return false;
+  }
+}
+
+async function restoreFiles(files) {
+  const results = await Promise.all(files.map(f => trashPost({ action: 'restore-file', sheet: f.sheet, id: f.id }).then(() => true, () => false)));
+  await Promise.all([...new Set(files.map(f => f.sheet))].map(refreshFilesFor));
+  const failed = results.filter(ok => !ok).length;
+  showToast(failed ? `${failed} file${failed === 1 ? '' : 's'} couldn’t be restored` : files.length === 1 ? `Restored ${files[0].name}` : `Restored ${files.length} files`);
+  return !failed;
+}
+
+trashBody.addEventListener('click', async e => {
+  const btn = e.target.closest('button');
+  if (!btn || !trashData) return;
+  const fileAt = i => trashData.files[Number(i)];
+  if (btn.dataset.restoreSheet) {
+    btn.disabled = true;
+    if (await restoreSheet(Number(btn.dataset.restoreSheet), { open: false })) await loadTrash();
+    else btn.disabled = false;
+  } else if (btn.dataset.restoreFile) {
+    btn.disabled = true;
+    if (await restoreFiles([fileAt(btn.dataset.restoreFile)])) await loadTrash();
+    else btn.disabled = false;
+  } else if (btn.dataset.deleteSheet || btn.dataset.deleteFile) {
+    const sheet = btn.dataset.deleteSheet ? trashData.sheets.find(s => s.id === Number(btn.dataset.deleteSheet)) : null;
+    const file = btn.dataset.deleteFile ? fileAt(btn.dataset.deleteFile) : null;
+    openSheet({
+      title: `Delete ${sheet ? sheet.name : file.name} for good?`,
+      text: sheet ? 'Its text and files will be gone from all your devices. This can’t be undone.' : 'It will be gone from all your devices. This can’t be undone.',
+      files: file ? [file] : [],
+      actions: [
+        { label: 'Cancel', kind: 'secondary' },
+        {
+          label: 'Delete for good',
+          kind: 'danger-solid',
+          run: async () => {
+            try {
+              await trashPost(sheet ? { action: 'delete-sheet', sheet: sheet.id } : { action: 'delete-file', sheet: file.sheet, id: file.id });
+              showToast('Deleted for good');
+              loadUsage();
+              await loadTrash();
+            } catch (err) {
+              showToast(err.message);
+            }
+          }
+        }
+      ]
+    });
+  }
+});
+
+trashEmptyBtn.addEventListener('click', () => {
+  const n = (trashData?.sheets?.length || 0) + (trashData?.files?.length || 0);
+  openSheet({
+    title: 'Empty Recently Deleted?',
+    text: `${n} item${n === 1 ? '' : 's'} will be deleted for good on all your devices. This can’t be undone.`,
+    actions: [
+      { label: 'Cancel', kind: 'secondary' },
+      {
+        label: 'Empty Recently Deleted',
+        kind: 'danger-solid',
+        run: async () => {
+          try {
+            await trashPost({ action: 'empty' });
+            showToast('Recently Deleted is empty');
+            loadUsage();
+            await loadTrash();
+          } catch (err) {
+            showToast(err.message);
+          }
+        }
+      }
+    ]
+  });
+});
+
+trashModal.querySelector('[data-close-trash]').addEventListener('click', closeTrash);
+trashModal.addEventListener('click', e => { if (e.target === trashModal) closeTrash(); });
+
 // ---- Account ----
 
 const rawFetch = window.fetch.bind(window);
@@ -2839,6 +3364,8 @@ accountBtn.addEventListener('click', () => {
   openMenu(accountBtn, [
     { heading: account?.email || 'Account' },
     account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
+    { label: 'Recently Deleted', icon: 'trash', run: openTrash },
+    'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
     { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere }
@@ -2946,7 +3473,7 @@ async function changeLimit(a) {
 }
 
 async function openAdmin() {
-  rememberFocus();
+  rememberFocus('admin');
   adminBody.textContent = 'Loading…';
   adminModal.hidden = false;
   adminModal.querySelector('[data-close-admin]').focus({ preventScroll:true });
@@ -2963,8 +3490,8 @@ async function openAdmin() {
 function closeAdmin() {
   if (adminModal.hidden) return;
   adminModal.hidden = true;
-  if (renameModal.hidden && previewModal.hidden) document.body.classList.remove('modal-open');
-  restoreFocus();
+  updateModalOpen();
+  restoreFocus('admin');
 }
 
 adminModal.querySelector('[data-close-admin]').addEventListener('click', closeAdmin);

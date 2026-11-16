@@ -20,7 +20,8 @@ async function recordsSize(store, sizeOf) {
     // Uploads in progress count too, so parallel uploads can't slip past the limit.
     if (!record) continue;
     bytes += sizeOf(record);
-    if (record.complete) count++;
+    // Files in Recently Deleted still take space, but aren't counted as files.
+    if (record.complete && !record.deletedAt) count++;
   }
   return { bytes, count };
 }

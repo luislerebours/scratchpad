@@ -1,8 +1,10 @@
 import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import {
+  TRASH_DAYS, deleteFileForGood, publicRecord, readRecords, readSheetTrash, visibleFiles, wipeSheet, writeSheetTrash
+} from '../lib/files.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
-const FILE_KINDS = ['files', 'chunks', 'file-thumbs', 'images', 'image-chunks', 'image-previews'];
 
 const cleanName = value => String(value ?? '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 40);
 
@@ -24,11 +26,6 @@ async function writeSheets(ns, store, sheets) {
   await store.setJSON('meta/sheets', next);
   await bumpRev(ns, 'sheets');
   return next;
-}
-
-async function emptyStore(store) {
-  const { blobs } = await store.list();
-  await Promise.all(blobs.map(({ key }) => store.delete(key)));
 }
 
 export default async req => {
@@ -61,19 +58,20 @@ export default async req => {
       room -= size;
       out.push({ id: s.id, html, text, updatedAt: Number(doc?.updatedAt || 0) });
     });
-    // What each tab shows under its name: whether it holds anything, and its file count.
-    const fileCounts = await Promise.all(sheets.map(async s => {
-      const records = userStore(ns, 'files', s.id);
-      const { blobs } = await records.list();
-      const all = await Promise.all(blobs.map(({ key }) => records.get(key, { type: 'json' }).catch(() => null)));
-      return all.filter(r => r?.complete).length;
-    }));
+    // What each tab shows under its name (whether it holds anything, and its
+    // files), and every file name for search. Reading also clears out what has
+    // been in Recently Deleted for 30 days.
+    const [fileLists, trash] = await Promise.all([
+      Promise.all(sheets.map(async s => visibleFiles((await readRecords(ns, s.id)).records, s.id))),
+      readSheetTrash(ns)
+    ]);
     const status = sheets.map((s, i) => ({
       id: s.id,
       content: Boolean(String(docs[i]?.text || '').trim() || /<img\b/i.test(String(docs[i]?.html || ''))),
-      files: fileCounts[i]
+      files: fileLists[i].length,
+      fileList: fileLists[i]
     }));
-    return json({ sheets: out, status });
+    return json({ sheets: out, status, trashedSheets: trash.length });
   }
 
   // The 2-second check: just the change markers for the tabs and one sheet.
@@ -94,8 +92,20 @@ export default async req => {
 
     if (body.action === 'add') {
       if (sheets.length >= MAX_SHEETS) return json({ error: `You can have up to ${MAX_SHEETS} sheets.` }, 400);
-      const used = new Set(sheets.map(s => s.id));
+      let trash = await readSheetTrash(ns);
+      // Every slot taken, some by deleted sheets: the owner may delete one for good to make room.
+      const purge = trash.find(t => t.id === parseSheet(body.purge));
+      if (purge) {
+        await wipeSheet(ns, purge.id);
+        trash = trash.filter(t => t !== purge);
+        await writeSheetTrash(ns, trash);
+      }
+      const used = new Set([...sheets.map(s => s.id), ...trash.map(t => t.id)]);
       const id = Array.from({ length: MAX_SHEETS }, (_, i) => i + 1).find(n => !used.has(n));
+      if (!id) {
+        const oldest = [...trash].sort((a, b) => a.deletedAt - b.deletedAt)[0];
+        return json({ error: 'Recently Deleted is holding the last free sheet.', purge: { id: oldest.id, name: oldest.name } }, 409);
+      }
       // A freed slot may hold leftovers from a deleted sheet; start it clean.
       await store.delete(`sheets/${id}`);
       await Promise.all([bumpRev(ns, `text-${id}`), bumpRev(ns, `files-${id}`)]);
@@ -111,13 +121,80 @@ export default async req => {
       return json(await writeSheets(ns, store, sheets.map(s => (s.id === sheet ? { ...s, name } : s))));
     }
 
+    // Deleting moves the sheet, with its text and files, to Recently Deleted.
     if (body.action === 'delete') {
       if (sheets.length === 1) return json({ error: 'You need at least one sheet.' }, 400);
-      const next = await writeSheets(ns, store, sheets.filter(s => s.id !== sheet));
-      await store.delete(`sheets/${sheet}`);
-      await Promise.all(FILE_KINDS.map(kind => emptyStore(userStore(ns, kind, sheet))));
+      const position = sheets.findIndex(s => s.id === sheet);
+      const trash = await readSheetTrash(ns);
+      await writeSheetTrash(ns, [...trash.filter(t => t.id !== sheet), { id: sheet, name: sheets[position].name, deletedAt: Date.now(), position }]);
+      return json({ ...(await writeSheets(ns, store, sheets.filter(s => s.id !== sheet))), trashed: sheet });
+    }
+
+    return json({ error: 'Unknown action' }, 400);
+  }
+
+  // Recently Deleted: sheets and files kept for TRASH_DAYS before going for good.
+  if (meta === 'trash') {
+    const { sheets } = await readSheets(store);
+    const trash = await readSheetTrash(ns);
+
+    if (req.method === 'GET') {
+      const [active, held] = await Promise.all([
+        Promise.all(sheets.map(async s => ({ sheet: s, ...(await readRecords(ns, s.id)) }))),
+        Promise.all(trash.map(async t => ({ t, ...(await readRecords(ns, t.id)) })))
+      ]);
+      const files = active.flatMap(({ sheet, records }) => records
+        .filter(r => r.complete && r.deletedAt)
+        .map(r => ({ ...publicRecord(r, sheet.id), sheetName: sheet.name, deletedAt: r.deletedAt })));
+      const deletedSheets = held.map(({ t, records }) => {
+        const done = records.filter(r => r.complete);
+        return { id: t.id, name: t.name, deletedAt: t.deletedAt, files: done.length, bytes: done.reduce((n, r) => n + (r.size || 0), 0) };
+      });
+      const byNewest = (a, b) => b.deletedAt - a.deletedAt;
+      return json({ days: TRASH_DAYS, sheets: deletedSheets.sort(byNewest), files: files.sort(byNewest) });
+    }
+
+    if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+    const body = await req.json().catch(() => ({}));
+    const sheet = parseSheet(body.sheet);
+
+    if (body.action === 'restore-sheet' || body.action === 'delete-sheet') {
+      const held = trash.find(t => t.id === sheet);
+      if (!held) return json({ error: 'That sheet is no longer in Recently Deleted.' }, 404);
+      await writeSheetTrash(ns, trash.filter(t => t !== held));
+      if (body.action === 'delete-sheet') {
+        await wipeSheet(ns, sheet);
+        return json({ ok: true });
+      }
+      const next = [...sheets];
+      next.splice(Math.min(Number.isInteger(held.position) ? held.position : next.length, next.length), 0, { id: held.id, name: held.name });
       await Promise.all([bumpRev(ns, `text-${sheet}`), bumpRev(ns, `files-${sheet}`)]);
-      return json(next);
+      return json(await writeSheets(ns, store, next));
+    }
+
+    if (body.action === 'restore-file' || body.action === 'delete-file') {
+      if (!sheets.some(s => s.id === sheet)) return json({ error: 'Restore its sheet first.' }, 404);
+      const { store: files, records } = await readRecords(ns, sheet);
+      const record = records.find(r => r.id === body.id && r.deletedAt);
+      if (!record) return json({ error: 'That file is no longer in Recently Deleted.' }, 404);
+      if (body.action === 'delete-file') {
+        await deleteFileForGood(files, record);
+        return json({ ok: true });
+      }
+      const { deletedAt, ...restored } = record;
+      await files.records.setJSON(record.id, restored);
+      await bumpRev(ns, `files-${sheet}`);
+      return json({ ok: true, file: publicRecord(restored, sheet) });
+    }
+
+    if (body.action === 'empty') {
+      await Promise.all(trash.map(t => wipeSheet(ns, t.id)));
+      await writeSheetTrash(ns, []);
+      await Promise.all(sheets.map(async s => {
+        const { store: files, records } = await readRecords(ns, s.id);
+        await Promise.all(records.filter(r => r.deletedAt).map(r => deleteFileForGood(files, r)));
+      }));
+      return json({ ok: true });
     }
 
     return json({ error: 'Unknown action' }, 400);

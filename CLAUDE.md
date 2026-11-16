@@ -95,8 +95,11 @@ Pushes to `main` deploy straight to the live site.
   Its own type is Montserrat served from `public/fonts/` (no Google
   requests) and its own `--auth-*` tokens (brighter cyan on dark, teal on
   light). `.only-wide` / `.only-narrow` swap copy at 860px; the sun/moon is
-  `#authThemeBtn`. Help/Support go to support@sector809labs.com; `/privacy` and
-  `/terms` don't exist yet.
+  `#authThemeBtn`. Help/Support go to support@sector809labs.com.
+- Privacy policy and Terms of service: `public/privacy.html` and `public/terms.html`
+  (served at `/privacy` and `/terms`, styled by `legal.css`; also in the account
+  menu). Keep them true to what the app does: update them when data handling,
+  providers, plans or prices change. Terms are governed by New York law.
 - Icons: `public/assets/icon-source.png` is the 1024px master; the other
   sizes and the header's see-through `mark.png` are made from it.
 - Files can be swiped left to delete (touch only). The server delete waits

@@ -24,7 +24,7 @@ export default async req => {
   const meta = url.searchParams.get('meta');
   // End-to-end encrypted accounts only ever send us locked text, names and keys.
   const locked = Boolean(auth.user.keyring);
-  const SEALED_ONLY = 'Reload Scratch Pad to keep editing.';
+  const SEALED_ONLY = 'Reload ScrapSheet to keep editing.';
 
   // Storage used by the account and its limit (null: no limit).
   if (meta === 'usage' && req.method === 'GET') {

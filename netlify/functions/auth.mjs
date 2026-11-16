@@ -24,17 +24,17 @@ async function sendCodeEmail(to, code, link) {
     }
     throw new Error('Email is not set up (RESEND_API_KEY and MAIL_FROM)');
   }
-  const text = `Your Scratch Pad code is ${code}\n\nOpen ${link} and enter the code. It works once and expires in 15 minutes.\n\nIf you didn't ask for this, you can ignore this email.`;
+  const text = `Your ScrapSheet code is ${code}\n\nOpen ${link} and enter the code. It works once and expires in 15 minutes.\n\nIf you didn't ask for this, you can ignore this email.`;
   const html = `<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:16px;line-height:1.5;color:#111">
-<p>Your Scratch Pad code is</p>
+<p>Your ScrapSheet code is</p>
 <p style="font-size:28px;font-weight:700;letter-spacing:.04em;margin:8px 0 16px">${code}</p>
-<p><a href="${link}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#2cc7ff;color:#06101e;font-weight:700;text-decoration:none">Open Scratch Pad</a></p>
+<p><a href="${link}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#2cc7ff;color:#06101e;font-weight:700;text-decoration:none">Open ScrapSheet</a></p>
 <p style="color:#555;font-size:14px">Enter the code there. It works once and expires in 15 minutes. If you didn't ask for this, you can ignore this email.</p>
 </div>`;
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [to], subject: `Your Scratch Pad code: ${code}`, text, html })
+    body: JSON.stringify({ from, to: [to], subject: `Your ScrapSheet code: ${code}`, text, html })
   });
   if (!r.ok) throw new Error(`Resend ${r.status}: ${await r.text()}`);
 }
@@ -245,7 +245,7 @@ export default async (req, context) => {
     if (!pending || pending.nonce !== pass.n || pending.expiresAt < Date.now()) {
       return json({ error: 'This step has expired. Ask for a new code.' }, 400);
     }
-    if (!validAuth(body.auth)) return json({ error: 'Update Scratch Pad (reload the page) and try again.' }, 400);
+    if (!validAuth(body.auth)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
     const existing = await store.get(`users/${pass.ek}`, { type: 'json' });
     // What the master key will be locked with: a whole new keyring (new
     // account, starting over, or an account from before encryption), or, after
@@ -255,7 +255,7 @@ export default async (req, context) => {
       if (!b64ish(body.byPassword)) return json({ error: 'Enter your recovery key first.' }, 400);
       keyring = { ...existing.keyring, byPassword: body.byPassword };
     } else {
-      if (!validKeyring(body.keyring)) return json({ error: 'Update Scratch Pad (reload the page) and try again.' }, 400);
+      if (!validKeyring(body.keyring)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
       keyring = cleanKeyring(body.keyring);
     }
     await store.delete(`pending/${pass.ek}`);

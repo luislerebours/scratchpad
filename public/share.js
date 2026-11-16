@@ -222,7 +222,7 @@ function renderSheetText(data, box) {
 // ---- Pages ----
 
 function header(kicker, name, meta) {
-  document.title = `${name} · Scratch Pad`;
+  document.title = `${name} · ScrapSheet`;
   return `<p class="share-kicker">${escapeHtml(kicker)}</p>
     <h1 class="share-title">${escapeHtml(name)}</h1>
     <p class="share-meta">${meta}</p>`;
@@ -293,7 +293,7 @@ function renderSheet(data) {
 }
 
 function renderProblem(reason, message) {
-  document.title = 'Scratch Pad';
+  document.title = 'ScrapSheet';
   const advice = {
     expired: 'Ask the person who shared it for a new link.',
     off: 'The person who shared it turned this link off.',

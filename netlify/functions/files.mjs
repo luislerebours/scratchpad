@@ -54,7 +54,7 @@ export default async req => {
     const sealed = Boolean(body?.enc);
     // Its type is locked too, so the server can't tell a photo from a PDF.
     if ((auth.user.keyring || sealed) && !(sealed && isWrappedKey(body.key) && isSealed(body.name) && isSealed(body.type))) {
-      return json({ error: 'Reload Scratch Pad to keep uploading.' }, 400);
+      return json({ error: 'Reload ScrapSheet to keep uploading.' }, 400);
     }
     // Locking a file from before encryption: a locked copy replaces it, keeping
     // its dates, and the old one is erased once the copy is complete.

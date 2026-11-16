@@ -92,7 +92,7 @@ export default async (req, context) => {
     if (full) return json({ error: full, quota: true }, 413);
 
     // An encrypted account only sends locked images (locked with the sheet's key).
-    if (auth.user.keyring && !sealed) return json({ error: 'Reload Scratch Pad to keep adding images.' }, 400);
+    if (auth.user.keyring && !sealed) return json({ error: 'Reload ScrapSheet to keep adding images.' }, 400);
     const record = {
       ...(sealed ? { enc: 1 } : {}),
       id: randomUUID(),

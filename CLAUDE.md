@@ -1,6 +1,8 @@
 # Scratch Pad
 
-A shared scratch pad (five sheets of text, images and files) hosted on Netlify.
+A shared scratch pad (five sheets of text, images and files) hosted on Netlify
+at https://scratch.sector809labs.com (Netlify site `scratchpadx`; DNS is a
+DNS-only CNAME in Cloudflare; the old scratchpadx.netlify.app forwards there).
 Pushes to `main` deploy straight to the live site.
 
 ## Rules

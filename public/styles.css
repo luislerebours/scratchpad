@@ -615,8 +615,10 @@ body.signed-out { background: var(--auth-bg); }
 .auth-punch strong { display: block; font-size: 1.875rem; font-weight: 800; letter-spacing: -.01em; }
 
 .auth-plans { grid-area: plans; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 21px; margin-top: 34px; }
-.plan-card { padding: 20px 14px 22px 24px; border: 1.5px solid var(--auth-line); border-radius: 12px; background: var(--auth-plan); }
-.plan-pro { border: 2.5px solid var(--auth-accent); }
+/* Both plans look the same; the one under the pointer (or keyboard focus) lights up. */
+.plan-card { padding: 20px 14px 22px 24px; border: 2px solid var(--auth-line); border-radius: 12px; background: var(--auth-plan); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.plan-card:hover, .plan-card:focus-visible { border-color: var(--auth-accent); box-shadow: 0 0 0 1px var(--auth-accent); outline: none; }
+.plan-card:active { transform: scale(.99); }
 .plan-name { margin: 0; font-size: 1.625rem; font-weight: 700; line-height: 1.15; }
 .plan-price { margin: 2px 0 0; font-size: 2.3rem; font-weight: 800; line-height: 1.05; letter-spacing: -.01em; white-space: nowrap; }
 .plan-blurb { margin: 8px 0 0; color: var(--auth-soft); font-size: 1.125rem; white-space: nowrap; }

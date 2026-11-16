@@ -4003,16 +4003,21 @@ function appearanceItems() {
 
 // Tapping the logo or name flips between light and dark (and keeps that choice).
 const brandBtn = document.querySelector('#brandBtn');
+// The sign-in page's sun/moon does the same.
+const authThemeBtn = document.querySelector('#authThemeBtn');
 function updateBrandLabel() {
   const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
   brandBtn.setAttribute('aria-label', `ScrapSheet: switch to ${next} mode`);
   brandBtn.title = `Switch to ${next} mode`;
+  authThemeBtn.setAttribute('aria-label', `Switch to ${next} mode`);
+  authThemeBtn.title = `Switch to ${next} mode`;
 }
 function flipTheme() {
   window.scratchTheme?.set(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
   updateBrandLabel();
 }
 brandBtn.addEventListener('click', flipTheme);
+authThemeBtn.addEventListener('click', flipTheme);
 brandBtn.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();

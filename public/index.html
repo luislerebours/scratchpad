@@ -111,8 +111,15 @@
         </div>
       </div>
       <div id="selectBar" class="select-bar" hidden>
-        <button id="selectAllBtn" class="link-btn" type="button">Select all</button>
-        <span id="selectTotal"></span>
+        <label class="select-all"><input id="selectAllBox" class="check" type="checkbox" /><span>Select all</span></label>
+        <div id="bulkBar" class="bulk-bar" role="toolbar" aria-label="Selected files">
+          <span class="sb-sep sb-sep-lead" aria-hidden="true"></span>
+          <span id="bulkCount" class="bulk-count" aria-live="polite">0 selected</span>
+          <span class="sb-sep sb-sep-count" aria-hidden="true"></span>
+          <button id="bulkSaveBtn" class="bulk-btn bulk-save" type="button" disabled><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Download</span></button>
+          <span class="sb-sep" aria-hidden="true"></span>
+          <button id="bulkDeleteBtn" class="bulk-btn bulk-delete" type="button" aria-label="Delete selected files" disabled><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg><span class="bulk-delete-label">Delete</span></button>
+        </div>
       </div>
       <div id="fileList" class="file-list" role="list" aria-label="Files"></div>
       <div id="emptyFiles" class="empty-state">No files on this sheet yet.</div>
@@ -205,13 +212,6 @@
     </div>
   </section>
 
-  <div id="bulkBar" class="bulk-bar" hidden>
-    <div class="bulk-summary"><strong id="bulkCount">0 selected</strong><span id="bulkSize"></span></div>
-    <div class="bulk-actions">
-      <button id="bulkSaveBtn" class="btn bulk-save" type="button" disabled>Download</button>
-      <button id="bulkDeleteBtn" class="btn bulk-delete" type="button" disabled>Delete</button>
-    </div>
-  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

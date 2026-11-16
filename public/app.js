@@ -46,11 +46,9 @@ const filesHint = document.querySelector('#filesHint');
 const selectBtn = document.querySelector('#selectBtn');
 const uploadBtn = document.querySelector('#uploadBtn');
 const selectBar = document.querySelector('#selectBar');
-const selectAllBtn = document.querySelector('#selectAllBtn');
-const selectTotal = document.querySelector('#selectTotal');
+const selectAllBox = document.querySelector('#selectAllBox');
 const bulkBar = document.querySelector('#bulkBar');
 const bulkCount = document.querySelector('#bulkCount');
-const bulkSize = document.querySelector('#bulkSize');
 const bulkSaveBtn = document.querySelector('#bulkSaveBtn');
 const bulkDeleteBtn = document.querySelector('#bulkDeleteBtn');
 const sheetModal = document.querySelector('#sheetModal');
@@ -1684,7 +1682,7 @@ function renderFiles() {
       const checked = selectedIds.has(f.id);
       return `
       <label class="file-row selectable${checked ? ' selected' : ''}" role="listitem">
-        <input type="checkbox" data-select="${id}"${checked ? ' checked' : ''} aria-label="Select ${name}" />
+        <input class="check" type="checkbox" data-select="${id}"${checked ? ' checked' : ''} aria-label="Select ${name}" />
         ${fileIconHtml(f)}
         <span class="file-main">
           <span class="file-title" title="${name}">${name}</span>
@@ -1803,10 +1801,6 @@ function setSelecting(on) {
 
 // "Sheet 5 · 3 files" under the Files title (just the sheet while loading).
 function updateFilesSubtitle() {
-  if (selecting) {
-    filesHint.textContent = 'Tap files to select them';
-    return;
-  }
   const loading = !currentFiles.length && emptyFiles.hidden;
   const n = currentFiles.length;
   filesHint.textContent = loading ? currentSheetName() : `${currentSheetName()} · ${n} file${n === 1 ? '' : 's'}`;
@@ -1814,26 +1808,20 @@ function updateFilesSubtitle() {
 
 function updateSelectionUi() {
   const files = selectedFiles();
-  const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
-  selectBtn.textContent = selecting ? 'Done' : 'Select';
-  uploadBtn.hidden = selecting;
+  selectBtn.textContent = selecting ? 'Cancel' : 'Select';
   updateFilesSubtitle();
   selectBar.hidden = !selecting;
-  bulkBar.hidden = !selecting;
   const all = currentFiles.length > 0 && files.length === currentFiles.length;
-  selectAllBtn.textContent = all ? 'Clear selection' : 'Select all';
-  selectTotal.textContent = `${currentFiles.length} file${currentFiles.length === 1 ? '' : 's'}`;
+  selectAllBox.checked = all;
   bulkCount.textContent = `${files.length} selected`;
-  bulkSize.textContent = files.length ? ` · ${bytes(total)}` : '';
   bulkSaveBtn.disabled = bulkDeleteBtn.disabled = !files.length;
-  bulkSaveBtn.textContent = files.length ? `Download ${files.length}` : 'Download';
-  bulkDeleteBtn.textContent = files.length ? `Delete ${files.length}` : 'Delete';
+  bulkDeleteBtn.setAttribute('aria-label', files.length ? `Delete ${files.length} selected file${files.length === 1 ? '' : 's'}` : 'Delete selected files');
 }
 
 selectBtn.addEventListener('click', () => setSelecting(!selecting));
 
-selectAllBtn.addEventListener('click', () => {
-  selectedIds = selectedIds.size === currentFiles.length ? new Set() : new Set(currentFiles.map(f => f.id));
+selectAllBox.addEventListener('change', () => {
+  selectedIds = selectAllBox.checked ? new Set(currentFiles.map(f => f.id)) : new Set();
   renderFiles();
 });
 

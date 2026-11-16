@@ -456,6 +456,7 @@ function filesUrl(sheet = activeSheet, extra = '') {
 // ---- Icons ----
 
 const ICON_PATHS = {
+  theme: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/>',
   pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
   eraser: '<path d="M20 20H9l-4.5-4.5a2 2 0 0 1 0-2.8L13 4.2a2 2 0 0 1 2.8 0l4 4a2 2 0 0 1 0 2.8L12 19"/><path d="m8 10 6 6"/>',
@@ -3978,12 +3979,24 @@ accountBtn.addEventListener('click', () => {
     { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
     account?.keyring ? { label: 'New recovery key…', icon: 'key', run: confirmNewRecoveryKey } : null,
+    { label: 'Appearance…', icon: 'theme', run: chooseAppearance },
     'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
     { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere }
   ], 'Account');
 });
+
+// Light, dark, or whatever the device uses (theme.js applies and remembers it).
+function chooseAppearance() {
+  const now = window.scratchTheme?.get() || 'system';
+  const choice = (value, label) => ({ label: value === now ? `✓ ${label}` : label, kind: value === now ? 'primary' : 'secondary', full: true, run: () => window.scratchTheme?.set(value) });
+  openSheet({
+    title: 'Appearance',
+    text: 'System follows your device’s light or dark setting.',
+    actions: [choice('system', 'System'), choice('light', 'Light'), choice('dark', 'Dark')]
+  });
+}
 
 function confirmSignOutEverywhere() {
   openSheet({

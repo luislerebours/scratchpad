@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { isSealed } from '../lib/sheets.mjs';
 import { overQuota } from '../lib/usage.mjs';
 
 // Images pasted into a sheet's text. Netlify functions take about 4.5 MB per
@@ -80,16 +81,17 @@ export default async (req, context) => {
   // Start an upload: reserve an id and tell the page how to chunk it.
   if (req.method === 'POST' && action === 'start') {
     const body = await req.json().catch(() => null);
-    const type = String(body?.type || '').toLowerCase();
+    // A locked image's type is locked too (with its sheet's key).
+    const sealed = Boolean(body?.enc);
+    const type = sealed ? String(body?.type || '') : String(body?.type || '').toLowerCase();
     const size = Number(body?.size);
-    if (!TYPES.has(type)) return json({ error: 'Unsupported image type' }, 415);
+    if (sealed ? !isSealed(type) : !TYPES.has(type)) return json({ error: 'Unsupported image type' }, 415);
     if (!Number.isInteger(size) || size <= 0) return json({ error: 'Invalid size' }, 400);
     if (size > MAX_IMAGE_BYTES) return json({ error: 'Image is over 100 MB' }, 413);
     const full = await overQuota(auth.user, ns, size);
     if (full) return json({ error: full, quota: true }, 413);
 
     // An encrypted account only sends locked images (locked with the sheet's key).
-    const sealed = Boolean(body?.enc);
     if (auth.user.keyring && !sealed) return json({ error: 'Reload Scratch Pad to keep adding images.' }, 400);
     const record = {
       ...(sealed ? { enc: 1 } : {}),
@@ -127,8 +129,8 @@ export default async (req, context) => {
     if (url.searchParams.get('preview') === '1') {
       // A locked display copy arrives as plain bytes; the page says what it really is.
       const sent = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      const type = record.enc ? String(url.searchParams.get('type') || '').toLowerCase() : sent;
-      if (!PREVIEW_TYPES.has(type)) return json({ error: 'Unsupported preview type' }, 415);
+      const type = record.enc ? String(url.searchParams.get('type') || '') : sent;
+      if (record.enc ? !isSealed(type) : !PREVIEW_TYPES.has(type)) return json({ error: 'Unsupported preview type' }, 415);
       if (!data.byteLength || data.byteLength > MAX_PREVIEW_BYTES + 28) return json({ error: 'Preview too large' }, 413);
       await store.previews.set(id, data);
       await store.records.setJSON(id, { ...record, preview: { type, size: data.byteLength } });
@@ -148,6 +150,15 @@ export default async (req, context) => {
     await store.records.setJSON(id, done);
     context?.waitUntil?.(removeUnusedImages(ns, sheet).catch(err => console.error('Image cleanup failed', err)));
     return json({ src: `/.netlify/functions/images?sheet=${sheet}&id=${id}` });
+  }
+
+  // A locked image from before types were locked: its types, locked. Never replaces a locked type.
+  if (req.method === 'POST' && action === 'seal-type') {
+    const body = await req.json().catch(() => null);
+    if (!record.enc || isSealed(record.type)) return json({ ok: true });
+    if (!isSealed(body?.type) || (record.preview && !isSealed(body?.preview))) return json({ error: 'Bad type' }, 400);
+    await store.records.setJSON(id, { ...record, type: body.type, ...(record.preview ? { preview: { ...record.preview, type: body.preview } } : {}) });
+    return json({ ok: true });
   }
 
   // Erasing an image from before encryption once its locked copy replaced it in the text.

@@ -52,7 +52,8 @@ export default async req => {
     if (size > MAX_FILE_BYTES) return json({ error: 'File is over 100 MB' }, 413);
     // An encrypted account sends only locked files: a locked name and the file's locked key.
     const sealed = Boolean(body?.enc);
-    if ((auth.user.keyring || sealed) && !(sealed && isWrappedKey(body.key) && isSealed(body.name))) {
+    // Its type is locked too, so the server can't tell a photo from a PDF.
+    if ((auth.user.keyring || sealed) && !(sealed && isWrappedKey(body.key) && isSealed(body.name) && isSealed(body.type))) {
       return json({ error: 'Reload Scratch Pad to keep uploading.' }, 400);
     }
     // Locking a file from before encryption: a locked copy replaces it, keeping
@@ -66,7 +67,7 @@ export default async req => {
     const record = {
       id: randomUUID(),
       name: sealed ? body.name : String(body?.name || 'file').slice(0, 200),
-      type: String(body?.type || 'application/octet-stream').slice(0, 200),
+      type: sealed ? body.type : String(body?.type || 'application/octet-stream').slice(0, 200),
       size,
       chunkSize: CHUNK_BYTES,
       chunks: Math.max(1, Math.ceil(size / CHUNK_BYTES)),
@@ -157,6 +158,16 @@ export default async req => {
   }
 
   // "Keep": the owner still needs this file, so no reminders about its age.
+  // A locked file from before types were locked: its type, locked with its key. Never replaces a locked type.
+  if (req.method === 'POST' && action === 'seal-type') {
+    const body = await req.json().catch(() => null);
+    if (!record.enc || isSealed(record.type)) return json({ ok: true });
+    if (!isSealed(body?.type)) return json({ error: 'Bad type' }, 400);
+    const latest = (await store.records.get(id, { type: 'json' })) || record;
+    await store.records.setJSON(id, { ...latest, type: body.type, ...(latest.thumb ? { thumb: { ...latest.thumb, type: 'application/octet-stream' } } : {}) });
+    return json({ ok: true });
+  }
+
   if (req.method === 'POST' && action === 'keep') {
     if (!record.complete) return json({ error: 'Upload not finished' }, 409);
     const body = await req.json().catch(() => ({}));

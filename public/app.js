@@ -277,7 +277,8 @@ async function openFiles(list, sheet) {
     knownFiles.set(f.id, file);
     if (!f.enc) return file;
     try {
-      return { ...file, name: await vault.decryptText(await fileKeyFor(file, sheet), f.name) };
+      const key = await fileKeyFor(file, sheet);
+      return { ...file, name: await vault.decryptText(key, f.name), type: await vault.decryptText(key, f.type) };
     } catch {
       return { ...file, name: 'Locked file' };
     }
@@ -1098,8 +1099,9 @@ function imageObjectUrl(src) {
       let type = (r.headers.get('content-type') || '').split(';')[0];
       if (type === 'application/octet-stream') {
         const sheet = validSheet(new URL(src, location.origin).searchParams.get('sheet'));
-        data = await vault.decryptBytes(await keyForSheet(sheet), data);
-        type = r.headers.get('x-image-type') || '';
+        const key = await keyForSheet(sheet);
+        data = await vault.decryptBytes(key, data);
+        type = await vault.decryptText(key, r.headers.get('x-image-type') || '');
       }
       return URL.createObjectURL(new Blob([data], { type }));
     })().catch(err => {
@@ -1158,13 +1160,14 @@ async function uploadPadImage(img, blob) {
     // Locked with the sheet's key: the display copy and every piece of the original.
     const key = isLocked() ? await keyForSheet(sheet) : null;
     const seal = async part => key ? new Blob([await vault.encryptBytes(key, new Uint8Array(await part.arrayBuffer()))]) : part;
-    const start = await postJson(imageUrl(sheet, 'action=start'), { type, size: blob.size, ...(key ? { enc: 1 } : {}) });
+    const start = await postJson(imageUrl(sheet, 'action=start'), { type: key ? await vault.encryptText(key, type) : type, size: blob.size, ...(key ? { enc: 1 } : {}) });
     const id = encodeURIComponent(start.id);
     const loaded = new Array(start.chunks).fill(0);
     const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
     if (preview) {
       const sealedPreview = await seal(preview);
-      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1&type=${encodeURIComponent(preview.type)}`), sealedPreview, transfer.signal, () => {}, key ? 'application/octet-stream' : preview.type), transfer.signal);
+      const previewType = key ? await vault.encryptText(key, preview.type) : preview.type;
+      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1&type=${encodeURIComponent(previewType)}`), sealedPreview, transfer.signal, () => {}, key ? 'application/octet-stream' : preview.type), transfer.signal);
     }
     await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
       const part = await seal(blob.slice(i * start.chunkSize, Math.min(blob.size, (i + 1) * start.chunkSize)));
@@ -2370,6 +2373,7 @@ async function saveOriginalImage(src) {
     const r = await fetch(imageUrl(sheet, `id=${id}&info=1`), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const info = await r.json();
+    if (info.enc) info.type = await vault.decryptText(await keyForSheet(sheet), info.type);
     const ext = ((info.type.split('/')[1] || 'png').replace('jpeg', 'jpg'));
     const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
     const name = `Scratch Pad image ${stamp}.${ext}`;
@@ -2917,7 +2921,7 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
     // piece and the thumbnail are locked with it.
     const key = isLocked() ? await vault.newKey() : null;
     const meta = key
-      ? { name: await vault.encryptText(key, file.name), type: file.type, size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), ...extra }
+      ? { name: await vault.encryptText(key, file.name), type: await vault.encryptText(key, file.type || 'application/octet-stream'), size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), ...extra }
       : { name: file.name, type: file.type, size: file.size };
     const start = await postJson(filesUrl(targetSheet, 'action=start'), meta);
     id = start.id;
@@ -4423,14 +4427,15 @@ async function lockImage(sheet, id, key) {
   const parts = [];
   for (let i = 0; i < info.chunks; i++) parts.push(await getBytes(imageUrl(sheet, `id=${encodeURIComponent(id)}&chunk=${i}`)));
   const original = new Blob(parts, { type: info.type });
-  const start = await postJson(imageUrl(sheet, 'action=start'), { type: info.type, size: original.size, enc: 1 });
+  const start = await postJson(imageUrl(sheet, 'action=start'), { type: await vault.encryptText(key, info.type), size: original.size, enc: 1 });
   const newId = encodeURIComponent(start.id);
   const signal = new AbortController().signal;
   const seal = async part => new Blob([await vault.encryptBytes(key, new Uint8Array(await part.arrayBuffer()))]);
   if (info.preview) {
     const preview = new Blob([await getBytes(imageUrl(sheet, `id=${encodeURIComponent(id)}`))]);
     const sealedPreview = await seal(preview);
-    await withRetry(() => putChunk(imageUrl(sheet, `id=${newId}&preview=1&type=${encodeURIComponent(info.preview)}`), sealedPreview, signal, () => {}), signal);
+    const previewType = await vault.encryptText(key, info.preview);
+    await withRetry(() => putChunk(imageUrl(sheet, `id=${newId}&preview=1&type=${encodeURIComponent(previewType)}`), sealedPreview, signal, () => {}), signal);
   }
   for (let i = 0; i < start.chunks; i++) {
     const part = await seal(original.slice(i * start.chunkSize, Math.min(original.size, (i + 1) * start.chunkSize)));
@@ -4512,6 +4517,34 @@ async function lockTheRest() {
   }
 }
 
+// Files and images locked before their types were: their types get locked too, once.
+async function sealOldTypes() {
+  try {
+    for (const sheet of await slotsToLock()) {
+      const key = await keyForSheet(sheet);
+      const { files } = await getJson(filesUrl(sheet, 'all=1'));
+      for (const f of files.filter(x => x.enc && !vault.isSealed(x.type))) {
+        const fileKey = await vault.unwrap(f.key, key);
+        await postJson(filesUrl(sheet, `id=${encodeURIComponent(f.id)}&action=seal-type`), { type: await vault.encryptText(fileKey, f.type || 'application/octet-stream') });
+      }
+      const html = await sheetHtml(sheet, await getJson(stateUrl(sheet)));
+      const ids = new Set([...html.matchAll(/images\?sheet=(?:[1-9]|10)(?:&amp;|&)id=([A-Za-z0-9-]{1,64})/g)].map(m => m[1]));
+      for (const id of ids) {
+        const info = await getJson(imageUrl(sheet, `id=${encodeURIComponent(id)}&info=1`)).catch(() => null);
+        if (!info?.enc || vault.isSealed(info.type)) continue;
+        await postJson(imageUrl(sheet, `id=${encodeURIComponent(id)}&action=seal-type`), {
+          type: await vault.encryptText(key, info.type),
+          ...(info.preview ? { preview: await vault.encryptText(key, info.preview) } : {})
+        });
+      }
+    }
+    await authPost('types-sealed', {});
+    account.typesSealed = true;
+  } catch (err) {
+    console.error('Locking file types failed', err);
+  }
+}
+
 async function startApp() {
   document.body.classList.remove('signed-out');
   authScreen.hidden = true;
@@ -4538,7 +4571,8 @@ async function startApp() {
   prefetchSheets();
   await switchSheet(startSheet, { remember:false, force:true });
   appStarted = true;
-  if (locking) lockTheRest();
+  if (locking) lockTheRest().then(() => { if (account.locked === 'on') sealOldTypes(); });
+  else if (masterKey && account.locked === 'on' && !account.typesSealed) sealOldTypes();
   connectSync();
   // Every 2 seconds while the relay is down; once a minute as a safety net otherwise.
   setInterval(() => {

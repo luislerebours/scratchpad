@@ -74,7 +74,9 @@ Pushes to `main` deploy straight to the live site.
   wrapped by the password and by a recovery key (shown once; "New recovery key…"
   in the account menu). Each sheet has a key (wrapped by the master key, on its
   entry) that locks its text, name and pasted images; each file has a key
-  (wrapped by its sheet's key) that locks its name, chunks and thumbnail. The
+  (wrapped by its sheet's key) that locks its name, type, chunks and thumbnail
+  (pasted images' types are locked with the sheet key; older ones are locked
+  once in the background, then the account gets `typesSealedAt`). The
   device keeps the master key unextractable in IndexedDB until sign-out; without
   it the page asks for the password ("Unlock"). Once an account has a keyring the
   server refuses anything unlocked. Share links carry the item's key after `#`.

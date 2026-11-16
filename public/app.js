@@ -3462,15 +3462,17 @@ function renderShare(focus) {
     return;
   }
   const canShare = typeof navigator.share === 'function';
+  const phone = canShare && phoneShare();
   shareBody.innerHTML = `
+    ${phone ? `<button class="btn full share-send-main" type="button" data-share-send>${icon('share')}Share…</button>` : ''}
     <div>
       <label class="field-label" for="shareUrlInput">Link</label>
       <div class="share-url-row">
         <input id="shareUrlInput" type="text" readonly value="${escapeHtml(shareUrl(shareLink))}" />
-        <button class="btn compact" type="button" data-share-copy>Copy</button>
+        <button class="btn compact${phone ? ' secondary' : ''}" type="button" data-share-copy>Copy</button>
       </div>
     </div>
-    ${canShare ? `<button class="btn secondary full" type="button" data-share-send>${icon('share')}Send link…</button>` : ''}
+    ${canShare && !phone ? `<button class="btn secondary full" type="button" data-share-send>${icon('share')}Share…</button>` : ''}
     <p class="share-status"><b>${escapeHtml(untilText(shareLink.expiresAt))}</b> · ${escapeHtml(viewsText(shareLink.views || 0))}</p>
     <p class="seg-label">Change to expire after (from now)</p>
     ${segHtml(0)}
@@ -3478,7 +3480,26 @@ function renderShare(focus) {
       <span class="share-status">Anyone with the link can open ${what}.</span>
       <button class="link-btn share-off" type="button" data-share-revoke>Turn off link</button>
     </div>`;
-  if (focus) shareBody.querySelector('[data-share-copy]').focus({ preventScroll: true });
+  if (focus) shareBody.querySelector(phone ? '[data-share-send]' : '[data-share-copy]').focus({ preventScroll: true });
+}
+
+// Phones and tablets: the system share menu (Messages, Mail, AirDrop, WhatsApp…)
+// comes first; computers lead with Copy.
+function phoneShare() {
+  return typeof navigator.share === 'function' && matchMedia('(pointer: coarse)').matches;
+}
+
+// Opens the system share menu. Some phones refuse when it isn't straight
+// after a tap (say, after waiting for a new link); the Share… button is then
+// one tap away. Returns false if the menu didn't open.
+async function shareNatively(url, title) {
+  try {
+    await navigator.share({ title, url });
+    return true;
+  } catch (err) {
+    // Closing the menu without sharing is fine; anything else means it didn't open.
+    return err?.name === 'AbortError';
+  }
 }
 
 async function copyLink(url, input) {
@@ -3516,7 +3537,11 @@ shareBody.addEventListener('click', async e => {
       shareLink = share;
       noteShare(share);
       renderShare(true);
-      copyLink(shareUrl(share), shareBody.querySelector('#shareUrlInput'));
+      if (phoneShare()) {
+        if (!(await shareNatively(shareUrl(share), shareTarget.name))) showToast('Link ready: tap Share… to send it');
+      } else {
+        copyLink(shareUrl(share), shareBody.querySelector('#shareUrlInput'));
+      }
     } catch (err) {
       btn.disabled = false;
       showToast(err.message);
@@ -3524,7 +3549,7 @@ shareBody.addEventListener('click', async e => {
   } else if ('shareCopy' in btn.dataset) {
     copyLink(shareUrl(shareLink), shareBody.querySelector('#shareUrlInput'));
   } else if ('shareSend' in btn.dataset) {
-    navigator.share({ title: shareTarget.name, url: shareUrl(shareLink) }).catch(() => {});
+    if (!(await shareNatively(shareUrl(shareLink), shareTarget.name))) copyLink(shareUrl(shareLink), shareBody.querySelector('#shareUrlInput'));
   } else if ('shareRevoke' in btn.dataset) {
     try {
       const { share } = await sharePost({ action: 'revoke', token: shareLink.token });
@@ -3596,7 +3621,7 @@ function renderLinks() {
     return `<div class="trash-row">
       ${mark}
       <div class="search-main"><div class="trash-name" title="${name}">${name}</div><div class="trash-meta">${where}</div><div class="trash-meta link-row-state${s.state === 'on' ? '' : ' off'}">${state}</div></div>
-      ${s.state === 'on' ? `<button class="link-btn" type="button" data-link-copy="${i}">Copy</button>
+      ${s.state === 'on' ? `<button class="link-btn" type="button" data-link-copy="${i}">${phoneShare() ? 'Share' : 'Copy'}</button>
       <button class="icon-btn" type="button" data-link-off="${i}" aria-label="Turn off the link to ${name}" title="Turn off link">${icon('trash')}</button>` : '<span></span><span></span>'}
     </div>`;
   };
@@ -3609,7 +3634,8 @@ linksBody.addEventListener('click', async e => {
   const btn = e.target.closest('button');
   if (!btn) return;
   if (btn.dataset.linkCopy) {
-    copyLink(shareUrl(linksList[Number(btn.dataset.linkCopy)]));
+    const share = linksList[Number(btn.dataset.linkCopy)];
+    if (!phoneShare() || !(await shareNatively(shareUrl(share), share.name))) copyLink(shareUrl(share));
   } else if (btn.dataset.linkOff) {
     const share = linksList[Number(btn.dataset.linkOff)];
     btn.disabled = true;

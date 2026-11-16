@@ -24,6 +24,12 @@ Pushes to `main` deploy straight to the live site.
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
     plus a small thumbnail for images (made in the browser, `thumb=1`)
   - `images.mjs`: images in the text (chunked original plus a display copy)
+  - `share.mjs`: share links. A file, or a sheet with its text, images and
+    files, for anyone with `/s/<token>` (viewer: `public/share.html`/`share.js`)
+    until it expires (1, 7 or 30 days) or is turned off. One link per file or
+    sheet; a link stops working if what it shares is deleted. Links live in the
+    `scratchpad-shares` store; each account lists its tokens in `meta/shares`.
+    Downloads are capped per link per hour. Viewer pages are noindex/no-referrer.
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none; the
   admin has none by default), enforced when an upload starts; the admin can

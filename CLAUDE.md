@@ -56,3 +56,10 @@ Pushes to `main` deploy straight to the live site.
   sizes and the header's see-through `mark.png` are made from it.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
+- Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a
+  file marks it `deletedAt`; deleting a sheet moves it to `meta/trash` and keeps
+  its slot (text, files, images) so nothing new lands on top of it. Both are
+  deleted for good after 30 days (checked when lists are read) or from the
+  Recently Deleted panel. They still count toward storage until then.
+- Search runs on the device over the kept copies of every sheet and its file
+  list (`state?meta=all` returns both), so typing makes no requests.

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { bumpRev, json, parseSheet, requireUser } from '../lib/auth.mjs';
+import { deleteFileForGood, fileStores, publicRecord, readRecords, visibleFiles } from '../lib/files.mjs';
 import { overQuota } from '../lib/usage.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
@@ -14,33 +15,6 @@ const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
 const chunkKey = (id, index) => `${id}-${index}`;
 
-// Records are kept in their own store so listing never touches chunk data.
-const stores = (ns, sheet) => ({
-  records: userStore(ns, 'files', sheet),
-  chunks: userStore(ns, 'chunks', sheet),
-  thumbs: userStore(ns, 'file-thumbs', sheet)
-});
-
-const publicRecord = (record, sheet) => ({
-  id: record.id,
-  sheet,
-  name: record.name,
-  type: record.type,
-  size: record.size,
-  chunks: record.chunks,
-  uploadedAt: record.uploadedAt,
-  kept: Boolean(record.kept),
-  thumb: Boolean(record.thumb)
-});
-
-async function deleteFile({ records, chunks, thumbs }, record) {
-  await Promise.all([
-    ...Array.from({ length: record.chunks }, (_, i) => chunks.delete(chunkKey(record.id, i))),
-    record.thumb ? thumbs.delete(record.id) : null
-  ]);
-  await records.delete(record.id);
-}
-
 export default async req => {
   const auth = await requireUser(req);
   if (auth.error) return auth.error;
@@ -48,24 +22,21 @@ export default async req => {
   const sheet = parseSheet(url.searchParams.get('sheet'));
   if (!sheet) return json({ error: 'Invalid sheet' }, 400);
 
-  const store = stores(auth.ns, sheet);
   const id = url.searchParams.get('id');
   const action = url.searchParams.get('action');
   const chunkParam = url.searchParams.get('chunk');
 
-  // List completed files, cleaning up uploads that were abandoned midway.
+  // List completed files, cleaning up uploads that were abandoned midway, and
+  // (while reading) files that have been in Recently Deleted for 30 days.
   if (req.method === 'GET' && !id) {
-    const { blobs } = await store.records.list();
-    const all = await Promise.all(blobs.map(({ key }) => store.records.get(key, { type: 'json' })));
-    const files = [];
-    for (const record of all) {
-      if (!record) continue;
-      if (record.complete) files.push(publicRecord(record, sheet));
-      else if (Date.now() - record.startedAt > STALE_UPLOAD_MS) await deleteFile(store, record);
+    const { store, records } = await readRecords(auth.ns, sheet);
+    for (const record of records) {
+      if (!record.complete && Date.now() - record.startedAt > STALE_UPLOAD_MS) await deleteFileForGood(store, record);
     }
-    files.sort((a, b) => b.uploadedAt - a.uploadedAt);
-    return json({ files, maxBytes: MAX_FILE_BYTES });
+    return json({ files: visibleFiles(records, sheet), maxBytes: MAX_FILE_BYTES });
   }
+
+  const store = fileStores(auth.ns, sheet);
 
   // Start an upload: reserve an id and tell the client how to chunk it.
   if (req.method === 'POST' && action === 'start') {
@@ -168,10 +139,15 @@ export default async req => {
     return json(publicRecord(updated, sheet));
   }
 
+  // Deleting moves a file to Recently Deleted; an unfinished upload just goes.
   if (req.method === 'DELETE') {
-    await deleteFile(store, record);
+    if (!record.complete) {
+      await deleteFileForGood(store, record);
+      return json({ ok: true });
+    }
+    if (!record.deletedAt) await store.records.setJSON(id, { ...record, deletedAt: Date.now() });
     await bumpRev(auth.ns, `files-${sheet}`);
-    return json({ ok: true });
+    return json({ ok: true, trashed: true });
   }
 
   return json({ error: 'Method not allowed' }, 405);

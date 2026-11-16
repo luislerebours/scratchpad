@@ -4145,7 +4145,8 @@ accountBtn.addEventListener('click', () => {
     'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
-    { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere }
+    { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere },
+    account?.admin ? null : { label: 'Delete account…', icon: 'trash', danger: true, run: openDeleteAccount }
   ], 'Account');
 });
 
@@ -4181,6 +4182,67 @@ brandBtn.addEventListener('keydown', e => {
 });
 matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => setTimeout(updateBrandLabel));
 updateBrandLabel();
+
+// ---- Delete account: everything in it, after the password (checked as the sign-in secret) ----
+
+const deleteAccountModal = document.querySelector('#deleteAccountModal');
+const deleteAccountForm = document.querySelector('#deleteAccountForm');
+const deleteAccountError = document.querySelector('#deleteAccountError');
+const deleteAccountPassword = document.querySelector('#deleteAccountPassword');
+
+function openDeleteAccount() {
+  rememberFocus('delete');
+  deleteAccountModal.querySelector('#deleteAccountEmail').textContent = account?.email || 'this account';
+  deleteAccountModal.querySelector('#deleteAccountUser').value = account?.email || '';
+  deleteAccountModal.querySelector('#deleteAccountPro').hidden = !myPlan().billing || myPlan().plan !== 'pro';
+  deleteAccountError.textContent = '';
+  deleteAccountPassword.value = '';
+  deleteAccountModal.hidden = false;
+  updateModalOpen();
+  deleteAccountPassword.focus();
+}
+
+function closeDeleteAccount() {
+  if (deleteAccountModal.hidden) return;
+  deleteAccountModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('delete');
+}
+
+deleteAccountModal.querySelectorAll('[data-close-delete]').forEach(btn => btn.addEventListener('click', closeDeleteAccount));
+deleteAccountModal.addEventListener('click', e => { if (e.target === deleteAccountModal) closeDeleteAccount(); });
+deleteAccountModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeDeleteAccount(); });
+deleteAccountForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const submit = deleteAccountForm.querySelector('[type="submit"]');
+  const password = deleteAccountPassword.value;
+  deleteAccountError.textContent = '';
+  if (!password) {
+    deleteAccountError.textContent = 'Enter your password.';
+    return;
+  }
+  submit.disabled = true;
+  submit.textContent = 'Deleting…';
+  try {
+    const { auth } = await vault.passwordKeys(account.email, password);
+    const r = await rawFetch(`${API_AUTH}?action=delete-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auth })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Couldn’t delete the account. Try again.');
+    appStarted = false;
+    await vault.forgetKeys();
+    try { localStorage.clear(); sessionStorage.clear(); } catch { /* nothing kept */ }
+    deleteAccountForm.innerHTML = '<p class="delete-account-text"><strong>Your account was deleted.</strong> Everything in it is gone, and you’re signed out on every device.</p>';
+    setTimeout(() => location.replace('/'), 2500);
+  } catch (err) {
+    deleteAccountError.textContent = err.message;
+    submit.disabled = false;
+    submit.textContent = 'Delete account';
+  }
+});
 
 function confirmSignOutEverywhere() {
   openSheet({

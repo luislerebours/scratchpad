@@ -1808,7 +1808,6 @@ function updateFilesSubtitle() {
 
 function updateSelectionUi() {
   const files = selectedFiles();
-  selectBtn.textContent = selecting ? 'Cancel' : 'Select';
   updateFilesSubtitle();
   selectBar.hidden = !selecting;
   const all = currentFiles.length > 0 && files.length === currentFiles.length;
@@ -1818,7 +1817,8 @@ function updateSelectionUi() {
   bulkDeleteBtn.setAttribute('aria-label', files.length ? `Delete ${files.length} selected file${files.length === 1 ? '' : 's'}` : 'Delete selected files');
 }
 
-selectBtn.addEventListener('click', () => setSelecting(!selecting));
+selectBtn.addEventListener('click', () => setSelecting(true));
+document.querySelector('#selectCancelBtn').addEventListener('click', () => setSelecting(false));
 
 selectAllBox.addEventListener('change', () => {
   selectedIds = selectAllBox.checked ? new Set(currentFiles.map(f => f.id)) : new Set();

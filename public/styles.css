@@ -167,7 +167,14 @@ body.signed-out .app-shell { display: none; }
 .files-title { font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
 .files-title:focus { outline: none; }
 .files-sub { margin-top: 3px; color: var(--muted); font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.files-head .link-btn { flex: 0 0 auto; min-height: 44px; margin: -6px -8px 0 0; padding: 0 8px; font-size: 1rem; font-weight: 600; }
+.select-row { display: flex; justify-content: flex-end; min-height: 12px; margin-top: 2px; }
+.select-files-btn { appearance: none; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin: -2px -8px -6px 0; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--accent); font: inherit; font-size: .9375rem; font-weight: 600; cursor: pointer; }
+.select-files-btn .i { width: 19px; height: 19px; stroke-width: 2; }
+.select-files-btn:hover { background: var(--hover); }
+.select-cancel { appearance: none; flex: 0 0 auto; min-height: 44px; margin: 0 -8px 0 auto; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--accent); font: inherit; font-size: 1.0625rem; font-weight: 600; cursor: pointer; }
+.select-cancel:hover { background: var(--hover); }
+body:not(.selecting) .file-list { border-top: 1px solid var(--line); }
+body.selecting .select-row { display: none; }
 
 /* Upload zone: tap to pick files; on a computer, also the drop target */
 .drop-zone { appearance: none; display: grid; justify-items: center; gap: 4px; width: 100%; margin-top: 18px; padding: 18px 16px 16px; border: 1.5px dashed rgba(56, 189, 248, .75); border-radius: 14px; background: rgba(56, 189, 248, .06); color: var(--text); font: inherit; text-align: center; cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
@@ -185,7 +192,8 @@ body.signed-out .app-shell { display: none; }
 body.dragging-files .drop-zone { border-color: var(--accent); background: rgba(56, 189, 248, .1); }
 .files.drag-active .drop-zone { border-style: solid; border-color: var(--accent); background: rgba(56, 189, 248, .16); }
 
-.file-list { margin-top: 10px; }
+.file-list { margin-top: 6px; }
+body:not(.selecting) .select-row:has(#selectBtn:not([hidden])) + .transfer-list:empty ~ .file-list { margin-top: 0; }
 .file-list:empty { display: none; }
 .file-row { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
 .file-row-inner { position: relative; z-index: 1; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; min-height: 72px; padding: 10px 0; background: var(--files-bg); touch-action: pan-y; transition: transform .22s ease; }
@@ -224,7 +232,7 @@ body.dragging-files .drop-zone { border-color: var(--accent); background: rgba(5
 .check:checked { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304121f' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E"); }
 .check:indeterminate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304121f' stroke-width='3.2' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E"); }
 
-.select-bar { display: flex; align-items: center; margin-top: 14px; }
+.select-bar { display: flex; align-items: center; margin-top: 6px; }
 .select-all { display: inline-flex; align-items: center; gap: 14px; min-height: 44px; color: var(--text); font-size: 1rem; font-weight: 600; cursor: pointer; }
 .bulk-bar { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
 .sb-sep { flex: 0 0 auto; width: 1px; height: 26px; background: var(--line-strong); }
@@ -248,7 +256,7 @@ body.dragging-files .drop-zone { border-color: var(--accent); background: rgba(5
   body.selecting .app-shell { padding-bottom: 110px; }
   body.selecting .toast { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 76px); }
   .bulk-bar { position: fixed; z-index: 800; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); justify-content: space-between; gap: 6px; height: 60px; padding: 0 10px 0 20px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--raised); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
-  .sb-sep-lead { display: none; }
+  .sb-sep-lead, .sb-sep-cancel { display: none; }
   .bulk-count { color: var(--text); font-weight: 600; }
   .bulk-save { flex: 1 1 auto; }
   .bulk-delete { width: 48px; padding: 0; }
@@ -419,7 +427,8 @@ body.dragging-files .files.drag-active
   .sb-sep-lead { margin-right: 24px; }
   .sb-sep-count { flex: 1 1 auto; height: 0; background: none; }
   .bulk-btn { padding: 0 14px; }
-  .bulk-bar .sb-sep:not(.sb-sep-lead):not(.sb-sep-count) { margin: 0 8px; }
+  .select-bar .sb-sep:not(.sb-sep-lead):not(.sb-sep-count) { margin: 0 8px; }
+  .select-cancel { margin: 0; padding: 0 14px; font-size: 1rem; }
 }
 
 /* ---------- Narrow phones ---------- */

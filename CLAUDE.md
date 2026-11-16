@@ -71,6 +71,14 @@ Pushes to `main` deploy straight to the live site.
   (clear/delete always confirm in a bottom sheet). The header dot is the
   server connection; the toolbar text is the save state, which shows
   "Saved" only after the server confirms.
+- Sign-in page (`#authScreen` in `index.html`) doubles as the front page:
+  pitch, device row, Free/Pro plan cards, features and footer around the
+  sign-in card, where every auth step (code, password, unlock, recovery) shows.
+  Its own type is Plus Jakarta Sans served from `public/fonts/` (no Google
+  requests) and its own `--auth-*` tokens (brighter cyan on dark, teal on
+  light). `.only-wide` / `.only-narrow` swap copy at 860px; the sun/moon is
+  `#authThemeBtn`. Help/Support go to support@sector809labs.com; `/privacy` and
+  `/terms` don't exist yet.
 - Icons: `public/assets/icon-source.png` is the 1024px master; the other
   sizes and the header's see-through `mark.png` are made from it.
 - Files can be swiped left to delete (touch only). The server delete waits

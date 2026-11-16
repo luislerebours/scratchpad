@@ -215,32 +215,90 @@
   </div>
 
   <section id="authScreen" class="auth-screen" hidden>
-    <div class="auth-card">
-      <div class="auth-brand">
-        <img data-mark src="/assets/mark.png?v=2" alt="" class="brand-icon mark-dark" width="34" height="34" />
-        <img data-mark src="/assets/mark-light.png?v=2" alt="" class="brand-icon mark-light" width="34" height="34" />
-        <h1>ScrapSheet</h1>
-      </div>
-
-      <form id="signinForm" class="auth-step" data-step="signin" novalidate>
-        <h2>Sign in</h2>
-        <label class="field-label" for="signinEmail">Email</label>
-        <input id="signinEmail" class="auth-input" type="email" autocomplete="username" inputmode="email" required />
-        <div class="label-row">
-          <label class="field-label" for="signinPassword">Password</label>
-          <button class="link-btn small-link" type="button" data-go="email" data-mode="reset">Forgot password?</button>
+    <div class="auth-page">
+      <header class="auth-top">
+        <div class="auth-logo">
+          <img data-mark src="/assets/mark.png?v=2" alt="" class="mark-dark" width="41" height="41" />
+          <img data-mark src="/assets/mark-light.png?v=2" alt="" class="mark-light" width="41" height="41" />
+          <span>ScrapSheet</span>
         </div>
+        <nav class="auth-nav" aria-label="Help and appearance">
+          <a class="auth-help" href="mailto:support@sector809labs.com">Help</a>
+          <button class="auth-theme" id="authThemeBtn" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+            <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2.3M12 19.5v2.3M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.2 12h2.3M19.5 12h2.3M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+            <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg>
+          </button>
+        </nav>
+      </header>
+
+      <div class="auth-main">
+        <div class="auth-pitch">
+          <h1 class="auth-hero">Your devices don’t <span>have to match.</span></h1>
+          <p class="auth-lede only-wide">Move text, images, and files between your iPhone, Android, Mac, and Windows computer.</p>
+          <p class="auth-lede-2 only-wide">Add something on one device, and it’s ready on the others.</p>
+          <p class="auth-lede only-narrow">Move text and files between iPhone, Android, Mac and Windows.</p>
+          <ul class="auth-devices only-wide" aria-label="Works on iPhone, Android, Mac and Windows">
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 5.2h3M12 18.3h.01"/></svg>iPhone</li>
+            <li class="auth-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h18M6.5 8.5 3 12l3.5 3.5M17.5 8.5 21 12l-3.5 3.5"/></svg></li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5a8 8 0 0 1 16 0Z"/><path d="M7.2 6.3l1.6 2.8M16.8 6.3l-1.6 2.8"/><circle cx="9" cy="13.6" r=".6"/><circle cx="15" cy="13.6" r=".6"/></svg>Android</li>
+            <li class="auth-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h18M6.5 8.5 3 12l3.5 3.5M17.5 8.5 21 12l-3.5 3.5"/></svg></li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="11" rx="1.6"/><path d="M1.8 18.3h20.4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1ZM10.5 18.3h3"/></svg>Mac</li>
+            <li class="auth-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h18M6.5 8.5 3 12l3.5 3.5M17.5 8.5 21 12l-3.5 3.5"/></svg></li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.5 11 4.3v7.2H3ZM13 4l8-1.2v8.7h-8ZM3 13.5h8v7.2l-8-1.2ZM13 13.5h8v8.7l-8-1.2Z"/></svg>Windows</li>
+          </ul>
+          <p class="auth-punch only-wide"><strong>No emailing yourself. No USB drives.</strong> <span>Just open ScrapSheet.</span></p>
+          <p class="auth-punch only-narrow"><strong>No emails. No USB drives.</strong></p>
+        </div>
+
+        <div class="auth-plans" aria-label="Plans">
+          <section class="plan-card">
+            <h2 class="plan-name">Free</h2>
+            <p class="plan-price">$0</p>
+            <p class="plan-blurb only-wide">Start with the essentials</p>
+            <ul class="plan-list">
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>1 sheet</li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span class="only-wide">1 file attachment, up to 10 MB</span><span class="only-narrow">1 file · 10 MB</span></li>
+              <li class="only-wide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Real-time text and image sync</li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span class="only-wide">Access on all your devices</span><span class="only-narrow">All devices</span></li>
+            </ul>
+          </section>
+          <section class="plan-card plan-pro">
+            <h2 class="plan-name">Pro</h2>
+            <p class="plan-price">$0.99<span class="only-wide"> / month</span><span class="only-narrow"> / mo</span></p>
+            <p class="plan-blurb only-wide">More room for your daily work</p>
+            <ul class="plan-list">
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>10 sheets</li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span class="only-wide">5 GB of storage</span><span class="only-narrow">5 GB storage</span></li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span class="only-wide">Files up to 100 MB each</span><span class="only-narrow">100 MB per file</span></li>
+              <li class="only-wide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>ZIP downloads and bulk actions</li>
+            </ul>
+          </section>
+        </div>
+
+        <p class="auth-closer only-narrow">Your notes and files. Ready on your other devices.</p>
+
+    <div class="auth-card">
+      <form id="signinForm" class="auth-step" data-step="signin" novalidate>
+        <p class="auth-kicker only-wide">Your private workspace</p>
+        <h2 class="auth-title">Welcome back</h2>
+        <p class="auth-sub only-wide">Sign in to pick up where you left off.</p>
+        <label class="field-label" for="signinEmail">Email address</label>
+        <input id="signinEmail" class="auth-input" type="email" autocomplete="username" inputmode="email" placeholder="you@example.com" required />
+        <label class="field-label" for="signinPassword">Password</label>
         <div class="password-field">
-          <input id="signinPassword" class="auth-input" type="password" autocomplete="current-password" required />
+          <input id="signinPassword" class="auth-input" type="password" autocomplete="current-password" placeholder="Enter your password" required />
           <button class="reveal-btn" type="button" aria-label="Show password" aria-pressed="false" data-reveal>
             <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
             <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.7 17.7 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
           </button>
         </div>
+        <button class="link-btn auth-forgot" type="button" data-go="email" data-mode="reset">Forgot password?</button>
         <p class="auth-error" role="alert"></p>
         <button class="btn auth-submit" type="submit">Sign in</button>
         <div class="auth-divider"><span>New to ScrapSheet?</span></div>
-        <button class="btn secondary auth-create" type="button" data-go="email" data-mode="create">Create an account</button>
+        <button class="btn auth-create" type="button" data-go="email" data-mode="create">Create a free account</button>
+        <p class="auth-note">Start free. Upgrade anytime.</p>
+        <p class="auth-legal only-wide"><a href="/terms">Terms</a><span aria-hidden="true">·</span><a href="/privacy">Privacy</a></p>
       </form>
 
       <form id="emailForm" class="auth-step" data-step="email" novalidate hidden>
@@ -320,6 +378,20 @@
         <p class="auth-error" role="alert"></p>
         <button class="btn auth-submit" type="submit">Continue</button>
       </form>
+        <p class="auth-secure"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10.5" rx="2.4"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>Protected with AES-256 encryption.</p>
+    </div>
+      </div>
+
+      <ul class="auth-features only-wide">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="11" rx="1.6"/><path d="M1.8 18.3h20.4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1Z"/></svg><div><strong>Across every platform</strong><span>iPhone, Android, Mac and Windows</span></div></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7.5 12 12l9-4.5Z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg><div><strong>Text, images and files</strong><span>Keep everything together in one place</span></div></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10.5" rx="2.4"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg><div><strong>AES-256 encryption</strong><span>Protection built into your workspace.</span></div></li>
+      </ul>
+
+      <footer class="auth-foot only-wide">
+        <span>ScrapSheet</span>
+        <nav aria-label="About"><a href="mailto:support@sector809labs.com">Support</a><span aria-hidden="true">·</span><a href="/privacy">Privacy</a><span aria-hidden="true">·</span><a href="/terms">Terms</a></nav>
+      </footer>
     </div>
   </section>
 

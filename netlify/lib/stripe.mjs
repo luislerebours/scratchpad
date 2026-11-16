@@ -4,7 +4,8 @@ import { authStore, emailKey, env } from './auth.mjs';
 // Stripe, through its REST API (no SDK). Keys live in Netlify's environment:
 //   STRIPE_SECRET_KEY      sk_test_… or sk_live_…
 //   STRIPE_WEBHOOK_SECRET  whsec_… for /.netlify/functions/stripe-webhook
-// Prices are found by lookup key, so the code never holds price ids.
+// Prices are found by lookup key, so the code never holds price ids. The
+// product ("ScrapSheet Pro") carries the SaaS tax code Managed Payments needs.
 export const LOOKUP_KEYS = { month: 'scrapsheet_pro_month', year: 'scrapsheet_pro_year' };
 
 export const stripeReady = () => Boolean(env('STRIPE_SECRET_KEY'));
@@ -27,7 +28,9 @@ export async function stripe(method, path, params) {
     method,
     headers: {
       Authorization: `Bearer ${env('STRIPE_SECRET_KEY')}`,
-      'Stripe-Version': '2024-06-20',
+      // Managed Payments needs 2025-03-31.basil or later; on this version a
+      // subscription's period dates live on its items.
+      'Stripe-Version': '2026-04-22.dahlia',
       ...(method === 'GET' ? {} : { 'Content-Type': 'application/x-www-form-urlencoded' })
     },
     body: method === 'GET' ? undefined : encode(params)

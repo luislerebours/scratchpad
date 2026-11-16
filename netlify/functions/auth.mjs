@@ -281,7 +281,8 @@ export default async (req, context) => {
         const { modified } = await store.set('legacy-owner', pass.ek, { onlyIfNew: true });
         if (modified) ns = '';
       }
-      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, typesSealedAt: Date.now(), version: 1, createdAt: Date.now(), plan: 'free' };
+      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, typesSealedAt: Date.now(), version: 1, createdAt: Date.now(), plan: env('NEW_ACCOUNT_PLAN') === 'pro' ? 'pro' : 'free' };
+      // New accounts start on Free (NEW_ACCOUNT_PLAN=pro is for local testing only).
       // The owner's account takes over the data from before accounts: that still needs locking.
       if (!ns) delete user.migratedAt;
     }

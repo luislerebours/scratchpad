@@ -3,6 +3,8 @@ import { planOf } from '../lib/plans.mjs';
 import { ensureCustomer, priceFor, stripe, stripeReady } from '../lib/stripe.mjs';
 
 // Paying for Pro, on Stripe's own pages (card details never reach ScrapSheet).
+// Checkout runs with Managed Payments: Stripe is the merchant of record and
+// handles sales tax/VAT, fraud and disputes.
 //   POST ?action=checkout { interval: 'month' | 'year' }  → { url } of a Stripe Checkout page
 //   POST ?action=portal                                  → { url } of the Stripe billing page
 // Whether the account is Pro is set by the webhook (stripe-webhook.mjs), not here.
@@ -29,6 +31,7 @@ export default async req => {
       const ek = emailKey(user.email);
       const session = await stripe('POST', 'checkout/sessions', {
         mode: 'subscription',
+        managed_payments: { enabled: 'true' },
         customer: user.stripe.customer,
         client_reference_id: ek,
         line_items: [{ price: price.id, quantity: 1 }],

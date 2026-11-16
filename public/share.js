@@ -1,11 +1,33 @@
 // The page someone sees when they open a share link: /s/<token>.
-// No account needed; everything comes through the link's token.
+// No account needed; everything comes through the link's token. What's shared
+// is locked; its key is after "#" in the link, which browsers never send anywhere.
+
+import * as vault from '/crypto.js';
 
 const API = '/.netlify/functions/share';
 const token = decodeURIComponent((location.pathname.match(/^\/s\/([^/]+)/) || [])[1] || new URLSearchParams(location.search).get('t') || '');
 const card = document.querySelector('#shareCard');
 const toastEl = document.querySelector('#toast');
 const PARALLEL = 3;
+const fragment = location.hash.slice(1);
+let itemKey = null; // the shared file's or sheet's key, from the link
+const fileKeys = new Map();
+
+// A file's key: the link's own key for a shared file, or unwrapped with the sheet's key.
+async function keyOf(file) {
+  if (!file.enc) return null;
+  if (!fileKeys.has(file.id)) fileKeys.set(file.id, file.shared ? Promise.resolve(itemKey) : vault.unwrap(file.key, itemKey, false));
+  return fileKeys.get(file.id);
+}
+
+async function lockedBlob(url, key, type) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Not found');
+  const data = new Uint8Array(await r.arrayBuffer());
+  const sealed = r.headers.get('X-Sealed') === '1' || r.headers.get('Content-Type') === 'application/octet-stream';
+  if (!key || !sealed) return new Blob([data], { type: type || r.headers.get('Content-Type') || '' });
+  return new Blob([await vault.decryptBytes(key, data)], { type: r.headers.get('X-Image-Type') || type || '' });
+}
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -61,10 +83,24 @@ function fileKind(f) {
 function fileIconHtml(f, big = false) {
   const [kind, label] = fileKind(f);
   const size = big ? ' big' : '';
+  if (kind === 'img' && f.thumb && f.enc) {
+    return `<span class="file-icon kind-img has-thumb${size}" aria-hidden="true"><img data-thumb="${escapeHtml(f.id)}" alt="" /></span>`;
+  }
   if (kind === 'img' && f.thumb) {
     return `<span class="file-icon kind-img has-thumb${size}" aria-hidden="true"><img src="${API}?t=${encodeURIComponent(token)}&thumb=${encodeURIComponent(f.id)}" alt="" /></span>`;
   }
   return `<span class="file-icon kind-${kind}${size}" aria-hidden="true">${kind === 'img' ? icon('landscape') : escapeHtml(label)}</span>`;
+}
+
+function fillThumbs(files) {
+  for (const img of card.querySelectorAll('img[data-thumb]')) {
+    const f = files.find(x => x.id === img.dataset.thumb);
+    if (!f) continue;
+    keyOf(f)
+      .then(key => lockedBlob(`${API}?t=${encodeURIComponent(token)}&thumb=${encodeURIComponent(f.id)}`, key, f.thumb.type))
+      .then(blob => { img.src = URL.createObjectURL(blob); })
+      .catch(() => img.remove());
+  }
 }
 
 // ---- Downloading: a file arrives in 4 MB pieces, a few at a time ----
@@ -73,12 +109,14 @@ async function fetchFile(file, onProgress) {
   const parts = new Array(file.chunks);
   let got = 0;
   let next = 0;
+  const key = await keyOf(file);
   const worker = async () => {
     while (next < file.chunks) {
       const i = next++;
       const r = await fetch(`${API}?t=${encodeURIComponent(token)}&file=${encodeURIComponent(file.id)}&chunk=${i}`);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The download stopped. Try again.');
-      parts[i] = await r.arrayBuffer();
+      const piece = await r.arrayBuffer();
+      parts[i] = key ? await vault.decryptBytes(key, piece) : piece;
       got += parts[i].byteLength;
       onProgress(file.size ? got / file.size : 1);
     }
@@ -141,12 +179,17 @@ function appendClean(source, target) {
     if (tag === 'BR') {
       target.append(document.createElement('br'));
     } else if (tag === 'IMG') {
-      const match = IMAGE_SRC.exec(node.getAttribute('src') || '');
+      const match = IMAGE_SRC.exec(node.getAttribute('data-src') || node.getAttribute('src') || '');
       if (!match) continue;
       const img = document.createElement('img');
-      img.src = `${API}?t=${encodeURIComponent(token)}&image=${encodeURIComponent(match[1])}`;
+      const url = `${API}?t=${encodeURIComponent(token)}&image=${encodeURIComponent(match[1])}`;
+      if (itemKey) {
+        lockedBlob(url, itemKey).then(blob => { img.src = URL.createObjectURL(blob); }).catch(() => img.remove());
+      } else {
+        img.src = url;
+      }
       img.alt = 'Image';
-      img.loading = 'lazy';
+      if (!itemKey) img.loading = 'lazy';
       img.className = 'shared-image';
       const width = Math.round(Number(node.getAttribute('data-width')));
       if (Number.isFinite(width) && width > 0) img.style.width = `${Math.min(100, Math.max(10, width))}%`;
@@ -196,6 +239,7 @@ function renderFile(data) {
       <div class="dl-bar" aria-hidden="true"><i></i></div>
     </div>`;
   wireDownload(card.querySelector('.dl-main'), f);
+  fillThumbs([f]);
   if (canPreview) {
     fetchFile(f, () => {}).then(blob => {
       const img = document.createElement('img');
@@ -230,6 +274,7 @@ function renderSheet(data) {
     </div>` : ''}`;
   const box = card.querySelector('#shareText');
   renderSheetText(data, box);
+  fillThumbs(data.files);
   card.querySelectorAll('.dl-row').forEach(btn => wireDownload(btn, data.files[Number(btn.dataset.i)]));
   card.querySelector('.share-copy').addEventListener('click', async () => {
     const text = box.innerText;
@@ -252,13 +297,34 @@ function renderProblem(reason, message) {
     expired: 'Ask the person who shared it for a new link.',
     off: 'The person who shared it turned this link off.',
     gone: 'It was deleted by the person who shared it.',
-    missing: 'Check that the whole link was copied.'
+    missing: 'Check that the whole link was copied.',
+    key: 'Check that the whole link was copied, including the part after “#”.'
   }[reason] || 'Check your connection and try again.';
   card.innerHTML = `<div class="share-problem">
       <span class="share-problem-mark" aria-hidden="true">${icon('broken')}</span>
       <h1 class="share-title">${escapeHtml(message)}</h1>
       <p class="share-meta">${escapeHtml(advice)}</p>
     </div>`;
+}
+
+// Unlocks what the server sent, in place. False if it's locked and the link's key doesn't open it.
+async function unlock(data) {
+  const sealedName = vault.isSealed(data.name);
+  const locked = sealedName || vault.isSealed(data.html) || data.file?.enc || data.files?.some(f => f.enc);
+  if (!locked) return true;
+  try {
+    itemKey = await vault.importKey(fragment, false);
+    data.name = await vault.decryptText(itemKey, data.name);
+    if (data.kind === 'file') {
+      data.file = { ...data.file, shared: true, name: await vault.decryptText(itemKey, data.file.name) };
+    } else {
+      data.html = data.html == null ? data.html : await vault.decryptText(itemKey, data.html);
+      data.files = await Promise.all(data.files.map(async f => f.enc ? { ...f, name: await vault.decryptText(await keyOf(f), f.name) } : f));
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function start() {
@@ -271,6 +337,10 @@ async function start() {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
       renderProblem(data.reason, data.error || 'This link doesn’t work.');
+      return;
+    }
+    if (!(await unlock(data))) {
+      renderProblem('key', 'This link is missing its key.');
       return;
     }
     if (data.kind === 'file') renderFile(data);

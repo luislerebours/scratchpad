@@ -2,7 +2,7 @@ import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '.
 import {
   TRASH_DAYS, deleteFileForGood, publicRecord, readRecords, readSheetTrash, visibleFiles, wipeSheet, writeSheetTrash
 } from '../lib/files.mjs';
-import { cleanName, readSheets } from '../lib/sheets.mjs';
+import { cleanName, isSealed, isWrappedKey, readSheets } from '../lib/sheets.mjs';
 import { liveShares } from '../lib/shares.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
@@ -22,6 +22,9 @@ export default async req => {
   const url = new URL(req.url);
   const store = userStore(ns, 'state');
   const meta = url.searchParams.get('meta');
+  // End-to-end encrypted accounts only ever send us locked text, names and keys.
+  const locked = Boolean(auth.user.keyring);
+  const SEALED_ONLY = 'Reload Scratch Pad to keep editing.';
 
   // Storage used by the account and its limit (null: no limit).
   if (meta === 'usage' && req.method === 'GET') {
@@ -55,7 +58,8 @@ export default async req => {
     ]);
     const status = sheets.map((s, i) => ({
       id: s.id,
-      content: Boolean(String(docs[i]?.text || '').trim() || /<img\b/i.test(String(docs[i]?.html || ''))),
+      // Locked sheets say themselves whether they hold anything; older ones we can read.
+      content: typeof docs[i]?.filled === 'boolean' ? docs[i].filled : Boolean(String(docs[i]?.text || '').trim() || /<img\b/i.test(String(docs[i]?.html || ''))),
       files: fileLists[i].length,
       fileList: fileLists[i]
     }));
@@ -92,12 +96,29 @@ export default async req => {
       const id = Array.from({ length: MAX_SHEETS }, (_, i) => i + 1).find(n => !used.has(n));
       if (!id) {
         const oldest = [...trash].sort((a, b) => a.deletedAt - b.deletedAt)[0];
-        return json({ error: 'Recently Deleted is holding the last free sheet.', purge: { id: oldest.id, name: oldest.name } }, 409);
+        return json({ error: 'Recently Deleted is holding the last free sheet.', purge: { id: oldest.id, name: oldest.name, key: oldest.key || null } }, 409);
       }
+      if (locked && (!isWrappedKey(body.key) || !isSealed(body.name))) return json({ error: SEALED_ONLY }, 400);
       // A freed slot may hold leftovers from a deleted sheet; start it clean.
       await store.delete(`sheets/${id}`);
       await Promise.all([bumpRev(ns, `text-${id}`), bumpRev(ns, `files-${id}`)]);
-      return json({ ...(await writeSheets(ns, store, [...sheets, { id, name: cleanName(body.name) || `Sheet ${id}` }])), added: id });
+      const entry = { id, name: cleanName(body.name) || `Sheet ${id}`, ...(isWrappedKey(body.key) ? { key: body.key } : {}) };
+      return json({ ...(await writeSheets(ns, store, [...sheets, entry])), added: id });
+    }
+
+    // A key (and locked name) for a sheet that has none yet: new and older
+    // sheets of an encrypted account, live or in Recently Deleted. Never replaces a key.
+    if (body.action === 'set-key') {
+      const id = parseSheet(body.sheet);
+      if (!isWrappedKey(body.key) || !isSealed(body.name)) return json({ error: 'Bad key' }, 400);
+      const trash = await readSheetTrash(ns);
+      if (sheets.some(s => s.id === id && !s.key)) {
+        return json(await writeSheets(ns, store, sheets.map(s => (s.id === id ? { ...s, key: body.key, name: body.name } : s))));
+      }
+      if (trash.some(t => t.id === id && !t.key)) {
+        await writeSheetTrash(ns, trash.map(t => (t.id === id ? { ...t, key: body.key, name: body.name } : t)));
+      }
+      return json(await readSheets(store));
     }
 
     const sheet = parseSheet(body.sheet);
@@ -106,6 +127,7 @@ export default async req => {
     if (body.action === 'rename') {
       const name = cleanName(body.name);
       if (!name) return json({ error: 'Enter a name' }, 400);
+      if (locked && !isSealed(name)) return json({ error: SEALED_ONLY }, 400);
       return json(await writeSheets(ns, store, sheets.map(s => (s.id === sheet ? { ...s, name } : s))));
     }
 
@@ -114,7 +136,7 @@ export default async req => {
       if (sheets.length === 1) return json({ error: 'You need at least one sheet.' }, 400);
       const position = sheets.findIndex(s => s.id === sheet);
       const trash = await readSheetTrash(ns);
-      await writeSheetTrash(ns, [...trash.filter(t => t.id !== sheet), { id: sheet, name: sheets[position].name, deletedAt: Date.now(), position }]);
+      await writeSheetTrash(ns, [...trash.filter(t => t.id !== sheet), { id: sheet, name: sheets[position].name, key: sheets[position].key, deletedAt: Date.now(), position }]);
       return json({ ...(await writeSheets(ns, store, sheets.filter(s => s.id !== sheet))), trashed: sheet });
     }
 
@@ -136,7 +158,7 @@ export default async req => {
         .map(r => ({ ...publicRecord(r, sheet.id), sheetName: sheet.name, deletedAt: r.deletedAt })));
       const deletedSheets = held.map(({ t, records }) => {
         const done = records.filter(r => r.complete);
-        return { id: t.id, name: t.name, deletedAt: t.deletedAt, files: done.length, bytes: done.reduce((n, r) => n + (r.size || 0), 0) };
+        return { id: t.id, name: t.name, key: t.key || null, deletedAt: t.deletedAt, files: done.length, bytes: done.reduce((n, r) => n + (r.size || 0), 0) };
       });
       const byNewest = (a, b) => b.deletedAt - a.deletedAt;
       return json({ days: TRASH_DAYS, sheets: deletedSheets.sort(byNewest), files: files.sort(byNewest) });
@@ -155,7 +177,7 @@ export default async req => {
         return json({ ok: true });
       }
       const next = [...sheets];
-      next.splice(Math.min(Number.isInteger(held.position) ? held.position : next.length, next.length), 0, { id: held.id, name: held.name });
+      next.splice(Math.min(Number.isInteger(held.position) ? held.position : next.length, next.length), 0, { id: held.id, name: held.name, ...(held.key ? { key: held.key } : {}) });
       await Promise.all([bumpRev(ns, `text-${sheet}`), bumpRev(ns, `files-${sheet}`)]);
       return json(await writeSheets(ns, store, next));
     }
@@ -220,8 +242,16 @@ export default async req => {
     if (body.text.length > MAX_TEXT_CHARS) return json({ error: 'Text too long' }, 413);
     // html carries the layout with inline images; the page sanitizes it whenever it is shown.
     const html = typeof body.html === 'string' ? body.html : null;
-    if (html && html.length > MAX_TEXT_CHARS * 2) return json({ error: 'Text too long' }, 413);
-    const next = { text: body.text, html, updatedAt: Date.now() };
+    if (html && html.length > MAX_TEXT_CHARS * 3) return json({ error: 'Text too long' }, 413);
+    let next = { text: body.text, html, updatedAt: Date.now() };
+    if (locked) {
+      // Locked text: we keep it as sent, plus what we can't read for ourselves:
+      // whether it holds anything (for the tab), and which images it uses (so
+      // unused ones can be cleared away).
+      if (!(typeof html === 'string' && html.startsWith('e1:') && /^[A-Za-z0-9_-]+$/.test(html.slice(3)))) return json({ error: SEALED_ONLY }, 400);
+      const images = Array.isArray(body.images) ? body.images.filter(id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id)).slice(0, 2000) : [];
+      next = { text: '', html, filled: Boolean(body.filled), images, updatedAt: next.updatedAt };
+    }
     await store.setJSON(key, next);
     const rev = await bumpRev(ns, `text-${sheet}`);
     return json({ updatedAt: next.updatedAt, rev });

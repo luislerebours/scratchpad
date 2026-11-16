@@ -1,3 +1,5 @@
+import * as vault from '/crypto.js';
+
 const API_STATE = '/.netlify/functions/state';
 const API_FILES = '/.netlify/functions/files';
 const API_IMAGES = '/.netlify/functions/images';
@@ -204,6 +206,86 @@ function formatSavedTime(ts) {
   return `${day}, ${time}`;
 }
 
+// ---- End-to-end encryption: the keys this device holds while signed in ----
+// The master key (from the password, or the recovery key) opens each sheet's
+// key; a sheet's key locks its text, name and pasted images, and opens the keys
+// of its files. Only locked content ever leaves this device. See crypto.js.
+
+let masterKey = null;
+const sheetKeys = new Map();   // sheet id -> { wrapped, key }
+const fileKeys = new Map();    // file id -> key
+const knownFiles = new Map();  // file id -> file as listed (with its locked key and sheet)
+const isLocked = () => Boolean(masterKey);
+
+async function sheetKeyFrom(id, wrapped) {
+  const known = sheetKeys.get(id);
+  if (known?.wrapped === wrapped) return known.key;
+  const key = await vault.unwrap(wrapped, masterKey);
+  sheetKeys.set(id, { wrapped, key });
+  return key;
+}
+
+// The key of a live sheet (from its entry in the list).
+async function keyForSheet(id) {
+  const entry = sheets.find(s => s.id === id);
+  if (entry?.key) return sheetKeyFrom(id, entry.key);
+  const known = sheetKeys.get(id)?.key;
+  if (known) return known;
+  throw new Error('This sheet isn’t ready yet. Reload Scratch Pad and try again.');
+}
+
+async function fileKeyFor(file, sheet = file.sheet) {
+  if (fileKeys.has(file.id)) return fileKeys.get(file.id);
+  const key = await vault.unwrap(file.key, await keyForSheet(sheet));
+  fileKeys.set(file.id, key);
+  return key;
+}
+
+// The sheet list with names unlocked (sheets without a key yet keep theirs).
+async function openSheetList(data) {
+  if (!Array.isArray(data?.sheets) || !masterKey) return data;
+  const list = await Promise.all(data.sheets.map(async s => {
+    if (!s.key) return s;
+    try {
+      return { ...s, name: await vault.decryptText(await sheetKeyFrom(Number(s.id), s.key), s.name) };
+    } catch {
+      return { ...s, name: 'Locked sheet' };
+    }
+  }));
+  return { ...data, sheets: list };
+}
+
+// Every sheet gets a key the first time this device sees it without one.
+async function ensureSheetKeys() {
+  if (!masterKey) return;
+  for (const s of sheets.filter(entry => !entry.key)) {
+    const key = await vault.newKey();
+    await postSheets({ action: 'set-key', sheet: s.id, key: await vault.wrap(key, masterKey), name: await vault.encryptText(key, s.name) });
+  }
+}
+
+// A sheet's text as html: unlocked if locked, as it is if from before encryption.
+async function sheetHtml(sheet, data) {
+  if (vault.isSealed(data?.html)) return vault.decryptText(await keyForSheet(sheet), data.html);
+  return typeof data?.html === 'string' ? data.html : textToHtml(data?.text || '');
+}
+
+// File lists with names unlocked; each file is remembered for its key and thumbnail.
+async function openFiles(list, sheet) {
+  const opened = await Promise.all(list.map(async f => {
+    const file = { ...f, sheet };
+    knownFiles.set(f.id, file);
+    if (!f.enc) return file;
+    try {
+      return { ...file, name: await vault.decryptText(await fileKeyFor(file, sheet), f.name) };
+    } catch {
+      return { ...file, name: 'Locked file' };
+    }
+  }));
+  opened.signature = JSON.stringify(list);
+  return opened;
+}
+
 // ---- Copies of each sheet kept in memory, so a tab shows its text at once ----
 // sheetCache: sheet -> { html, updatedAt } as last saved or fetched.
 // filesCache: sheet -> its file list as last fetched.
@@ -278,11 +360,11 @@ async function prefetchSheets() {
     for (const s of data.status || []) {
       const id = Number(s.id);
       sheetStatus.set(id, { content: Boolean(s.content), files: Number(s.files) || 0 });
-      if (id !== activeSheet && Array.isArray(s.fileList)) filesCache.set(id, s.fileList);
+      if (id !== activeSheet && Array.isArray(s.fileList) && hasSheet(id)) filesCache.set(id, await openFiles(s.fileList, id));
     }
     for (const s of data.sheets || []) {
-      const html = typeof s.html === 'string' ? s.html : textToHtml(s.text || '');
-      cacheSheet(Number(s.id), html, Number(s.updatedAt || 0));
+      if (!hasSheet(Number(s.id))) continue;
+      cacheSheet(Number(s.id), await sheetHtml(Number(s.id), s), Number(s.updatedAt || 0));
     }
     scheduleTabStatus();
   } catch {
@@ -302,8 +384,8 @@ function refreshOtherSheet(sheet, kind) {
       const r = await fetch(kind === 'files' ? filesUrl(sheet) : stateUrl(sheet), { cache:'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
-      if (kind === 'files') { filesCache.set(sheet, Array.isArray(data.files) ? data.files : []); scheduleTabStatus(); }
-      else cacheSheet(sheet, typeof data.html === 'string' ? data.html : textToHtml(data.text || ''), Number(data.updatedAt || 0));
+      if (kind === 'files') { filesCache.set(sheet, await openFiles(Array.isArray(data.files) ? data.files : [], sheet)); scheduleTabStatus(); }
+      else cacheSheet(sheet, await sheetHtml(sheet, data), Number(data.updatedAt || 0));
     } catch {
       // A stale copy is worse than none: that tab will load normally instead.
       cache.delete(sheet);
@@ -370,6 +452,7 @@ function filesUrl(sheet = activeSheet, extra = '') {
 // ---- Icons ----
 
 const ICON_PATHS = {
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/>',
   pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
   eraser: '<path d="M20 20H9l-4.5-4.5a2 2 0 0 1 0-2.8L13 4.2a2 2 0 0 1 2.8 0l4 4a2 2 0 0 1 0 2.8L12 19"/><path d="m8 10 6 6"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
@@ -614,7 +697,7 @@ function applySheets(data) {
   const signature = JSON.stringify(data.sheets);
   if (signature === sheetsSignature) return;
   sheetsSignature = signature;
-  sheets = data.sheets.map(s => ({ id: Number(s.id), name: String(s.name || `Sheet ${s.id}`) }));
+  sheets = data.sheets.map(s => ({ id: Number(s.id), name: String(s.name || `Sheet ${s.id}`), ...(s.key ? { key: s.key } : {}) }));
   for (const id of [...sheetCache.keys(), ...filesCache.keys()]) if (!hasSheet(id)) forgetSheet(id);
   renderTabs();
   // The open sheet was deleted on another device.
@@ -625,7 +708,7 @@ async function fetchSheets() {
   try {
     const r = await fetch(sheetsUrl(), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    applySheets(await r.json());
+    applySheets(await openSheetList(await r.json()));
     return true;
   } catch {
     // Keep the tabs we have if the list is briefly unavailable.
@@ -641,8 +724,9 @@ async function postSheets(body) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(data.error || 'Something went wrong'), { data });
-  applySheets(data);
-  return data;
+  const opened = await openSheetList(data);
+  applySheets(opened);
+  return opened;
 }
 
 async function fetchState(sheet = activeSheet) {
@@ -651,14 +735,14 @@ async function fetchState(sheet = activeSheet) {
     const r = await fetch(stateUrl(requestedSheet), { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
-
+    if (requestedSheet !== activeSheet) return false;
+    const remoteHtml = await sheetHtml(requestedSheet, data);
     if (requestedSheet !== activeSheet) return false;
 
     const remoteTs = Number(data.updatedAt || 0);
     const recentlyTyping = Date.now() - lastInputAt < 850;
 
     const busy = saving || recentlyTyping || resizingImage || pendingImageUploads > 0;
-    const remoteHtml = typeof data.html === 'string' ? data.html : textToHtml(data.text || '');
     cacheSheet(requestedSheet, remoteHtml, remoteTs);
 
     if (remoteTs > localUpdatedAt && !busy) {
@@ -686,13 +770,24 @@ async function saveState(sheet = activeSheet) {
   const targetSheet = validSheet(sheet);
   const textToSave = pad.innerText;
   const htmlToSave = serializeEditor();
+  const filled = !editorIsEmpty();
   saving = true;
   if (targetSheet === activeSheet) setSaveState('saving');
   try {
+    // Locked before it leaves: the server keeps only whether it holds anything
+    // and which images it uses.
+    const body = isLocked()
+      ? {
+        text: '',
+        html: await vault.encryptText(await keyForSheet(targetSheet), htmlToSave),
+        filled,
+        images: [...new Set([...htmlToSave.matchAll(/[?&;]id=([A-Za-z0-9-]{1,64})/g)].map(m => m[1]))]
+      }
+      : { text: textToSave, html: htmlToSave };
     const r = await fetch(stateUrl(targetSheet), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textToSave, html: htmlToSave })
+      body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
@@ -734,7 +829,7 @@ pad.addEventListener('beforeinput', e => {
 
 copyBtn.addEventListener('click', async () => {
   const text = pad.innerText;
-  const html = serializeEditor().replace(/src="\//g, `src="${location.origin}/`);
+  const html = serializeEditor().replace(/<img[^>]*>/g, '');
   try {
     if (!window.ClipboardItem || !navigator.clipboard.write) throw new Error('No rich clipboard');
     await navigator.clipboard.write([new ClipboardItem({
@@ -792,9 +887,14 @@ function textToHtml(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
+// A pasted image keeps its server address in data-src (what is saved). What
+// shows is an unlocked copy in memory (see showPadImages); until then, a blank.
+const BLANK_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+
 function makePadImage(src, width = null) {
   const img = document.createElement('img');
-  img.setAttribute('src', src);
+  img.dataset.src = src;
+  img.setAttribute('src', BLANK_IMAGE);
   img.className = 'pad-image';
   img.alt = 'Pasted image';
   setImageWidth(img, width);
@@ -836,7 +936,7 @@ function appendClean(source, target, onOtherImage) {
     if (tag === 'BR') {
       target.append(document.createElement('br'));
     } else if (tag === 'IMG') {
-      const src = node.getAttribute('src') || '';
+      const src = node.getAttribute('data-src') || node.getAttribute('src') || '';
       const img = PAD_IMAGE_SRC.test(src) ? makePadImage(src, node.getAttribute('data-width')) : onOtherImage?.(src);
       if (img) target.append(img);
     } else if (BLOCK_TAGS.has(tag)) {
@@ -911,6 +1011,7 @@ function renderEditor(html) {
   if (clean.innerHTML === serializeEditor()) return;
   const caret = document.activeElement === pad ? caretOffset() : null;
   pad.replaceChildren(...clean.childNodes);
+  showPadImages(pad);
   if (caret !== null) placeCaret(caret);
   updateEmptyState();
   positionImageTools();
@@ -985,6 +1086,37 @@ async function makeDisplayCopy(blob) {
   throw new Error('Image too large');
 }
 
+// Unlocked copies of pasted images, by server address (an address always shows the same image).
+const imageUrls = new Map();
+
+function imageObjectUrl(src) {
+  if (!imageUrls.has(src)) {
+    imageUrls.set(src, (async () => {
+      const r = await fetch(src);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      let data = new Uint8Array(await r.arrayBuffer());
+      let type = (r.headers.get('content-type') || '').split(';')[0];
+      if (type === 'application/octet-stream') {
+        const sheet = validSheet(new URL(src, location.origin).searchParams.get('sheet'));
+        data = await vault.decryptBytes(await keyForSheet(sheet), data);
+        type = r.headers.get('x-image-type') || '';
+      }
+      return URL.createObjectURL(new Blob([data], { type }));
+    })().catch(err => {
+      imageUrls.delete(src);
+      throw err;
+    }));
+  }
+  return imageUrls.get(src);
+}
+
+function showPadImages(root) {
+  for (const img of root.querySelectorAll('img.pad-image[data-src]')) {
+    const src = img.dataset.src;
+    imageObjectUrl(src).then(url => { if (img.dataset.src === src) img.src = url; }).catch(() => img.classList.add('broken'));
+  }
+}
+
 function imageUrl(sheet, extra) {
   return `${API_IMAGES}?sheet=${validSheet(sheet)}&${extra}`;
 }
@@ -997,6 +1129,7 @@ async function uploadPadImage(img, blob) {
   let type = imageTypeOf(blob);
   const name = blob.name || 'Pasted image';
   let transfer = null;
+  let keepLocalUrl = false;
   try {
     if (blob.size > MAX_FILE_BYTES) throw new Error(`${name} is over ${bytes(MAX_FILE_BYTES)}`);
     const needsCopy = !DISPLAYABLE_TYPES.includes(type) || blob.size > SHOW_ORIGINAL_UP_TO;
@@ -1022,15 +1155,19 @@ async function uploadPadImage(img, blob) {
       preview = null;
     }
 
-    const start = await postJson(imageUrl(sheet, 'action=start'), { type, size: blob.size });
+    // Locked with the sheet's key: the display copy and every piece of the original.
+    const key = isLocked() ? await keyForSheet(sheet) : null;
+    const seal = async part => key ? new Blob([await vault.encryptBytes(key, new Uint8Array(await part.arrayBuffer()))]) : part;
+    const start = await postJson(imageUrl(sheet, 'action=start'), { type, size: blob.size, ...(key ? { enc: 1 } : {}) });
     const id = encodeURIComponent(start.id);
     const loaded = new Array(start.chunks).fill(0);
     const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
     if (preview) {
-      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1`), preview, transfer.signal, () => {}, preview.type), transfer.signal);
+      const sealedPreview = await seal(preview);
+      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1&type=${encodeURIComponent(preview.type)}`), sealedPreview, transfer.signal, () => {}, key ? 'application/octet-stream' : preview.type), transfer.signal);
     }
     await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
-      const part = blob.slice(i * start.chunkSize, Math.min(blob.size, (i + 1) * start.chunkSize));
+      const part = await seal(blob.slice(i * start.chunkSize, Math.min(blob.size, (i + 1) * start.chunkSize)));
       await withRetry(() => {
         loaded[i] = 0;
         return putChunk(imageUrl(sheet, `id=${id}&chunk=${i}`), part, transfer.signal, n => {
@@ -1040,7 +1177,10 @@ async function uploadPadImage(img, blob) {
       }, transfer.signal);
     });
     const { src } = await postJson(imageUrl(sheet, `id=${id}&action=finish`));
-    img.setAttribute('src', src);
+    // Keeps showing the local copy, which is also what this address now shows.
+    img.dataset.src = src;
+    imageUrls.set(src, Promise.resolve(localUrl));
+    keepLocalUrl = true;
     delete img.dataset.pending;
     img.classList.remove('pending');
     transfer.done(`Image added · ${bytes(blob.size)}`);
@@ -1050,14 +1190,17 @@ async function uploadPadImage(img, blob) {
     if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota ? err.message : 'Image upload failed');
     else showToast(err?.message?.includes('over') ? err.message : 'Image upload failed');
   } finally {
-    if (localUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
+    if (localUrl.startsWith('blob:') && !keepLocalUrl) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
     pendingImageUploads--;
     if (sheet === activeSheet) onEditorChanged();
   }
 }
 
+// An image being added shows its local copy straight away; it has no server address yet.
 function pendingImage(src) {
   const img = makePadImage(src);
+  delete img.dataset.src;
+  img.setAttribute('src', src);
   img.dataset.pending = '1';
   img.classList.add('pending');
   return img;
@@ -1338,7 +1481,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
 // The file list as last seen, or nothing (rather than "No files") until it loads.
 function showCachedFiles(sheet) {
   const files = filesCache.get(sheet);
-  filesSignature = files ? JSON.stringify(files) : '';
+  filesSignature = files ? files.signature || JSON.stringify(files) : '';
   currentFiles = (files || []).filter(f => !pendingDeletes.has(f.id)).map(f => ({ ...f, sheet }));
   fileIndex = new Map(currentFiles.map(f => [f.id, f]));
   if (files) {
@@ -1371,7 +1514,13 @@ addSheetBtn.addEventListener('click', () => addSheet());
 async function addSheet(purge) {
   addSheetBtn.disabled = true;
   try {
-    const data = await postSheets(purge ? { action:'add', purge } : { action:'add' });
+    const body = purge ? { action:'add', purge } : { action:'add' };
+    if (isLocked()) {
+      // Its own key, and its name locked with it.
+      const key = await vault.newKey();
+      Object.assign(body, { key: await vault.wrap(key, masterKey), name: await vault.encryptText(key, `Sheet ${sheets.length + 1}`) });
+    }
+    const data = await postSheets(body);
     // A new sheet starts empty: no need to wait for it.
     forgetSheet(data.added);
     cacheSheet(data.added, '', 0);
@@ -1379,7 +1528,8 @@ async function addSheet(purge) {
     await switchSheet(data.added);
     openRenameModal();
   } catch (err) {
-    const held = err.data?.purge;
+    const held = err.data?.purge && { ...err.data.purge };
+    if (held?.key && masterKey) held.name = await vault.decryptText(await vault.unwrap(held.key, masterKey), held.name).catch(() => 'a deleted sheet');
     if (held) {
       openSheet({
         title: 'Make room for a new sheet?',
@@ -1459,7 +1609,7 @@ renameForm.addEventListener('submit', async e => {
     return;
   }
   try {
-    await postSheets({ action:'rename', sheet:activeSheet, name });
+    await postSheets({ action:'rename', sheet:activeSheet, name: isLocked() ? await vault.encryptText(await keyForSheet(activeSheet), name) : name });
     closeRenameModal();
     showToast('Sheet renamed');
   } catch {
@@ -1621,12 +1771,12 @@ async function loadFiles(force = false, sheet = activeSheet) {
     const r = await fetch(filesUrl(requestedSheet), { cache:'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
-    const files = Array.isArray(data.files) ? data.files : [];
+    const files = await openFiles(Array.isArray(data.files) ? data.files : [], requestedSheet);
     filesCache.set(requestedSheet, files);
     if (requestedSheet !== activeSheet) return false;
 
     lastFileRefresh = Date.now();
-    const signature = JSON.stringify(files);
+    const signature = files.signature;
     if (signature === filesSignature) return true;
     filesSignature = signature;
     currentFiles = files.filter(f => !pendingDeletes.has(f.id)).map(f => ({ ...f, sheet: requestedSheet }));
@@ -1681,6 +1831,7 @@ function fileIconHtml(f, { view = false } = {}) {
   const [kind, label] = fileKind(f);
   const opens = view ? ` data-view="${escapeHtml(f.id)}"` : '';
   if (kind === 'img' && f.thumb) {
+    if (f.enc) return `<span class="file-icon kind-img has-thumb" aria-hidden="true"${opens}><img data-thumb="${escapeHtml(f.id)}" alt="" /></span>`;
     const src = escapeHtml(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&thumb=1`));
     return `<span class="file-icon kind-img has-thumb" aria-hidden="true"${opens}><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
   }
@@ -1717,11 +1868,12 @@ async function makeThumb(blob) {
   }
 }
 
-function sendThumb(sheet, id, thumb) {
+async function sendThumb(sheet, id, thumb, key = null) {
+  const body = key ? new Blob([await vault.encryptBytes(key, new Uint8Array(await thumb.arrayBuffer()))]) : thumb;
   return fetch(filesUrl(sheet, `id=${encodeURIComponent(id)}&thumb=1`), {
     method: 'PUT',
-    headers: { 'Content-Type': thumb.type },
-    body: thumb
+    headers: { 'Content-Type': key ? 'application/octet-stream' : thumb.type },
+    body
   }).then(r => r.ok).catch(() => false);
 }
 
@@ -1746,13 +1898,41 @@ async function backfillThumbs() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         parts.push(await r.arrayBuffer());
       }
-      const thumb = await makeThumb(new Blob(parts, { type: f.type || 'image/jpeg' }));
-      if (thumb && await sendThumb(f.sheet, f.id, thumb)) made++;
+      const key = f.enc ? await fileKeyFor(f) : null;
+      const plain = key ? await Promise.all(parts.map(p => vault.decryptBytes(key, new Uint8Array(p)))) : parts;
+      const thumb = await makeThumb(new Blob(plain, { type: f.type || 'image/jpeg' }));
+      if (thumb && await sendThumb(f.sheet, f.id, thumb, key)) made++;
     } catch {
       // Try again next time the app opens.
     }
   }
   if (made && sheet === activeSheet) loadFiles(true, sheet);
+}
+
+// Unlocked thumbnails, by file id.
+const thumbUrls = new Map();
+
+function fillThumbs(root) {
+  for (const img of root.querySelectorAll('img[data-thumb]:not([src])')) {
+    const file = knownFiles.get(img.dataset.thumb);
+    if (!file) continue;
+    if (!thumbUrls.has(file.id)) {
+      thumbUrls.set(file.id, (async () => {
+        const r = await fetch(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&thumb=1`));
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await vault.decryptBytes(await fileKeyFor(file), new Uint8Array(await r.arrayBuffer()));
+        return URL.createObjectURL(new Blob([data], { type: 'image/jpeg' }));
+      })().catch(err => {
+        thumbUrls.delete(file.id);
+        throw err;
+      }));
+    }
+    thumbUrls.get(file.id).then(url => { img.src = url; }).catch(() => {
+      const span = img.parentElement;
+      span.classList.remove('has-thumb');
+      span.innerHTML = icon('landscape');
+    });
+  }
 }
 
 // A thumbnail that won't load falls back to the icon.
@@ -1806,6 +1986,7 @@ function renderFiles() {
   updateOldFilesNote();
   updateAttachLink();
   scheduleTabStatus();
+  fillThumbs(fileList);
   if (!selecting && currentFiles.some(f => !f.thumb && !thumbTried.has(f.id) && fileKind(f)[0] === 'img')) scheduleThumbBackfill();
 }
 
@@ -2011,6 +2192,13 @@ async function fetchSharedFile(file, { signal, onProgress } = {}) {
     }, signal);
   });
 
+  if (file.enc) {
+    const key = file.cryptoKey || await fileKeyFor(file);
+    for (let i = 0; i < parts.length; i++) {
+      const sealed = parts[i] instanceof Blob ? await parts[i].arrayBuffer() : parts[i];
+      parts[i] = await vault.decryptBytes(key, new Uint8Array(sealed));
+    }
+  }
   return new File(parts, file.name || 'file', { type: file.type || 'application/octet-stream' });
 }
 
@@ -2160,7 +2348,7 @@ function openImageViewer(img) {
   previewAbort?.abort();
   previewAbort = null;
   viewedImage = img;
-  previewFile = { inline:true, src: img.getAttribute('src') };
+  previewFile = { inline:true, src: img.dataset.src || img.getAttribute('src') };
   previewLoadedFile = null;
   previewTitle.textContent = 'Image';
   previewRemoveBtn.hidden = false;
@@ -2185,7 +2373,7 @@ async function saveOriginalImage(src) {
     const ext = ((info.type.split('/')[1] || 'png').replace('jpeg', 'jpg'));
     const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
     const name = `Scratch Pad image ${stamp}.${ext}`;
-    const file = { name, type: info.type, size: info.size, chunks: info.chunks, sheet, chunkUrl: i => imageUrl(sheet, `id=${id}&chunk=${i}`) };
+    const file = { name, type: info.type, size: info.size, chunks: info.chunks, sheet, enc: info.enc, cryptoKey: info.enc ? await keyForSheet(sheet) : null, chunkUrl: i => imageUrl(sheet, `id=${id}&chunk=${i}`) };
     const transfer = createTransfer(name, 'Downloading original', info.size);
     transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
     try {
@@ -2722,11 +2910,18 @@ async function postJson(url, body) {
   return r.json();
 }
 
-async function uploadFile(file, targetSheet, transfer) {
+async function uploadFile(file, targetSheet, transfer, extra = {}) {
   let id = null;
   try {
-    const start = await postJson(filesUrl(targetSheet, 'action=start'), { name:file.name, type:file.type, size:file.size });
+    // A new key for this file, locked with its sheet's key; the name, every
+    // piece and the thumbnail are locked with it.
+    const key = isLocked() ? await vault.newKey() : null;
+    const meta = key
+      ? { name: await vault.encryptText(key, file.name), type: file.type, size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), ...extra }
+      : { name: file.name, type: file.type, size: file.size };
+    const start = await postJson(filesUrl(targetSheet, 'action=start'), meta);
     id = start.id;
+    if (key) fileKeys.set(id, key);
     const thumbPromise = fileKind({ name: file.name, type: file.type })[0] === 'img' ? makeThumb(file) : Promise.resolve(null);
     const loaded = new Array(start.chunks).fill(0);
     const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
@@ -2734,7 +2929,8 @@ async function uploadFile(file, targetSheet, transfer) {
 
     await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
       if (transfer.signal.aborted) throw abortError();
-      const blob = file.slice(i * start.chunkSize, Math.min(file.size, (i + 1) * start.chunkSize));
+      const plain = file.slice(i * start.chunkSize, Math.min(file.size, (i + 1) * start.chunkSize));
+      const blob = key ? new Blob([await vault.encryptBytes(key, new Uint8Array(await plain.arrayBuffer()))]) : plain;
       const url = filesUrl(targetSheet, `id=${encodeURIComponent(id)}&chunk=${i}`);
       await withRetry(() => {
         loaded[i] = 0;
@@ -2743,13 +2939,13 @@ async function uploadFile(file, targetSheet, transfer) {
           report();
         });
       }, transfer.signal);
-      loaded[i] = blob.size;
+      loaded[i] = plain.size;
       report();
     });
 
     transfer.status('Finishing…');
     const thumb = await thumbPromise;
-    if (thumb) await sendThumb(targetSheet, id, thumb);
+    if (thumb) await sendThumb(targetSheet, id, thumb, key);
     await postJson(filesUrl(targetSheet, `id=${encodeURIComponent(id)}&action=finish`));
     transfer.done(`Uploaded to ${currentSheetName(targetSheet)} · ${bytes(file.size)}`);
     return true;
@@ -3020,6 +3216,7 @@ function renderSearch() {
     return `${group}<div class="search-item" role="option" id="search-opt-${i}" data-i="${i}" aria-selected="false">${mark}<div class="search-main">${body}</div></div>`;
   }).join('');
   setSearchActive(0);
+  fillThumbs(searchResults);
 }
 
 function setSearchActive(i) {
@@ -3196,6 +3393,19 @@ async function loadTrash() {
     const r = await fetch(`${API_STATE}?meta=trash`, { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     trashData = await r.json();
+    trashData.sheets = await Promise.all((trashData.sheets || []).map(async t => {
+      if (!t.key || !masterKey) return t;
+      try {
+        return { ...t, name: await vault.decryptText(await vault.unwrap(t.key, masterKey), t.name) };
+      } catch {
+        return { ...t, name: 'Locked sheet' };
+      }
+    }));
+    const bySheet = new Map();
+    for (const f of trashData.files || []) bySheet.set(f.sheet, [...(bySheet.get(f.sheet) || []), f]);
+    const opened = (await Promise.all([...bySheet].map(([sheet, list]) => openFiles(list, sheet)))).flat();
+    const names = new Map(opened.map(f => [f.id, f.name]));
+    trashData.files = (trashData.files || []).map(f => ({ ...f, name: names.get(f.id) ?? f.name, sheetName: currentSheetName(f.sheet) }));
     renderTrash();
   } catch {
     trashBody.innerHTML = '<p class="trash-empty">Couldn’t load Recently Deleted. Check your connection and try again.</p>';
@@ -3244,6 +3454,7 @@ function renderTrash() {
     }).join('');
   }
   trashBody.innerHTML = html;
+  fillThumbs(trashBody);
   keepFocusInTrash();
 }
 
@@ -3261,7 +3472,7 @@ async function refreshFilesFor(sheet) {
     const r = await fetch(filesUrl(sheet), { cache: 'no-store' });
     if (!r.ok) return;
     const data = await r.json();
-    filesCache.set(sheet, Array.isArray(data.files) ? data.files : []);
+    filesCache.set(sheet, await openFiles(Array.isArray(data.files) ? data.files : [], sheet));
     scheduleTabStatus();
   } catch {
     filesCache.delete(sheet);
@@ -3271,7 +3482,7 @@ async function refreshFilesFor(sheet) {
 async function restoreSheet(id, { open = true } = {}) {
   try {
     const data = await trashPost({ action: 'restore-sheet', sheet: id });
-    applySheets(data);
+    applySheets(await openSheetList(data));
     prefetchSheets();
     showToast(`Restored ${currentSheetName(id)}`);
     if (open) await switchSheet(id);
@@ -3372,7 +3583,31 @@ let shareLink = null;
 function shareKey(kind, sheet, file = null) {
   return `${kind}:${sheet}:${file || ''}`;
 }
-const shareUrl = share => `${location.origin}/s/${share.token}`;
+// Each link carries the shared item's key after "#": browsers never send that
+// part to the server, so only someone holding the whole link can open it.
+const shareFragments = new Map();
+const shareUrl = share => `${location.origin}/s/${share.token}${shareFragments.has(share.token) ? `#${shareFragments.get(share.token)}` : ''}`;
+
+// Links with their item's key worked out, and their names unlocked.
+async function openShareLinks(list) {
+  return Promise.all(list.map(async s => {
+    if (!masterKey) return s;
+    try {
+      let key;
+      if (s.kind === 'sheet') {
+        key = await keyForSheet(s.sheet);
+      } else {
+        const file = knownFiles.get(s.file);
+        if (!file?.enc) return s;
+        key = await fileKeyFor(file, s.sheet);
+      }
+      shareFragments.set(s.token, await vault.exportKey(key));
+      return { ...s, name: await vault.decryptText(key, s.name) };
+    } catch {
+      return s;
+    }
+  }));
+}
 
 function setLiveShares(list) {
   liveShares = new Map(list.filter(s => s.expiresAt > Date.now() && !s.revoked).map(s => [shareKey(s.kind, s.sheet, s.file), s]));
@@ -3413,7 +3648,7 @@ async function sharePost(body) {
 async function fetchMyShares() {
   const r = await fetch(`${API_SHARE}?mine=1`, { cache: 'no-store' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const { shares } = await r.json();
+  const shares = await openShareLinks((await r.json()).shares);
   setLiveShares(shares.filter(s => s.state === 'on'));
   if (activeSheet) renderFiles();
   return shares;
@@ -3521,7 +3756,7 @@ shareBody.addEventListener('click', async e => {
     if (shareLink) {
       try {
         const { share } = await sharePost({ action: 'extend', token: shareLink.token, days });
-        shareLink = share;
+        shareLink = (await openShareLinks([share]))[0];
         noteShare(share);
         renderShare();
         showToast(`Link now expires in ${days} day${days === 1 ? '' : 's'}`);
@@ -3533,7 +3768,8 @@ shareBody.addEventListener('click', async e => {
     const days = Number(shareBody.querySelector('.seg [aria-checked="true"]')?.dataset.days || 7);
     btn.disabled = true;
     try {
-      const { share } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days });
+      const { share: made } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days });
+      const [share] = await openShareLinks([made]);
       shareLink = share;
       noteShare(share);
       renderShare(true);
@@ -3672,6 +3908,7 @@ accountBtn.addEventListener('click', () => {
     account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
     { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
+    account?.keyring ? { label: 'New recovery key…', icon: 'key', run: confirmNewRecoveryKey } : null,
     'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
@@ -3811,6 +4048,7 @@ async function signOut(action) {
     await saveState(activeSheet);
   }
   await rawFetch(`${API_AUTH}?action=${action}`, { method:'POST' }).catch(() => {});
+  await vault.forgetKeys();
   location.replace('/');
 }
 
@@ -3827,6 +4065,9 @@ async function authPost(action, body) {
 
 let authEmail = '';
 let passwordToken = '';
+let resetRecovery = null;   // an encrypted account's recovery-locked key, from the code step
+let recoveredMaster = null; // its master key, once the recovery key opened it
+let startOver = false;
 
 function showAuth(step) {
   document.body.classList.add('signed-out');
@@ -3867,10 +4108,177 @@ function authForm(id, run) {
   });
 }
 
-authForm('#signinForm', async () => {
+// Like authPost, but hands back 409s (an account from before encryption, a keyring already made).
+async function authRequest(action, body) {
+  const r = await rawFetch(`${API_AUTH}?action=${action}`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body:JSON.stringify(body)
+  });
+  return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+}
+
+// The password never leaves this device: it becomes a sign-in secret (sent)
+// and a key that opens the account's master key (kept here).
+async function keysFromPassword(email, password, button) {
+  const label = button?.textContent;
+  if (button) button.textContent = 'Unlocking…';
+  try {
+    return await vault.passwordKeys(email, password);
+  } finally {
+    if (button) button.textContent = label;
+  }
+}
+
+// Opens the account's keyring (or makes the first one, for an account from
+// before encryption) and keeps the master key on this device. Returns a new
+// recovery key to show, if one was made.
+async function settleKeys(me, kek) {
+  if (me.keyring) {
+    await vault.rememberMaster(me.email, await vault.openWithPassword(me.keyring, kek));
+    return null;
+  }
+  const made = await vault.newKeyring(kek);
+  const r = await authRequest('keyring', { keyring: made.keyring });
+  if (r.status === 409 && r.data.keyring) {
+    // Another device set it up first.
+    await vault.rememberMaster(me.email, await vault.openWithPassword(r.data.keyring, kek));
+    return null;
+  }
+  if (!r.ok) throw new Error(r.data.error || 'Something went wrong. Try again.');
+  await vault.rememberMaster(me.email, made.master);
+  return made.recoveryKey;
+}
+
+// Into the app, by way of the new recovery key if there is one.
+function enterApp(recoveryKey) {
+  if (recoveryKey) showRecoveryKey(recoveryKey, () => location.replace('/'));
+  else location.replace('/');
+}
+
+authForm('#signinForm', async form => {
   authEmail = document.querySelector('#signinEmail').value.trim();
-  await authPost('login', { email: authEmail, password: document.querySelector('#signinPassword').value });
-  location.replace('/');
+  const password = document.querySelector('#signinPassword').value;
+  if (!authEmail || !password) throw new Error('Enter your email and password.');
+  const { auth, kek } = await keysFromPassword(authEmail, password, form.querySelector('.auth-submit'));
+  let r = await authRequest('login', { email: authEmail, auth });
+  // From before encryption: the password goes once more, so the server can check it and switch over.
+  if (r.status === 409 && r.data.legacy) r = await authRequest('login', { email: authEmail, auth, password });
+  if (!r.ok) throw new Error(r.data.error || 'Something went wrong. Try again.');
+  enterApp(await settleKeys(r.data, kek));
+});
+
+// Signed in, but this device doesn't hold the keys (or the account isn't encrypted yet).
+let unlockPurpose = 'open';
+
+function showUnlock(purpose = 'open') {
+  unlockPurpose = purpose;
+  const text = document.querySelector('#unlockText');
+  const title = document.querySelector('#unlockForm h2');
+  const alt = document.querySelector('#unlockForm .auth-alt');
+  if (purpose === 'recovery') {
+    title.textContent = 'New recovery key';
+    text.textContent = 'Enter your password to make a new recovery key. Your old one will stop working.';
+    alt.innerHTML = '<button class="link-btn" type="button" data-cancel-unlock>Cancel</button>';
+  } else {
+    title.textContent = account.keyring ? 'Unlock your sheets' : 'Turn on encryption';
+    text.textContent = account.keyring
+      ? 'Your sheets and files are end-to-end encrypted. Enter your password to open them on this device.'
+      : 'Scratch Pad now locks your sheets and files with your password, so only you can read them. Enter it once to turn this on.';
+    alt.innerHTML = '<button class="link-btn" type="button" data-go="email" data-mode="reset">Forgot password?</button> · <button class="link-btn" type="button" data-sign-out>Sign out</button>';
+  }
+  authEmail = account.email;
+  document.querySelector('#unlockEmail').value = account.email;
+  document.querySelector('#unlockPassword').value = '';
+  showAuth('unlock');
+}
+
+authForm('#unlockForm', async form => {
+  const password = document.querySelector('#unlockPassword').value;
+  if (!password) throw new Error('Enter your password.');
+  const { auth, kek } = await keysFromPassword(account.email, password, form.querySelector('.auth-submit'));
+  if (unlockPurpose === 'recovery') {
+    const master = await vault.openWithPassword(account.keyring, kek);
+    const { recoveryKey, keyring } = await vault.rewrapForRecovery(account.keyring, master);
+    const data = await authPost('recovery', { auth, byRecovery: keyring.byRecovery, recoverySalt: keyring.recoverySalt });
+    account.keyring = data.keyring;
+    showRecoveryKey(recoveryKey, hideAuth);
+    return;
+  }
+  // Not encrypted yet: the server checks the password (and switches to the sign-in secret) first.
+  if (!account.keyring) await authPost('upgrade', { password, auth });
+  enterApp(await settleKeys(account, kek));
+});
+
+function hideAuth() {
+  authScreen.hidden = true;
+  document.body.classList.remove('signed-out');
+}
+
+function confirmNewRecoveryKey() {
+  openSheet({
+    title: 'Make a new recovery key?',
+    text: 'You’ll get a new key to save. The one you have now will stop working.',
+    actions: [
+      { label: 'Cancel', kind: 'secondary' },
+      { label: 'Continue', kind: 'primary', run: () => showUnlock('recovery') }
+    ]
+  });
+}
+
+// ---- The recovery key: shown once, to save ----
+
+let afterRecoveryKey = null;
+
+function showRecoveryKey(key, next) {
+  afterRecoveryKey = next;
+  document.querySelector('#recoveryKeyText').textContent = key;
+  document.querySelector('#recoverySaved').checked = false;
+  showAuth('recovery-key');
+}
+
+authForm('#recoveryKeyForm', async () => {
+  if (!document.querySelector('#recoverySaved').checked) throw new Error('Save your recovery key first, then tick the box.');
+  const next = afterRecoveryKey;
+  afterRecoveryKey = null;
+  document.querySelector('#recoveryKeyText').textContent = '';
+  next?.();
+});
+
+authScreen.addEventListener('click', async e => {
+  const key = document.querySelector('#recoveryKeyText').textContent;
+  if (e.target.closest('[data-copy-recovery]')) {
+    try {
+      await navigator.clipboard.writeText(key);
+      showToast('Recovery key copied');
+    } catch {
+      getSelection().selectAllChildren(document.querySelector('#recoveryKeyText'));
+      showToast('Selected: copy it from here');
+    }
+  } else if (e.target.closest('[data-save-recovery]')) {
+    const text = `Scratch Pad recovery key\n\nAccount: ${authEmail || account?.email || ''}\nRecovery key: ${key}\n\nThis key opens your encrypted sheets and files if you forget your password.\nKeep it private and somewhere safe.\n`;
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Scratch Pad recovery key.txt';
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } else if (e.target.closest('[data-sign-out]')) {
+    signOut('logout');
+  } else if (e.target.closest('[data-cancel-unlock]')) {
+    hideAuth();
+  } else if (e.target.closest('[data-start-over]')) {
+    openSheet({
+      title: 'Start over with an empty account?',
+      text: 'Without your recovery key, nothing in this account can be opened, by you or by us. Starting over erases its sheets, files and share links and gives you an empty account with the same email. This can’t be undone.',
+      actions: [
+        { label: 'Cancel', kind: 'secondary' },
+        { label: 'Erase and start over', kind: 'danger-solid', run: () => { startOver = true; showAuth('password'); } }
+      ]
+    });
+  }
 });
 
 async function requestCode() {
@@ -3888,15 +4296,46 @@ authForm('#emailForm', async () => {
 authForm('#codeForm', async () => {
   const data = await authPost('verify-code', { email: authEmail, code: document.querySelector('#codeInput').value });
   passwordToken = data.token;
+  resetRecovery = data.recovery || null;
+  recoveredMaster = null;
+  startOver = false;
   document.querySelector('#passwordTitle').textContent = data.existing ? 'Choose a new password' : 'Choose a password';
+  if (resetRecovery) {
+    document.querySelector('#recoverInput').value = '';
+    showAuth('recover');
+  } else {
+    showAuth('password');
+  }
+});
+
+authForm('#recoverForm', async () => {
+  recoveredMaster = await vault.openWithRecovery(resetRecovery, document.querySelector('#recoverInput').value);
+  startOver = false;
   showAuth('password');
 });
 
-authForm('#passwordForm', async () => {
+authForm('#passwordForm', async form => {
   const password = document.querySelector('#newPassword').value;
   if (password.length < 8) throw new Error('Use at least 8 characters.');
-  await authPost('set-password', { token: passwordToken, password });
-  location.replace('/');
+  const { auth, kek } = await keysFromPassword(authEmail, password, form.querySelector('.auth-submit'));
+  const body = { token: passwordToken, auth };
+  let master;
+  let recoveryKey = null;
+  if (resetRecovery && !startOver) {
+    // The same master key, now locked with the new password too.
+    if (!recoveredMaster) {
+      showAuth('recover');
+      return;
+    }
+    master = recoveredMaster;
+    body.byPassword = await vault.wrap(master, kek);
+  } else {
+    ({ master, recoveryKey, keyring: body.keyring } = await vault.newKeyring(kek));
+    if (startOver) body.startOver = true;
+  }
+  const data = await authPost('set-password', body);
+  await vault.rememberMaster(data.email, master);
+  enterApp(recoveryKey);
 });
 
 // The eye button in a password box shows or hides what was typed.
@@ -3941,6 +4380,138 @@ authScreen.addEventListener('click', async e => {
   }
 });
 
+// ---- Turning encryption on: everything from before is locked once, on this device ----
+
+const quietTransfer = () => ({ signal: new AbortController().signal, update() {}, status() {}, done() {}, fail() {} });
+
+async function getJson(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function getBytes(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+// Every slot that holds anything: the sheets, and those in Recently Deleted, each with its key.
+async function slotsToLock() {
+  await ensureSheetKeys();
+  const slots = sheets.map(s => s.id);
+  const { sheets: trashed = [] } = await getJson(`${API_STATE}?meta=trash`);
+  for (const t of trashed) {
+    const id = Number(t.id);
+    if (t.key) {
+      await sheetKeyFrom(id, t.key);
+    } else {
+      const key = await vault.newKey();
+      const wrapped = await vault.wrap(key, masterKey);
+      await postSheets({ action: 'set-key', sheet: id, key: wrapped, name: await vault.encryptText(key, t.name) });
+      sheetKeys.set(id, { wrapped, key });
+    }
+    slots.push(id);
+  }
+  return slots;
+}
+
+// An image in the text, copied as a locked image. Returns the new id.
+async function lockImage(sheet, id, key) {
+  const info = await getJson(imageUrl(sheet, `id=${encodeURIComponent(id)}&info=1`));
+  if (info.enc) return id;
+  const parts = [];
+  for (let i = 0; i < info.chunks; i++) parts.push(await getBytes(imageUrl(sheet, `id=${encodeURIComponent(id)}&chunk=${i}`)));
+  const original = new Blob(parts, { type: info.type });
+  const start = await postJson(imageUrl(sheet, 'action=start'), { type: info.type, size: original.size, enc: 1 });
+  const newId = encodeURIComponent(start.id);
+  const signal = new AbortController().signal;
+  const seal = async part => new Blob([await vault.encryptBytes(key, new Uint8Array(await part.arrayBuffer()))]);
+  if (info.preview) {
+    const preview = new Blob([await getBytes(imageUrl(sheet, `id=${encodeURIComponent(id)}`))]);
+    const sealedPreview = await seal(preview);
+    await withRetry(() => putChunk(imageUrl(sheet, `id=${newId}&preview=1&type=${encodeURIComponent(info.preview)}`), sealedPreview, signal, () => {}), signal);
+  }
+  for (let i = 0; i < start.chunks; i++) {
+    const part = await seal(original.slice(i * start.chunkSize, Math.min(original.size, (i + 1) * start.chunkSize)));
+    await withRetry(() => putChunk(imageUrl(sheet, `id=${newId}&chunk=${i}`), part, signal, () => {}), signal);
+  }
+  await postJson(imageUrl(sheet, `id=${newId}&action=finish`));
+  return start.id;
+}
+
+// A sheet's text and its images, locked. Its old images go once the locked text is saved.
+async function lockSheetText(sheet) {
+  const data = await getJson(stateUrl(sheet));
+  if (vault.isSealed(data.html)) return;
+  let html = typeof data.html === 'string' ? data.html : textToHtml(data.text || '');
+  if (!html && !data.updatedAt) return;
+  const key = await keyForSheet(sheet);
+  const oldIds = [...new Set([...html.matchAll(/images\?sheet=(?:[1-9]|10)(?:&amp;|&)id=([A-Za-z0-9-]{1,64})/g)].map(m => m[1]))];
+  const newIds = [];
+  for (const id of oldIds) {
+    let next;
+    try {
+      next = await lockImage(sheet, id, key);
+    } catch (err) {
+      // Already gone: nothing to keep.
+      if (String(err.message).includes('404')) continue;
+      throw err;
+    }
+    html = html.split(id).join(next);
+    newIds.push(next);
+  }
+  const r = await fetch(stateUrl(sheet), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: '', html: await vault.encryptText(key, html), filled: htmlHasContent(html), images: newIds })
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  for (const id of oldIds) {
+    if (!newIds.includes(id)) await fetch(imageUrl(sheet, `id=${encodeURIComponent(id)}`), { method: 'DELETE' }).catch(() => {});
+  }
+}
+
+// A sheet's files from before encryption (Recently Deleted too), each replaced by a locked copy.
+async function lockSheetFiles(sheet) {
+  const { files } = await getJson(filesUrl(sheet, 'all=1'));
+  for (const f of files.filter(x => !x.enc)) {
+    const parts = [];
+    for (let i = 0; i < f.chunks; i++) parts.push(await getBytes(filesUrl(sheet, `id=${encodeURIComponent(f.id)}&chunk=${i}`)));
+    const file = new File(parts, f.name, { type: f.type || '' });
+    if (!(await uploadFile(file, sheet, quietTransfer(), { migrateFrom: f.id }))) throw new Error('A file couldn’t be locked');
+  }
+}
+
+let lockSlots = [];
+
+// Before the editor opens: every sheet's text and images.
+async function lockAllText() {
+  showToast('Encrypting your sheets…');
+  lockSlots = await slotsToLock();
+  for (const sheet of lockSlots) await lockSheetText(sheet);
+}
+
+// Then, in the background: files, old share links, and done.
+async function lockTheRest() {
+  try {
+    for (const sheet of lockSlots) {
+      await lockSheetFiles(sheet);
+      if (sheet === activeSheet) loadFiles(true, sheet);
+    }
+    // Links from before point at what has now been replaced; they're turned off.
+    const { shares = [] } = await getJson(`${API_SHARE}?mine=1`);
+    for (const share of shares.filter(x => x.state === 'on')) await sharePost({ action: 'revoke', token: share.token }).catch(() => {});
+    await authPost('migrated', {});
+    account.locked = 'on';
+    showToast('Your sheets and files are now end-to-end encrypted');
+    loadUsage();
+  } catch (err) {
+    console.error('Encrypting files failed', err);
+    showToast('Couldn’t finish encrypting your files. It will carry on next time.');
+  }
+}
+
 async function startApp() {
   document.body.classList.remove('signed-out');
   authScreen.hidden = true;
@@ -3948,11 +4519,26 @@ async function startApp() {
   accountBtn.title = account.email;
   accountBtn.setAttribute('aria-label', `Account: ${account.email}`);
   await fetchSheets();
+  let locking = false;
+  if (masterKey) {
+    try {
+      if (account.locked === 'migrating') {
+        await lockAllText();
+        locking = true;
+      } else {
+        await ensureSheetKeys();
+      }
+    } catch (err) {
+      console.error('Encrypting sheets failed', err);
+      showToast('Couldn’t encrypt your sheets. Reload to try again.');
+    }
+  }
   renderTabs();
   const startSheet = (await fetchCurrentSheet()) || rememberedSheet() || sheets[0].id;
   prefetchSheets();
   await switchSheet(startSheet, { remember:false, force:true });
   appStarted = true;
+  if (locking) lockTheRest();
   connectSync();
   // Every 2 seconds while the relay is down; once a minute as a safety net otherwise.
   setInterval(() => {
@@ -4095,8 +4681,12 @@ async function checkForChanges() {
 const me = await rawFetch(API_AUTH, { cache:'no-store' }).catch(() => null);
 if (me?.ok) {
   account = await me.json();
-  await startApp();
+  masterKey = account.keyring ? await vault.recallMaster(account.email) : null;
+  if (masterKey) await startApp();
+  else showUnlock();
 } else {
+  // Signed out (here or everywhere): this device forgets its keys.
+  await vault.forgetKeys();
   // The emailed link opens straight at the code step.
   const params = new URLSearchParams(location.search);
   authEmail = params.get('email') || '';

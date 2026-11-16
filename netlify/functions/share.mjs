@@ -193,19 +193,23 @@ async function visitor(req, url, token) {
   if (thumbId !== null) {
     const record = await fileOfShare(thumbId);
     const data = record?.thumb ? await fileStores(share.ns, share.sheet).thumbs.get(record.id, { type: 'arrayBuffer' }) : null;
-    return data ? bytesResponse(data, record.thumb.type) : publicJson({ error: 'Not found' }, 404);
+    return data ? bytesResponse(data, record.enc ? 'application/octet-stream' : record.thumb.type) : publicJson({ error: 'Not found' }, 404);
   }
 
   if (imageId !== null) {
     if (share.kind !== 'sheet' || !validId(imageId)) return publicJson({ error: 'Not found' }, 404);
     const record = await userStore(share.ns, 'images', share.sheet).get(imageId, { type: 'json' });
     if (!record?.complete) return publicJson({ error: 'Not found' }, 404);
+    // Locked images go out as they are stored; the viewer unlocks them with the key in its link.
+    const send = (data, type) => record.enc
+      ? new Response(data, { headers: { 'Content-Type': 'application/octet-stream', 'X-Image-Type': type, 'X-Sealed': '1', 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow' } })
+      : bytesResponse(data, type);
     if (record.preview) {
       const data = await userStore(share.ns, 'image-previews', share.sheet).get(imageId, { type: 'arrayBuffer' });
-      if (data) return bytesResponse(data, record.preview.type);
+      if (data) return send(data, record.preview.type);
     }
     const data = await userStore(share.ns, 'image-chunks', share.sheet).get(`${imageId}-0`, { type: 'arrayBuffer' });
-    return data ? bytesResponse(data, record.type) : publicJson({ error: 'Not found' }, 404);
+    return data ? send(data, record.type) : publicJson({ error: 'Not found' }, 404);
   }
 
   // What's shared. Counted as a view.

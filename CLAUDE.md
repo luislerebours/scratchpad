@@ -67,5 +67,21 @@ Pushes to `main` deploy straight to the live site.
   its slot (text, files, images) so nothing new lands on top of it. Both are
   deleted for good after 30 days (checked when lists are read) or from the
   Recently Deleted panel. They still count toward storage until then.
+- End-to-end encryption (`public/crypto.js`, Web Crypto only): the password
+  never leaves the device. PBKDF2 (600k, salted with the email) gives a sign-in
+  secret (sent; the server keeps a scrypt hash, `authV: 2`) and a key that opens
+  the account's master key. The keyring (`user.keyring`) holds the master key
+  wrapped by the password and by a recovery key (shown once; "New recovery key…"
+  in the account menu). Each sheet has a key (wrapped by the master key, on its
+  entry) that locks its text, name and pasted images; each file has a key
+  (wrapped by its sheet's key) that locks its name, chunks and thumbnail. The
+  device keeps the master key unextractable in IndexedDB until sign-out; without
+  it the page asks for the password ("Unlock"). Once an account has a keyring the
+  server refuses anything unlocked. Share links carry the item's key after `#`.
+  Password reset needs the recovery key, or "Start over" erases the account.
+  Accounts from before: the first sign-in sends the password once, makes the
+  keyring, and the page locks everything (text, images, files, Recently Deleted)
+  and turns old share links off, then marks the account `migratedAt`.
+  Server-side search, previews or recovery of content are impossible by design.
 - Search runs on the device over the kept copies of every sheet and its file
   list (`state?meta=all` returns both), so typing makes no requests.

@@ -456,6 +456,8 @@ function filesUrl(sheet = activeSheet, extra = '') {
 // ---- Icons ----
 
 const ICON_PATHS = {
+  star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z"/>',
+  card: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
@@ -1199,7 +1201,8 @@ async function uploadPadImage(img, blob) {
     loadUsage();
   } catch (err) {
     img.remove();
-    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota ? err.message : 'Image upload failed');
+    if (err?.upgrade) showUpgrade(err.message);
+    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota || err?.upgrade ? err.message : 'Image upload failed');
     else showToast(err?.message?.includes('over') ? err.message : 'Image upload failed');
   } finally {
     if (localUrl.startsWith('blob:') && !keepLocalUrl) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
@@ -1521,7 +1524,13 @@ sheetTabsEl.addEventListener('dblclick', e => {
   else openRenameModal();
 });
 
-addSheetBtn.addEventListener('click', () => addSheet());
+addSheetBtn.addEventListener('click', () => {
+  if (sheets.length >= myPlan().sheets && myPlan().sheets < MAX_SHEETS) {
+    showUpgrade('The Free plan has 1 sheet.');
+    return;
+  }
+  addSheet();
+});
 
 async function addSheet(purge) {
   addSheetBtn.disabled = true;
@@ -1540,6 +1549,10 @@ async function addSheet(purge) {
     await switchSheet(data.added);
     openRenameModal();
   } catch (err) {
+    if (err.data?.upgrade) {
+      showUpgrade(err.message);
+      return;
+    }
     const held = err.data?.purge && { ...err.data.purge };
     if (held?.key && masterKey) held.name = await vault.decryptText(await vault.unwrap(held.key, masterKey), held.name).catch(() => 'a deleted sheet');
     if (held) {
@@ -2980,6 +2993,7 @@ async function postJson(url, body) {
     const err = new Error(data.error || 'Request failed');
     err.status = r.status;
     err.quota = Boolean(data.quota);
+    err.upgrade = Boolean(data.upgrade);
     throw err;
   }
   return r.json();
@@ -3028,6 +3042,10 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
     if (id) fetch(filesUrl(targetSheet, `id=${encodeURIComponent(id)}`), { method:'DELETE' }).catch(() => {});
     if (err?.name === 'AbortError') transfer.fail('Upload cancelled');
     else if (err?.quota) transfer.fail(err.message);
+    else if (err?.upgrade) {
+      transfer.fail(err.message);
+      showUpgrade(err.message);
+    }
     else transfer.fail('Upload failed. Check your connection and retry.', () => uploadFiles([file], targetSheet));
     return false;
   }
@@ -3037,6 +3055,21 @@ async function uploadFiles(files, targetSheet = activeSheet) {
   fileInput.value = '';
   if (!hasSheet(targetSheet)) return;
   const queue = [];
+  // Free's limits, checked here first so nothing is uploaded for nothing (the server checks too).
+  const plan = myPlan();
+  const tooBig = files.filter(f => f.size > plan.fileBytes && f.size <= MAX_FILE_BYTES);
+  if (tooBig.length) {
+    showUpgrade(`On the Free plan, files can be up to ${bytes(plan.fileBytes)}. ${tooBig.length === 1 ? `${tooBig[0].name} is` : `${tooBig.length} files are`} bigger.`);
+    files = files.filter(f => !tooBig.includes(f));
+  }
+  if (plan.files !== null) {
+    const have = [...filesCache.values()].reduce((n, list) => n + (list?.length || 0), 0);
+    const room = Math.max(0, plan.files - have);
+    if (files.length > room) {
+      showUpgrade(`The Free plan holds ${plan.files} file${plan.files === 1 ? '' : 's'}.`);
+      files = files.slice(0, room);
+    }
+  }
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) {
       showToast(`${file.name} is over ${bytes(MAX_FILE_BYTES)}`);
@@ -3716,7 +3749,10 @@ const viewsText = n => n ? `Opened ${n} time${n === 1 ? '' : 's'}` : 'Not opened
 async function sharePost(body) {
   const r = await fetch(API_SHARE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  if (!r.ok) {
+    if (data.upgrade) showUpgrade(data.error);
+    throw new Error(data.error || 'Something went wrong. Try again.');
+  }
   return data;
 }
 
@@ -3735,6 +3771,10 @@ function segHtml(selected) {
 }
 
 async function openShare(target) {
+  if (!myPlan().share) {
+    showUpgrade('Share links are part of Pro.');
+    return;
+  }
   shareTarget = target;
   shareLink = null;
   rememberFocus('share');
@@ -3965,6 +4005,114 @@ linksBody.addEventListener('click', async e => {
 linksModal.querySelector('[data-close-links]').addEventListener('click', closeLinks);
 linksModal.addEventListener('click', e => { if (e.target === linksModal) closeLinks(); });
 
+// ---- Plans and billing: Free and Pro, paid through Stripe ----
+// The server enforces every limit; the page checks first to save a wasted upload.
+
+const API_BILLING = '/.netlify/functions/billing';
+
+function myPlan() {
+  return account?.plan || { plan: 'pro', name: 'Pro', sheets: MAX_SHEETS, files: null, fileBytes: MAX_FILE_BYTES, share: true, billing: null, prices: { month: 0.99, year: 9.99 } };
+}
+
+const money = n => `$${Number(n).toFixed(2)}`;
+
+function planLine() {
+  const p = myPlan();
+  if (p.plan === 'free') return 'Free plan';
+  const b = p.billing;
+  if (!b) return 'Pro plan';
+  const when = b.renewsAt ? new Date(b.renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  if (b.cancelsAtEnd && when) return `Pro · ends ${when}`;
+  return `Pro · ${b.interval === 'year' ? 'yearly' : 'monthly'}${when ? ` · renews ${when}` : ''}`;
+}
+
+// Free's limits show where they apply.
+function applyPlan() {
+  const sub = document.querySelector('.dz-sub');
+  if (sub) sub.textContent = `Up to ${bytes(myPlan().fileBytes)} per file`;
+}
+
+// The Pro offer: monthly or yearly, paid on Stripe's own page.
+function showUpgrade(reason) {
+  const { month, year } = myPlan().prices || { month: 0.99, year: 9.99 };
+  const save = Math.round((1 - year / (month * 12)) * 100);
+  openSheet({
+    title: 'Upgrade to Pro',
+    text: `${reason ? `${reason} ` : ''}Pro gives you 10 sheets, 5 GB of storage, files up to 100 MB each, and share links.`,
+    actions: [
+      { label: `${money(month)} / month`, kind: 'primary', run: () => startCheckout('month') },
+      { label: `${money(year)} / year · save ${save}%`, kind: 'primary', run: () => startCheckout('year') },
+      { label: 'Not now', kind: 'secondary', full: true }
+    ]
+  });
+}
+
+async function billingPost(action, body = {}) {
+  const r = await fetch(`${API_BILLING}?action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Payments aren’t available right now. Try again later.');
+  return data;
+}
+
+async function startCheckout(interval) {
+  showToast('Opening secure checkout…');
+  try {
+    const { url } = await billingPost('checkout', { interval });
+    location.assign(url);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+async function manageBilling() {
+  showToast('Opening billing…');
+  try {
+    const { url } = await billingPost('portal');
+    location.assign(url);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+// Back from Stripe: Stripe tells the server separately, so wait a moment for Pro to show up.
+async function afterCheckout() {
+  const params = new URLSearchParams(location.search);
+  const result = params.get('billing');
+  if (!result) return;
+  history.replaceState(null, '', '/');
+  if (result === 'cancelled') {
+    showToast('No changes made');
+    return;
+  }
+  if (result !== 'success') return;
+  showToast('Finishing your upgrade…');
+  for (let i = 0; i < 15; i++) {
+    const r = await rawFetch(API_AUTH, { cache: 'no-store' }).catch(() => null);
+    const me = r?.ok ? await r.json() : null;
+    if (me?.plan?.plan === 'pro') {
+      account.plan = me.plan;
+      applyPlan();
+      showToast('Welcome to Pro');
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  showToast('Payment received. Pro will switch on shortly; reload in a minute.');
+}
+
+// Chose Pro on the front page before having an account: offer it once signed in.
+const PRO_INTENT = 'scrapsheet-wants-pro';
+function offerProIfChosen() {
+  let wanted = false;
+  try {
+    wanted = sessionStorage.getItem(PRO_INTENT) === '1';
+    sessionStorage.removeItem(PRO_INTENT);
+  } catch {
+    // Not kept: nothing to offer.
+  }
+  if (wanted && myPlan().plan === 'free') showUpgrade('');
+}
+
 // ---- Account ----
 
 const rawFetch = window.fetch.bind(window);
@@ -3980,6 +4128,9 @@ window.fetch = async (...args) => {
 accountBtn.addEventListener('click', () => {
   openMenu(accountBtn, [
     { heading: account?.email || 'Account' },
+    { heading: planLine() },
+    myPlan().plan === 'free' ? { label: 'Upgrade to Pro…', icon: 'star', run: () => showUpgrade('') } : null,
+    myPlan().billing ? { label: 'Manage billing…', icon: 'card', run: manageBilling } : null,
     account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
     { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
@@ -4093,6 +4244,7 @@ function renderAdmin(data) {
     const facts = document.createElement('div');
     facts.className = 'admin-facts';
     facts.append(
+      adminFact('Plan', a.owner ? 'Owner (no limits)' : a.plan === 'free' ? 'Free' : a.paying ? 'Pro (paying)' : 'Pro'),
       adminFact('Storage', `${bytes(a.bytes)} of ${a.quota ? bytes(a.quota) : 'no limit'} · ${a.files} file${a.files === 1 ? '' : 's'} · ${a.images} image${a.images === 1 ? '' : 's'}`),
       adminFact('Active', a.activeDays30 === null ? '—' : `${a.activeDays30} of last 30 days`),
       adminFact('Last seen', timeAgo(a.lastSeenAt)),
@@ -4104,13 +4256,36 @@ function renderAdmin(data) {
     change.className = 'link-btn admin-limit';
     change.textContent = 'Change storage limit';
     change.addEventListener('click', () => changeLimit(a));
-    row.append(email, facts, change);
+    const actions = document.createElement('div');
+    actions.className = 'admin-actions';
+    actions.append(change);
+    if (!a.owner) {
+      const plan = document.createElement('button');
+      plan.type = 'button';
+      plan.className = 'link-btn admin-limit';
+      plan.textContent = a.plan === 'free' ? 'Switch to Pro' : 'Switch to Free';
+      plan.addEventListener('click', () => switchPlan(a, a.plan === 'free' ? 'pro' : 'free'));
+      actions.append(plan);
+    }
+    row.append(email, facts, actions);
     list.append(row);
   }
   const note = document.createElement('p');
   note.className = 'admin-note';
   note.textContent = '“Active” counts the days an account opened ScrapSheet. Sign-ins count password and email-code sign-ins.';
   adminBody.replaceChildren(summary, list, note);
+}
+
+async function switchPlan(a, plan) {
+  try {
+    const r = await fetch('/.netlify/functions/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.email, plan }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Couldn’t change the plan');
+    showToast(`${a.email} is now on ${plan === 'pro' ? 'Pro' : 'Free'}`);
+    await openAdmin();
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 async function changeLimit(a) {
@@ -4481,6 +4656,10 @@ authScreen.addEventListener('keydown', e => {
 });
 
 authScreen.addEventListener('click', async e => {
+  // Picked Pro before having an account: offer it right after signing up.
+  if (e.target.closest('.plan-pro')) {
+    try { sessionStorage.setItem(PRO_INTENT, '1'); } catch { /* not kept */ }
+  }
   const go = e.target.closest('[data-go]');
   if (go) {
     if (go.dataset.mode) setEmailMode(go.dataset.mode);
@@ -4664,6 +4843,7 @@ async function sealOldTypes() {
 async function startApp() {
   document.body.classList.remove('signed-out');
   authScreen.hidden = true;
+  applyPlan();
   avatarEl.textContent = (account.email || '?').charAt(0).toUpperCase();
   accountBtn.title = account.email;
   accountBtn.setAttribute('aria-label', `Account: ${account.email}`);
@@ -4687,6 +4867,8 @@ async function startApp() {
   prefetchSheets();
   await switchSheet(startSheet, { remember:false, force:true });
   appStarted = true;
+  afterCheckout();
+  offerProIfChosen();
   if (locking) lockTheRest().then(() => { if (account.locked === 'on') sealOldTypes(); });
   else if (masterKey && account.locked === 'on' && !account.typesSealed) sealOldTypes();
   connectSync();

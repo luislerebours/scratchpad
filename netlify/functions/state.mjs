@@ -4,6 +4,7 @@ import {
 } from '../lib/files.mjs';
 import { cleanName, isSealed, isWrappedKey, readSheets } from '../lib/sheets.mjs';
 import { liveShares } from '../lib/shares.mjs';
+import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
@@ -22,6 +23,8 @@ export default async req => {
   const url = new URL(req.url);
   const store = userStore(ns, 'state');
   const meta = url.searchParams.get('meta');
+  const limits = limitsFor(auth.user);
+  const startSheets = limits.sheets === 1 ? 1 : 5;
   // End-to-end encrypted accounts only ever send us locked text, names and keys.
   const locked = Boolean(auth.user.keyring);
   const SEALED_ONLY = 'Reload ScrapSheet to keep editing.';
@@ -35,7 +38,7 @@ export default async req => {
   // Every sheet's text in one request, so the page can switch tabs without
   // waiting. Very large sheets are left out; the page fetches those on their own.
   if (meta === 'all' && req.method === 'GET') {
-    const { sheets } = await readSheets(store);
+    const { sheets } = await readSheets(store, startSheets);
     const docs = await Promise.all(sheets.map(s => store.get(`sheets/${s.id}`, { type: 'json' })));
     let room = 3_000_000;
     const out = [];
@@ -77,12 +80,13 @@ export default async req => {
   }
 
   if (meta === 'sheets') {
-    if (req.method === 'GET') return json(await readSheets(store));
+    if (req.method === 'GET') return json(await readSheets(store, startSheets));
     if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
     const body = await req.json().catch(() => ({}));
-    const { sheets } = await readSheets(store);
+    const { sheets } = await readSheets(store, startSheets);
 
     if (body.action === 'add') {
+      if (sheets.length >= limits.sheets && limits.sheets < MAX_SHEETS) return needsPro('The Free plan has 1 sheet. Pro has up to 10.');
       if (sheets.length >= MAX_SHEETS) return json({ error: `You can have up to ${MAX_SHEETS} sheets.` }, 400);
       let trash = await readSheetTrash(ns);
       // Every slot taken, some by deleted sheets: the owner may delete one for good to make room.
@@ -118,7 +122,7 @@ export default async req => {
       if (trash.some(t => t.id === id && !t.key)) {
         await writeSheetTrash(ns, trash.map(t => (t.id === id ? { ...t, key: body.key, name: body.name } : t)));
       }
-      return json(await readSheets(store));
+      return json(await readSheets(store, startSheets));
     }
 
     const sheet = parseSheet(body.sheet);
@@ -145,7 +149,7 @@ export default async req => {
 
   // Recently Deleted: sheets and files kept for TRASH_DAYS before going for good.
   if (meta === 'trash') {
-    const { sheets } = await readSheets(store);
+    const { sheets } = await readSheets(store, startSheets);
     const trash = await readSheetTrash(ns);
 
     if (req.method === 'GET') {
@@ -212,7 +216,7 @@ export default async req => {
 
   // The sheet last opened on any device, so every device reopens there.
   if (meta === 'current') {
-    const { sheets } = await readSheets(store);
+    const { sheets } = await readSheets(store, startSheets);
     if (req.method === 'GET') {
       const data = await store.get('meta/current', { type: 'json' });
       const sheet = sheets.some(s => s.id === data?.sheet) ? data.sheet : sheets[0].id;

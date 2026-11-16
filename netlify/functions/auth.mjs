@@ -4,6 +4,7 @@ import {
   makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, userStore, validEmail, verify
 } from '../lib/auth.mjs';
 import { wipeSheet } from '../lib/files.mjs';
+import { planInfo } from '../lib/plans.mjs';
 import { readShares, sharesStore } from '../lib/shares.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
@@ -68,6 +69,7 @@ async function signedIn(user, body = {}) {
     locked: Boolean(user.keyring) && !user.migratedAt ? 'migrating' : user.keyring ? 'on' : 'off',
     // Whether files and images uploaded before their types were locked have been done.
     typesSealed: Boolean(user.typesSealedAt),
+    plan: planInfo(user),
     ...body
   }, 200, { 'Set-Cookie': await sessionCookie(user) });
 }
@@ -279,7 +281,7 @@ export default async (req, context) => {
         const { modified } = await store.set('legacy-owner', pass.ek, { onlyIfNew: true });
         if (modified) ns = '';
       }
-      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, typesSealedAt: Date.now(), version: 1, createdAt: Date.now() };
+      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, typesSealedAt: Date.now(), version: 1, createdAt: Date.now(), plan: 'free' };
       // The owner's account takes over the data from before accounts: that still needs locking.
       if (!ns) delete user.migratedAt;
     }

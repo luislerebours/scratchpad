@@ -3,6 +3,7 @@ import { json, parseSheet, requireUser, sameOrigin, userStore } from '../lib/aut
 import { fileStores, publicRecord } from '../lib/files.mjs';
 import { ended, readShareIndex as readIndex, readShares, sharesStore, writeShareIndex as writeIndex } from '../lib/shares.mjs';
 import { readSheets } from '../lib/sheets.mjs';
+import { limitsFor, needsPro } from '../lib/plans.mjs';
 
 // Share links: anyone with the link can view and download a file, or a sheet
 // with its text, images and files, until the link expires or is turned off.
@@ -104,6 +105,7 @@ async function owner(req, url) {
   const days = Number(body.days);
 
   if (body.action === 'create') {
+    if (!limitsFor(auth.user).share) return needsPro('Share links are part of Pro.');
     if (!DAY_CHOICES.has(days)) return json({ error: 'Choose 1, 7 or 30 days.' }, 400);
     const kind = body.kind === 'sheet' ? 'sheet' : 'file';
     const sheet = parseSheet(body.sheet);

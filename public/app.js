@@ -118,6 +118,8 @@ const pendingDeletes = new Map();
 let swipe = null;
 let openSwipeRow = null;
 let swipeClickBlockedUntil = 0;
+// Share links still working, by "kind:sheet:file" (see "Share links").
+let liveShares = new Map();
 
 function validSheet(value) {
   const n = Number(value);
@@ -272,6 +274,7 @@ async function prefetchSheets() {
     const r = await fetch(`${API_STATE}?meta=all`, { cache:'no-store' });
     if (!r.ok) return;
     const data = await r.json();
+    if (Array.isArray(data.shares)) setLiveShares(data.shares);
     for (const s of data.status || []) {
       const id = Number(s.id);
       sheetStatus.set(id, { content: Boolean(s.content), files: Number(s.files) || 0 });
@@ -375,6 +378,8 @@ const ICON_PATHS = {
   pin: '<path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
   lines: '<path d="M5 7h14M5 12h14M5 17h14"/>',
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+  share: '<path d="M12 15V4M7 8.5 12 4l5 4.5M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4v4.5h4.5"/>',
   clip: '<path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/>',
   landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
@@ -770,6 +775,7 @@ function confirmClearSheet() {
 sheetMenuBtn.addEventListener('click', () => {
   openMenu(sheetMenuBtn, [
     { label: 'Rename sheet', icon: 'pencil', run: openRenameModal },
+    { label: liveShareFor('sheet', activeSheet) ? 'Shared link…' : 'Share sheet…', icon: 'link', run: () => openShare({ kind: 'sheet', sheet: activeSheet, name: currentSheetName() }) },
     'separator',
     { label: 'Clear sheet text…', icon: 'eraser', run: confirmClearSheet },
     sheets.length > 1 ? { label: 'Delete sheet…', icon: 'trash', danger: true, run: confirmDeleteSheet } : null
@@ -1763,7 +1769,8 @@ function renderFiles() {
     const id = escapeHtml(f.id);
     const name = escapeHtml(f.name);
     const when = f.kept ? `${fileWhen(f.uploadedAt)} · Kept` : fileWhen(f.uploadedAt);
-    const meta = `${bytes(f.size || 0)} · <span class="age">${escapeHtml(when)}</span>`;
+    const shared = liveShareFor('file', f.sheet, f.id) ? `<span class="shared-tag" title="Shared by link">${icon('link')}<span class="visually-hidden">Shared by link. </span></span>` : '';
+    const meta = `${shared}${bytes(f.size || 0)} · <span class="age">${escapeHtml(when)}</span>`;
     const metaTitle = escapeHtml(`${bytes(f.size || 0)} · uploaded ${new Date(f.uploadedAt).toLocaleString()}`);
     if (selecting) {
       const checked = selectedIds.has(f.id);
@@ -2240,6 +2247,8 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!searchModal.hidden) closeSearch();
   else if (!sheetModal.hidden) closeSheet();
+  else if (!shareModal.hidden) closeShare();
+  else if (!linksModal.hidden) closeLinks();
   else if (!trashModal.hidden) closeTrash();
   else if (!adminModal.hidden) closeAdmin();
   else if (!previewModal.hidden) closePreview();
@@ -2429,6 +2438,7 @@ function openFileMenu(trigger, file) {
   openMenu(trigger, [
     { label: 'Preview', icon: 'eye', run: () => openPreview(file) },
     { label: 'Download', icon: 'download', run: () => saveSharedFile(file) },
+    { label: liveShareFor('file', file.sheet, file.id) ? 'Shared link…' : 'Share link…', icon: 'link', run: () => openShare({ kind: 'file', sheet: file.sheet, file: file.id, name: file.name }) },
     canKeep(file) ? { label: file.kept ? 'Stop keeping' : 'Keep (no reminders)', icon: 'pin', run: () => toggleKeep(file) } : null,
     'separator',
     { label: 'Delete file…', icon: 'trash', danger: true, run: () => confirmDeleteFile(file) }
@@ -3348,6 +3358,276 @@ trashEmptyBtn.addEventListener('click', () => {
 trashModal.querySelector('[data-close-trash]').addEventListener('click', closeTrash);
 trashModal.addEventListener('click', e => { if (e.target === trashModal) closeTrash(); });
 
+// ---- Share links: a file or a sheet, for anyone with the link, until it expires ----
+
+const API_SHARE = '/.netlify/functions/share';
+const shareModal = document.querySelector('#shareModal');
+const shareBody = document.querySelector('#shareBody');
+const linksModal = document.querySelector('#linksModal');
+const linksBody = document.querySelector('#linksBody');
+const SHARE_DAYS = [[1, '1 day'], [7, '7 days'], [30, '30 days']];
+let shareTarget = null;
+let shareLink = null;
+
+function shareKey(kind, sheet, file = null) {
+  return `${kind}:${sheet}:${file || ''}`;
+}
+const shareUrl = share => `${location.origin}/s/${share.token}`;
+
+function setLiveShares(list) {
+  liveShares = new Map(list.filter(s => s.expiresAt > Date.now() && !s.revoked).map(s => [shareKey(s.kind, s.sheet, s.file), s]));
+}
+
+function liveShareFor(kind, sheet, file = null) {
+  const share = liveShares.get(shareKey(kind, sheet, file));
+  return share && share.expiresAt > Date.now() ? share : null;
+}
+
+// Forget or remember one link locally, then redraw what shows it.
+function noteShare(share) {
+  const key = shareKey(share.kind, share.sheet, share.file);
+  if (share.state === 'on') liveShares.set(key, share);
+  else if (liveShares.get(key)?.token === share.token) liveShares.delete(key);
+  if (share.kind === 'file' && share.sheet === activeSheet) renderFiles();
+}
+
+function untilText(at) {
+  const ms = at - Date.now();
+  if (ms <= 0) return 'Expired';
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `Expires in ${Math.max(1, Math.round(ms / 60000))} min`;
+  if (hours < 20) return `Expires in ${Math.round(hours)} h`;
+  const days = Math.max(1, Math.round(hours / 24));
+  return `Expires in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+const viewsText = n => n ? `Opened ${n} time${n === 1 ? '' : 's'}` : 'Not opened yet';
+
+async function sharePost(body) {
+  const r = await fetch(API_SHARE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  return data;
+}
+
+async function fetchMyShares() {
+  const r = await fetch(`${API_SHARE}?mine=1`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const { shares } = await r.json();
+  setLiveShares(shares.filter(s => s.state === 'on'));
+  if (activeSheet) renderFiles();
+  return shares;
+}
+
+function segHtml(selected) {
+  return `<div class="seg" role="radiogroup" aria-label="Link expires after">${SHARE_DAYS.map(([days, label]) =>
+    `<button type="button" role="radio" data-days="${days}" aria-checked="${days === selected}">${label}</button>`).join('')}</div>`;
+}
+
+async function openShare(target) {
+  shareTarget = target;
+  shareLink = null;
+  rememberFocus('share');
+  shareModal.querySelector('#shareKicker').textContent = target.kind === 'sheet' ? 'Share sheet' : 'Share file';
+  shareModal.querySelector('#shareTitle').textContent = target.name;
+  shareBody.innerHTML = '<p class="share-explain">Loading…</p>';
+  shareModal.hidden = false;
+  updateModalOpen();
+  shareModal.querySelector('[data-close-share]').focus({ preventScroll: true });
+  try {
+    const shares = await fetchMyShares();
+    shareLink = shares.find(s => s.state === 'on' && shareKey(s.kind, s.sheet, s.file) === shareKey(target.kind, target.sheet, target.file)) || null;
+  } catch {
+    shareLink = liveShareFor(target.kind, target.sheet, target.file);
+  }
+  renderShare();
+}
+
+function closeShare() {
+  if (shareModal.hidden) return;
+  shareModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('share');
+}
+
+function renderShare(focus) {
+  const what = shareTarget.kind === 'sheet' ? 'this sheet’s text, images and files' : 'this file';
+  if (!shareLink) {
+    shareBody.innerHTML = `
+      <p class="share-explain">Anyone with the link can view and download ${what}. They don’t need an account.</p>
+      <p class="seg-label" id="shareDaysLabel">Link expires after</p>
+      ${segHtml(7)}
+      <button class="btn full" type="button" data-share-create>${icon('link')}Create link</button>`;
+    if (focus) shareBody.querySelector('[data-share-create]').focus({ preventScroll: true });
+    return;
+  }
+  const canShare = typeof navigator.share === 'function';
+  shareBody.innerHTML = `
+    <div>
+      <label class="field-label" for="shareUrlInput">Link</label>
+      <div class="share-url-row">
+        <input id="shareUrlInput" type="text" readonly value="${escapeHtml(shareUrl(shareLink))}" />
+        <button class="btn compact" type="button" data-share-copy>Copy</button>
+      </div>
+    </div>
+    ${canShare ? `<button class="btn secondary full" type="button" data-share-send>${icon('share')}Send link…</button>` : ''}
+    <p class="share-status"><b>${escapeHtml(untilText(shareLink.expiresAt))}</b> · ${escapeHtml(viewsText(shareLink.views || 0))}</p>
+    <p class="seg-label">Change to expire after (from now)</p>
+    ${segHtml(0)}
+    <div class="share-actions">
+      <span class="share-status">Anyone with the link can open ${what}.</span>
+      <button class="link-btn share-off" type="button" data-share-revoke>Turn off link</button>
+    </div>`;
+  if (focus) shareBody.querySelector('[data-share-copy]').focus({ preventScroll: true });
+}
+
+async function copyLink(url, input) {
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied');
+  } catch {
+    input?.select();
+    showToast('Selected: copy it from the box');
+  }
+}
+
+shareBody.addEventListener('click', async e => {
+  const btn = e.target.closest('button');
+  if (!btn || !shareTarget) return;
+  if (btn.dataset.days) {
+    const days = Number(btn.dataset.days);
+    btn.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', String(b === btn)));
+    if (shareLink) {
+      try {
+        const { share } = await sharePost({ action: 'extend', token: shareLink.token, days });
+        shareLink = share;
+        noteShare(share);
+        renderShare();
+        showToast(`Link now expires in ${days} day${days === 1 ? '' : 's'}`);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+  } else if ('shareCreate' in btn.dataset) {
+    const days = Number(shareBody.querySelector('.seg [aria-checked="true"]')?.dataset.days || 7);
+    btn.disabled = true;
+    try {
+      const { share } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days });
+      shareLink = share;
+      noteShare(share);
+      renderShare(true);
+      copyLink(shareUrl(share), shareBody.querySelector('#shareUrlInput'));
+    } catch (err) {
+      btn.disabled = false;
+      showToast(err.message);
+    }
+  } else if ('shareCopy' in btn.dataset) {
+    copyLink(shareUrl(shareLink), shareBody.querySelector('#shareUrlInput'));
+  } else if ('shareSend' in btn.dataset) {
+    navigator.share({ title: shareTarget.name, url: shareUrl(shareLink) }).catch(() => {});
+  } else if ('shareRevoke' in btn.dataset) {
+    try {
+      const { share } = await sharePost({ action: 'revoke', token: shareLink.token });
+      noteShare(share);
+      shareLink = null;
+      renderShare(true);
+      showToast('Link turned off');
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+});
+
+// Arrow keys move between the expiry choices.
+shareBody.addEventListener('keydown', e => {
+  const btn = e.target.closest('.seg button');
+  if (!btn || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  e.preventDefault();
+  const all = [...btn.parentElement.querySelectorAll('button')];
+  const next = all[(all.indexOf(btn) + (e.key === 'ArrowRight' ? 1 : -1) + all.length) % all.length];
+  next.focus();
+  next.click();
+});
+
+shareModal.querySelector('[data-close-share]').addEventListener('click', closeShare);
+shareModal.addEventListener('click', e => { if (e.target === shareModal) closeShare(); });
+
+// ---- Shared links: every link this account has made ----
+
+let linksList = [];
+
+async function openLinks() {
+  rememberFocus('links');
+  linksModal.hidden = false;
+  updateModalOpen();
+  linksModal.querySelector('[data-close-links]').focus({ preventScroll: true });
+  linksBody.innerHTML = '<p class="trash-empty">Loading…</p>';
+  await loadLinks();
+}
+
+function closeLinks() {
+  if (linksModal.hidden) return;
+  linksModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('links');
+}
+
+async function loadLinks() {
+  try {
+    linksList = await fetchMyShares();
+    renderLinks();
+  } catch {
+    linksBody.innerHTML = '<p class="trash-empty">Couldn’t load your links. Check your connection and try again.</p>';
+  }
+}
+
+function renderLinks() {
+  if (!linksList.length) {
+    linksBody.innerHTML = '<div class="trash-empty"><strong>No shared links</strong>Share a file or a sheet from its ••• menu. Its link shows up here.</div>';
+    return;
+  }
+  const on = linksList.filter(s => s.state === 'on');
+  const ended = linksList.filter(s => s.state !== 'on');
+  const row = (s, i) => {
+    const name = escapeHtml(s.name);
+    const mark = s.kind === 'sheet' ? `<span class="search-mark" aria-hidden="true">${icon('lines')}</span>` : `<span class="search-mark" aria-hidden="true">${icon('link')}</span>`;
+    const state = s.state === 'on' ? `${escapeHtml(untilText(s.expiresAt))} · ${escapeHtml(viewsText(s.views))}` : s.state === 'off' ? 'Turned off' : 'Expired';
+    const where = s.kind === 'sheet' ? 'Sheet' : `File in ${escapeHtml(currentSheetName(s.sheet))}`;
+    return `<div class="trash-row">
+      ${mark}
+      <div class="search-main"><div class="trash-name" title="${name}">${name}</div><div class="trash-meta">${where}</div><div class="trash-meta link-row-state${s.state === 'on' ? '' : ' off'}">${state}</div></div>
+      ${s.state === 'on' ? `<button class="link-btn" type="button" data-link-copy="${i}">Copy</button>
+      <button class="icon-btn" type="button" data-link-off="${i}" aria-label="Turn off the link to ${name}" title="Turn off link">${icon('trash')}</button>` : '<span></span><span></span>'}
+    </div>`;
+  };
+  linksBody.innerHTML = (on.length ? `<div class="trash-group">On</div>${on.map(s => row(s, linksList.indexOf(s))).join('')}` : '')
+    + (ended.length ? `<div class="trash-group">Ended</div>${ended.map(s => row(s, linksList.indexOf(s))).join('')}` : '');
+  if (!linksModal.hidden && !linksModal.contains(document.activeElement)) linksModal.querySelector('[data-close-links]').focus({ preventScroll: true });
+}
+
+linksBody.addEventListener('click', async e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  if (btn.dataset.linkCopy) {
+    copyLink(shareUrl(linksList[Number(btn.dataset.linkCopy)]));
+  } else if (btn.dataset.linkOff) {
+    const share = linksList[Number(btn.dataset.linkOff)];
+    btn.disabled = true;
+    try {
+      const data = await sharePost({ action: 'revoke', token: share.token });
+      noteShare(data.share);
+      showToast('Link turned off');
+      await loadLinks();
+    } catch (err) {
+      btn.disabled = false;
+      showToast(err.message);
+    }
+  }
+});
+
+linksModal.querySelector('[data-close-links]').addEventListener('click', closeLinks);
+linksModal.addEventListener('click', e => { if (e.target === linksModal) closeLinks(); });
+
 // ---- Account ----
 
 const rawFetch = window.fetch.bind(window);
@@ -3364,6 +3644,7 @@ accountBtn.addEventListener('click', () => {
   openMenu(accountBtn, [
     { heading: account?.email || 'Account' },
     account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
+    { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
     'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },

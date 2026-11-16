@@ -2,24 +2,11 @@ import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '.
 import {
   TRASH_DAYS, deleteFileForGood, publicRecord, readRecords, readSheetTrash, visibleFiles, wipeSheet, writeSheetTrash
 } from '../lib/files.mjs';
+import { cleanName, readSheets } from '../lib/sheets.mjs';
+import { liveShares } from '../lib/shares.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 const MAX_TEXT_CHARS = 1_000_000;
-
-const cleanName = value => String(value ?? '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 40);
-
-// The account's sheets, in tab order. Accounts made before sheets could be
-// added had five fixed sheets with names in meta/names.
-async function readSheets(store) {
-  const data = await store.get('meta/sheets', { type: 'json' });
-  if (data?.sheets?.length) return data;
-  const legacy = await store.get('meta/names', { type: 'json' });
-  if (legacy) {
-    const names = Array.from({ length: 5 }, (_, i) => cleanName(legacy.names?.[i]) || `Sheet ${i + 1}`);
-    return { sheets: names.map((name, i) => ({ id: i + 1, name })), updatedAt: Number(legacy.updatedAt || 0) };
-  }
-  return { sheets: Array.from({ length: 5 }, (_, i) => ({ id: i + 1, name: `Sheet ${i + 1}` })), updatedAt: 0 };
-}
 
 async function writeSheets(ns, store, sheets) {
   const next = { sheets, updatedAt: Date.now() };
@@ -61,9 +48,10 @@ export default async req => {
     // What each tab shows under its name (whether it holds anything, and its
     // files), and every file name for search. Reading also clears out what has
     // been in Recently Deleted for 30 days.
-    const [fileLists, trash] = await Promise.all([
+    const [fileLists, trash, shares] = await Promise.all([
       Promise.all(sheets.map(async s => visibleFiles((await readRecords(ns, s.id)).records, s.id))),
-      readSheetTrash(ns)
+      readSheetTrash(ns),
+      liveShares(ns)
     ]);
     const status = sheets.map((s, i) => ({
       id: s.id,
@@ -71,7 +59,7 @@ export default async req => {
       files: fileLists[i].length,
       fileList: fileLists[i]
     }));
-    return json({ sheets: out, status, trashedSheets: trash.length });
+    return json({ sheets: out, status, trashedSheets: trash.length, shares });
   }
 
   // The 2-second check: just the change markers for the tabs and one sheet.

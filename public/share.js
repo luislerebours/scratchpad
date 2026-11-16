@@ -1,0 +1,283 @@
+// The page someone sees when they open a share link: /s/<token>.
+// No account needed; everything comes through the link's token.
+
+const API = '/.netlify/functions/share';
+const token = decodeURIComponent((location.pathname.match(/^\/s\/([^/]+)/) || [])[1] || new URLSearchParams(location.search).get('t') || '');
+const card = document.querySelector('#shareCard');
+const toastEl = document.querySelector('#toast');
+const PARALLEL = 3;
+
+const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+function bytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function showToast(text) {
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+}
+
+function expiresText(at) {
+  const ms = at - Date.now();
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `Expires in ${Math.max(1, Math.round(ms / 60000))} min`;
+  if (hours < 24) {
+    const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(at);
+    return new Date(at).toDateString() === new Date().toDateString() ? `Expires today at ${time}` : `Expires tomorrow at ${time}`;
+  }
+  const days = Math.round(hours / 24);
+  return `Expires in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+const ICON = {
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
+  broken: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2M4 4l16 16"/>'
+};
+const icon = name => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+
+function fileKind(f) {
+  const ext = (String(f.name).split('.').pop() || '').toLowerCase();
+  const type = f.type || '';
+  if (type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'avif'].includes(ext)) return ['img', ''];
+  if (type === 'application/pdf' || ext === 'pdf') return ['pdf', 'PDF'];
+  if (['xls', 'xlsx', 'xlsm', 'numbers', 'ods', 'csv'].includes(ext)) return ['sheet', ext === 'csv' ? 'CSV' : 'XLS'];
+  if (['doc', 'docx', 'pages', 'rtf', 'odt'].includes(ext)) return ['doc', 'DOC'];
+  if (['ppt', 'pptx', 'key', 'odp'].includes(ext)) return ['slides', 'PPT'];
+  if (['zip', 'rar', '7z', 'gz', 'tar'].includes(ext)) return ['zip', 'ZIP'];
+  if (type.startsWith('video/') || ['mov', 'mp4', 'm4v', 'webm'].includes(ext)) return ['video', 'VID'];
+  if (type.startsWith('audio/') || ['mp3', 'm4a', 'wav', 'aac'].includes(ext)) return ['audio', 'AUD'];
+  if (type.startsWith('text/') || ['txt', 'md', 'json', 'log'].includes(ext)) return ['text', 'TXT'];
+  return ['file', ext && ext.length <= 4 ? ext.toUpperCase() : 'FILE'];
+}
+
+function fileIconHtml(f, big = false) {
+  const [kind, label] = fileKind(f);
+  const size = big ? ' big' : '';
+  if (kind === 'img' && f.thumb) {
+    return `<span class="file-icon kind-img has-thumb${size}" aria-hidden="true"><img src="${API}?t=${encodeURIComponent(token)}&thumb=${encodeURIComponent(f.id)}" alt="" /></span>`;
+  }
+  return `<span class="file-icon kind-${kind}${size}" aria-hidden="true">${kind === 'img' ? icon('landscape') : escapeHtml(label)}</span>`;
+}
+
+// ---- Downloading: a file arrives in 4 MB pieces, a few at a time ----
+
+async function fetchFile(file, onProgress) {
+  const parts = new Array(file.chunks);
+  let got = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < file.chunks) {
+      const i = next++;
+      const r = await fetch(`${API}?t=${encodeURIComponent(token)}&file=${encodeURIComponent(file.id)}&chunk=${i}`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The download stopped. Try again.');
+      parts[i] = await r.arrayBuffer();
+      got += parts[i].byteLength;
+      onProgress(file.size ? got / file.size : 1);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, file.chunks) }, worker));
+  return new Blob(parts, { type: file.type || 'application/octet-stream' });
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// A download button that shows its own progress.
+function wireDownload(button, file) {
+  const label = button.querySelector('.dl-label');
+  const bar = button.parentElement.querySelector('.dl-bar i');
+  button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    const before = label?.textContent;
+    try {
+      const blob = await fetchFile(file, share => {
+        if (bar) bar.style.width = `${Math.round(share * 100)}%`;
+        if (label) label.textContent = `Downloading… ${Math.round(share * 100)}%`;
+      });
+      saveBlob(blob, file.name);
+      if (label) label.textContent = 'Downloaded';
+    } catch (err) {
+      showToast(err.message);
+      if (label) label.textContent = before;
+    } finally {
+      button.disabled = false;
+      setTimeout(() => { if (bar) bar.style.width = '0'; if (label) label.textContent = before; }, 2500);
+    }
+  });
+}
+
+// ---- A shared sheet's text: only text, line breaks and the sheet's own images ----
+
+const IMAGE_SRC = /^\/\.netlify\/functions\/images\?sheet=(?:[1-9]|10)&id=([A-Za-z0-9-]{1,64})$/;
+const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'UL', 'OL', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'TR', 'TABLE', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER']);
+const DROPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED', 'NOSCRIPT', 'SVG', 'MATH', 'HEAD', 'TITLE', 'META', 'LINK', 'VIDEO', 'AUDIO', 'CANVAS', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON']);
+
+function appendClean(source, target) {
+  for (const node of [...source.childNodes]) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      target.append(node.textContent);
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = node.tagName.toUpperCase();
+    if (DROPPED_TAGS.has(tag)) continue;
+    if (tag === 'BR') {
+      target.append(document.createElement('br'));
+    } else if (tag === 'IMG') {
+      const match = IMAGE_SRC.exec(node.getAttribute('src') || '');
+      if (!match) continue;
+      const img = document.createElement('img');
+      img.src = `${API}?t=${encodeURIComponent(token)}&image=${encodeURIComponent(match[1])}`;
+      img.alt = 'Image';
+      img.loading = 'lazy';
+      img.className = 'shared-image';
+      const width = Math.round(Number(node.getAttribute('data-width')));
+      if (Number.isFinite(width) && width > 0) img.style.width = `${Math.min(100, Math.max(10, width))}%`;
+      target.append(img);
+    } else if (BLOCK_TAGS.has(tag)) {
+      const div = document.createElement('div');
+      appendClean(node, div);
+      target.append(div);
+    } else {
+      appendClean(node, target);
+    }
+  }
+}
+
+function renderSheetText(data, box) {
+  if (data.html !== null && data.html !== undefined) {
+    // Parsed inert: nothing in it runs or loads until copied over cleanly.
+    const doc = new DOMParser().parseFromString(`<!doctype html><body>${data.html}`, 'text/html');
+    appendClean(doc.body, box);
+  } else {
+    box.textContent = data.text || '';
+  }
+  if (!box.textContent.trim() && !box.querySelector('img')) {
+    box.classList.add('is-empty');
+    box.textContent = 'This sheet has no text.';
+  }
+}
+
+// ---- Pages ----
+
+function header(kicker, name, meta) {
+  document.title = `${name} · Scratch Pad`;
+  return `<p class="share-kicker">${escapeHtml(kicker)}</p>
+    <h1 class="share-title">${escapeHtml(name)}</h1>
+    <p class="share-meta">${meta}</p>`;
+}
+
+function renderFile(data) {
+  const f = data.file;
+  const [kind] = fileKind(f);
+  const canPreview = kind === 'img' && f.size <= 12 * 1000 * 1000 && !/heic|heif/i.test(f.type || f.name);
+  card.innerHTML = `
+    ${header('Shared file', data.name, `${bytes(f.size)} · ${escapeHtml(expiresText(data.expiresAt))}`)}
+    <div class="share-preview">${canPreview ? '<p class="share-loading">Loading preview…</p>' : fileIconHtml(f, true)}</div>
+    <div class="dl">
+      <button class="btn dl-main" type="button">${icon('download')}<span class="dl-label">Download</span></button>
+      <div class="dl-bar" aria-hidden="true"><i></i></div>
+    </div>`;
+  wireDownload(card.querySelector('.dl-main'), f);
+  if (canPreview) {
+    fetchFile(f, () => {}).then(blob => {
+      const img = document.createElement('img');
+      img.alt = data.name;
+      img.src = URL.createObjectURL(blob);
+      card.querySelector('.share-preview').replaceChildren(img);
+    }).catch(() => {
+      card.querySelector('.share-preview').innerHTML = fileIconHtml(f, true);
+    });
+  }
+}
+
+function renderSheet(data) {
+  const n = data.files.length;
+  const meta = `${n ? `${n} file${n === 1 ? '' : 's'} · ` : ''}${escapeHtml(expiresText(data.expiresAt))}`;
+  card.innerHTML = `
+    ${header('Shared sheet', data.name, meta)}
+    <div class="share-text-wrap">
+      <button class="ghost-btn share-copy" type="button">${icon('copy')}<span>Copy text</span></button>
+      <div class="share-text" id="shareText"></div>
+    </div>
+    ${n ? `<h2 class="share-files-title">Files</h2>
+    <div class="share-files">${data.files.map((f, i) => `
+      <div class="share-file">
+        ${fileIconHtml(f)}
+        <div class="share-file-main"><div class="share-file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div><div class="share-file-meta">${bytes(f.size || 0)}</div></div>
+        <div class="dl">
+          <button class="icon-btn dl-row" type="button" data-i="${i}" aria-label="Download ${escapeHtml(f.name)}">${icon('download')}<span class="dl-label sr-only">Download</span></button>
+          <div class="dl-bar" aria-hidden="true"><i></i></div>
+        </div>
+      </div>`).join('')}
+    </div>` : ''}`;
+  const box = card.querySelector('#shareText');
+  renderSheetText(data, box);
+  card.querySelectorAll('.dl-row').forEach(btn => wireDownload(btn, data.files[Number(btn.dataset.i)]));
+  card.querySelector('.share-copy').addEventListener('click', async () => {
+    const text = box.innerText;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied');
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      showToast('Selected: copy it from here');
+    }
+  });
+}
+
+function renderProblem(reason, message) {
+  document.title = 'Scratch Pad';
+  const advice = {
+    expired: 'Ask the person who shared it for a new link.',
+    off: 'The person who shared it turned this link off.',
+    gone: 'It was deleted by the person who shared it.',
+    missing: 'Check that the whole link was copied.'
+  }[reason] || 'Check your connection and try again.';
+  card.innerHTML = `<div class="share-problem">
+      <span class="share-problem-mark" aria-hidden="true">${icon('broken')}</span>
+      <h1 class="share-title">${escapeHtml(message)}</h1>
+      <p class="share-meta">${escapeHtml(advice)}</p>
+    </div>`;
+}
+
+async function start() {
+  if (!token) {
+    renderProblem('missing', 'This link doesn’t work.');
+    return;
+  }
+  try {
+    const r = await fetch(`${API}?t=${encodeURIComponent(token)}`, { cache: 'no-store' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      renderProblem(data.reason, data.error || 'This link doesn’t work.');
+      return;
+    }
+    if (data.kind === 'file') renderFile(data);
+    else renderSheet(data);
+  } catch {
+    renderProblem('network', 'Couldn’t open this link.');
+  }
+}
+
+start();

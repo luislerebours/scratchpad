@@ -456,6 +456,9 @@ function filesUrl(sheet = activeSheet, extra = '') {
 // ---- Icons ----
 
 const ICON_PATHS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   theme: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/>',
   pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
@@ -544,13 +547,15 @@ function openMenu(trigger, items, label) {
     } else {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `menu-item${item.danger ? ' danger' : ''}`;
-      btn.setAttribute('role', 'menuitem');
+      btn.className = `menu-item${item.danger ? ' danger' : ''}${item.checked !== undefined ? ' menu-choice' : ''}`;
+      btn.setAttribute('role', item.checked !== undefined ? 'menuitemradio' : 'menuitem');
+      if (item.checked !== undefined) btn.setAttribute('aria-checked', String(Boolean(item.checked)));
       btn.tabIndex = -1;
       btn.innerHTML = item.icon ? icon(item.icon) : '';
       const text = document.createElement('span');
       text.textContent = item.label;
       btn.append(text);
+      if (item.checked) btn.insertAdjacentHTML('beforeend', `<span class="menu-check">${icon('check')}</span>`);
       btn.addEventListener('click', () => {
         closeMenu();
         item.run();
@@ -580,7 +585,7 @@ function openMenu(trigger, items, label) {
   openMenuState = { el, trigger, place, width: window.innerWidth };
   place();
 
-  const entries = () => [...el.querySelectorAll('[role="menuitem"]')];
+  const entries = () => [...el.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')];
   entries()[0]?.focus({ preventScroll:true });
   el.addEventListener('keydown', e => {
     const list = entries();
@@ -3979,7 +3984,9 @@ accountBtn.addEventListener('click', () => {
     { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
     account?.keyring ? { label: 'New recovery key…', icon: 'key', run: confirmNewRecoveryKey } : null,
-    { label: 'Appearance…', icon: 'theme', run: chooseAppearance },
+    'separator',
+    { heading: 'Appearance' },
+    ...appearanceItems(),
     'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
@@ -3988,15 +3995,32 @@ accountBtn.addEventListener('click', () => {
 });
 
 // Light, dark, or whatever the device uses (theme.js applies and remembers it).
-function chooseAppearance() {
+function appearanceItems() {
   const now = window.scratchTheme?.get() || 'system';
-  const choice = (value, label) => ({ label: value === now ? `✓ ${label}` : label, kind: value === now ? 'primary' : 'secondary', full: true, run: () => window.scratchTheme?.set(value) });
-  openSheet({
-    title: 'Appearance',
-    text: 'System follows your device’s light or dark setting.',
-    actions: [choice('system', 'System'), choice('light', 'Light'), choice('dark', 'Dark')]
-  });
+  return [['system', 'System', 'theme'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']]
+    .map(([value, label, mark]) => ({ label, icon: mark, checked: value === now, run: () => { window.scratchTheme?.set(value); updateBrandLabel(); } }));
 }
+
+// Tapping the logo or name flips between light and dark (and keeps that choice).
+const brandBtn = document.querySelector('#brandBtn');
+function updateBrandLabel() {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  brandBtn.setAttribute('aria-label', `Scratch Pad: switch to ${next} mode`);
+  brandBtn.title = `Switch to ${next} mode`;
+}
+function flipTheme() {
+  window.scratchTheme?.set(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+  updateBrandLabel();
+}
+brandBtn.addEventListener('click', flipTheme);
+brandBtn.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    flipTheme();
+  }
+});
+matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => setTimeout(updateBrandLabel));
+updateBrandLabel();
 
 function confirmSignOutEverywhere() {
   openSheet({

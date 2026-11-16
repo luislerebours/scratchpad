@@ -213,7 +213,57 @@ const otherRefreshTimers = new Map();
 function cacheSheet(sheet, html, updatedAt) {
   const known = sheetCache.get(sheet);
   if (known && known.updatedAt > updatedAt) return;
-  sheetCache.set(sheet, { html, updatedAt });
+  sheetCache.set(sheet, { html, updatedAt, content: htmlHasContent(html) });
+  scheduleTabStatus();
+}
+
+// Text (ignoring whitespace) or an image counts as content.
+const contentProbe = document.createElement('template');
+function htmlHasContent(html) {
+  contentProbe.innerHTML = html || '';
+  const content = contentProbe.content;
+  return Boolean(content.querySelector('img') || content.textContent.trim());
+}
+
+// ---- Under each tab's name: Empty, a text mark, and/or a paperclip with the file count ----
+// sheetStatus holds what the server reported when the app opened; fresher
+// copies (the open editor, kept text, kept file lists) take over as they arrive.
+const sheetStatus = new Map();
+let tabStatusFrame = 0;
+
+function scheduleTabStatus() {
+  if (!tabStatusFrame) tabStatusFrame = requestAnimationFrame(() => { tabStatusFrame = 0; updateTabStatus(); });
+}
+
+function statusFor(id) {
+  const reported = sheetStatus.get(id);
+  const loaded = id === activeSheet && !pad.classList.contains('is-loading');
+  const content = loaded ? !editorIsEmpty() : sheetCache.has(id) ? sheetCache.get(id).content : reported?.content;
+  const list = id === activeSheet && (currentFiles.length || !emptyFiles.hidden) ? currentFiles : filesCache.get(id)?.filter(f => !pendingDeletes.has(f.id));
+  const files = list ? list.length : reported?.files;
+  return { content, files };
+}
+
+function updateTabStatus() {
+  for (const tab of sheetTabsEl.querySelectorAll('.sheet-tab')) {
+    const id = Number(tab.dataset.sheet);
+    const { content, files } = statusFor(id);
+    const row = tab.querySelector('.sheet-status');
+    const parts = [];
+    let html = '';
+    if (content === undefined && files === undefined) {
+      html = '';
+    } else if (!content && !files) {
+      html = '<span>Empty</span>';
+      parts.push('empty');
+    } else {
+      if (content) { html += icon('lines'); parts.push('has text'); }
+      if (files) { html += `<span class="tab-files">${icon('clip')}${files}</span>`; parts.push(`${files} file${files === 1 ? '' : 's'}`); }
+    }
+    if (row.innerHTML !== html) row.innerHTML = html;
+    const name = sheets.find(s => s.id === id)?.name || '';
+    tab.setAttribute('aria-label', parts.length ? `${name}, ${parts.join(', ')}` : name);
+  }
 }
 
 // One request for every sheet's text, made when the app opens.
@@ -222,10 +272,12 @@ async function prefetchSheets() {
     const r = await fetch(`${API_STATE}?meta=all`, { cache:'no-store' });
     if (!r.ok) return;
     const data = await r.json();
+    for (const s of data.status || []) sheetStatus.set(Number(s.id), { content: Boolean(s.content), files: Number(s.files) || 0 });
     for (const s of data.sheets || []) {
       const html = typeof s.html === 'string' ? s.html : textToHtml(s.text || '');
       cacheSheet(Number(s.id), html, Number(s.updatedAt || 0));
     }
+    scheduleTabStatus();
   } catch {
     // Tabs just load the way they did before.
   }
@@ -243,7 +295,7 @@ function refreshOtherSheet(sheet, kind) {
       const r = await fetch(kind === 'files' ? filesUrl(sheet) : stateUrl(sheet), { cache:'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
-      if (kind === 'files') filesCache.set(sheet, Array.isArray(data.files) ? data.files : []);
+      if (kind === 'files') { filesCache.set(sheet, Array.isArray(data.files) ? data.files : []); scheduleTabStatus(); }
       else cacheSheet(sheet, typeof data.html === 'string' ? data.html : textToHtml(data.text || ''), Number(data.updatedAt || 0));
     } catch {
       // A stale copy is worse than none: that tab will load normally instead.
@@ -318,6 +370,8 @@ const ICON_PATHS = {
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   pin: '<path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  lines: '<path d="M5 7h14M5 12h14M5 17h14"/>',
+  clip: '<path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/>',
   landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5L5 20"/>',
   shield: '<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/>',
@@ -485,9 +539,13 @@ function renderTabs() {
     const label = document.createElement('span');
     label.className = 'sheet-label';
     label.textContent = sheet.name;
-    tab.append(label);
+    const status = document.createElement('span');
+    status.className = 'sheet-status';
+    status.setAttribute('aria-hidden', 'true');
+    tab.append(label, status);
     return tab;
   }));
+  updateTabStatus();
   addSheetBtn.hidden = sheets.length >= MAX_SHEETS;
   updateFilesSubtitle();
   requestAnimationFrame(() => revealActiveTab());
@@ -793,6 +851,7 @@ function editorIsEmpty() {
 
 function updateEmptyState() {
   pad.classList.toggle('is-empty', editorIsEmpty());
+  scheduleTabStatus();
 }
 
 function caretOffset() {
@@ -1254,6 +1313,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
   if (nextSheet !== activeSheet) return;
   pad.classList.remove('is-loading');
   pad.contentEditable = 'true';
+  scheduleTabStatus();
 }
 
 // The file list as last seen, or nothing (rather than "No files") until it loads.
@@ -1711,6 +1771,7 @@ function renderFiles() {
   updateSelectionUi();
   updateOldFilesNote();
   updateAttachLink();
+  scheduleTabStatus();
   if (!selecting && currentFiles.some(f => !f.thumb && !thumbTried.has(f.id) && fileKind(f)[0] === 'img')) scheduleThumbBackfill();
 }
 

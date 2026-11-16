@@ -111,11 +111,16 @@ body.signed-out .app-shell { display: none; }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .sheet-tabs { display: flex; gap: 10px; width: max-content; padding: 2px; }
-.sheet-tab { appearance: none; position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 84px; max-width: 200px; padding: 0 20px; border: 1px solid var(--tab-line); border-radius: 12px; background: var(--tab-bg); color: var(--tab-text); font-size: 1rem; font-weight: 600; letter-spacing: -.005em; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
+.sheet-tab { appearance: none; position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 44px; min-width: 84px; max-width: 200px; padding: 2px 20px; border: 1px solid var(--tab-line); border-radius: 12px; background: var(--tab-bg); color: var(--tab-text); font-size: 1rem; font-weight: 600; letter-spacing: -.005em; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
 .sheet-tab::after { content: ''; position: absolute; inset: -2px 0; }
 .sheet-tab:hover { background: var(--tab-bg-hover); color: var(--text); }
 .sheet-tab.active { background: linear-gradient(180deg, var(--tab-active-top), var(--tab-active-bottom)); border-color: var(--tab-active-line); color: #fff; box-shadow: 0 4px 14px rgba(20, 90, 160, .22); }
-.sheet-label { overflow: hidden; text-overflow: ellipsis; }
+.sheet-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 1.15; }
+.sheet-status { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 15px; color: var(--muted); opacity: .8; font-size: .8125rem; font-weight: 400; line-height: 1; letter-spacing: 0; }
+.sheet-status:empty { display: none; }
+.sheet-status .i { width: 15px; height: 15px; stroke-width: 1.9; }
+.tab-files { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.sheet-tab.active .sheet-status { color: #fff; opacity: .9; }
 .add-sheet-btn { flex: 0 0 auto; }
 
 /* ---------- Writing area ---------- */

@@ -61,7 +61,19 @@ export default async req => {
       room -= size;
       out.push({ id: s.id, html, text, updatedAt: Number(doc?.updatedAt || 0) });
     });
-    return json({ sheets: out });
+    // What each tab shows under its name: whether it holds anything, and its file count.
+    const fileCounts = await Promise.all(sheets.map(async s => {
+      const records = userStore(ns, 'files', s.id);
+      const { blobs } = await records.list();
+      const all = await Promise.all(blobs.map(({ key }) => records.get(key, { type: 'json' }).catch(() => null)));
+      return all.filter(r => r?.complete).length;
+    }));
+    const status = sheets.map((s, i) => ({
+      id: s.id,
+      content: Boolean(String(docs[i]?.text || '').trim() || /<img\b/i.test(String(docs[i]?.html || ''))),
+      files: fileCounts[i]
+    }));
+    return json({ sheets: out, status });
   }
 
   // The 2-second check: just the change markers for the tabs and one sheet.

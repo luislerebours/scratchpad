@@ -25,7 +25,8 @@ const stores = (ns, sheet) => ({
 
 // An id always names the same bytes, so the browser may keep it for good;
 // "private" keeps shared caches (Netlify's CDN) from serving it to anyone else.
-const imageHeaders = type => ({
+const imageHeaders = (type, shownAs) => ({
+  ...(shownAs ? { 'X-Image-Type': shownAs } : {}),
   'Content-Type': type,
   'Cache-Control': 'private, max-age=31536000, immutable',
   'X-Content-Type-Options': 'nosniff'
@@ -49,6 +50,8 @@ async function removeUnusedImages(ns, sheet) {
   );
   const used = new Set();
   for (const doc of docs) {
+    // Locked text lists its images; older text we read for them.
+    if (Array.isArray(doc?.images)) doc.images.forEach(id => used.add(id));
     for (const match of String(doc?.html || '').matchAll(/[?&;]id=([A-Za-z0-9-]{1,64})/g)) used.add(match[1]);
   }
 
@@ -85,7 +88,11 @@ export default async (req, context) => {
     const full = await overQuota(auth.user, ns, size);
     if (full) return json({ error: full, quota: true }, 413);
 
+    // An encrypted account only sends locked images (locked with the sheet's key).
+    const sealed = Boolean(body?.enc);
+    if (auth.user.keyring && !sealed) return json({ error: 'Reload Scratch Pad to keep adding images.' }, 400);
     const record = {
+      ...(sealed ? { enc: 1 } : {}),
       id: randomUUID(),
       type,
       size,
@@ -112,15 +119,17 @@ export default async (req, context) => {
   if (req.method === 'PUT' && !record.complete) {
     const data = await req.arrayBuffer();
     if (chunkIndex !== null) {
-      const expected = Math.min(record.chunkSize, record.size - chunkIndex * record.chunkSize);
+      const expected = Math.min(record.chunkSize, record.size - chunkIndex * record.chunkSize) + (record.enc ? 28 : 0);
       if (data.byteLength !== expected) return json({ error: 'Wrong chunk size' }, 400);
       await store.chunks.set(chunkKey(id, chunkIndex), data);
       return json({ ok: true });
     }
     if (url.searchParams.get('preview') === '1') {
-      const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      // A locked display copy arrives as plain bytes; the page says what it really is.
+      const sent = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      const type = record.enc ? String(url.searchParams.get('type') || '').toLowerCase() : sent;
       if (!PREVIEW_TYPES.has(type)) return json({ error: 'Unsupported preview type' }, 415);
-      if (!data.byteLength || data.byteLength > MAX_PREVIEW_BYTES) return json({ error: 'Preview too large' }, 413);
+      if (!data.byteLength || data.byteLength > MAX_PREVIEW_BYTES + 28) return json({ error: 'Preview too large' }, 413);
       await store.previews.set(id, data);
       await store.records.setJSON(id, { ...record, preview: { type, size: data.byteLength } });
       return json({ ok: true });
@@ -141,11 +150,18 @@ export default async (req, context) => {
     return json({ src: `/.netlify/functions/images?sheet=${sheet}&id=${id}` });
   }
 
+  // Erasing an image from before encryption once its locked copy replaced it in the text.
+  if (req.method === 'DELETE') {
+    if (record.enc) return json({ error: 'Not allowed' }, 405);
+    await deleteImage(store, record);
+    return json({ ok: true });
+  }
+
   if (req.method !== 'GET' || !record.complete) return json({ error: 'Not allowed' }, 405);
 
   // Details of the original, for saving it.
   if (url.searchParams.get('info') === '1') {
-    return json({ type: record.type, size: record.size, chunks: record.chunks });
+    return json({ type: record.type, size: record.size, chunks: record.chunks, enc: Boolean(record.enc), preview: record.preview?.type || null });
   }
 
   // One chunk of the original.
@@ -158,9 +174,9 @@ export default async (req, context) => {
   // What the text shows: the display copy, or the small original itself.
   if (record.preview) {
     const data = await store.previews.get(id, { type: 'arrayBuffer' });
-    if (data) return new Response(data, { headers: imageHeaders(record.preview.type) });
+    if (data) return new Response(data, { headers: imageHeaders(record.enc ? 'application/octet-stream' : record.preview.type, record.enc ? record.preview.type : null) });
   }
   const data = await store.chunks.get(chunkKey(id, 0), { type: 'arrayBuffer' });
   if (!data) return json({ error: 'Image missing' }, 404);
-  return new Response(data, { headers: imageHeaders(record.type) });
+  return new Response(data, { headers: imageHeaders(record.enc ? 'application/octet-stream' : record.type, record.enc ? record.type : null) });
 };

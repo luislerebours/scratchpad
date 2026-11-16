@@ -483,6 +483,15 @@ body.dragging-files .files.drag-active
 .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .auth-alt { margin: 16px 0 0; color: var(--muted); font-size: .875rem; line-height: 1.4; text-align: center; }
 .auth-alt .link-btn { min-height: 36px; font-size: .875rem; }
+.recovery-input { font-size: 1rem; letter-spacing: .04em; text-transform: uppercase; }
+.recovery-box { display: grid; gap: 10px; margin-bottom: 16px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--bg); }
+.recovery-key { display: block; color: var(--text); font: 600 1.0625rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em; text-align: center; overflow-wrap: anywhere; user-select: all; }
+.recovery-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.recovery-actions .btn { min-height: 40px; }
+.recovery-check { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: .9375rem; cursor: pointer; }
+.recovery-check input { width: 20px; height: 20px; accent-color: var(--accent); }
+/* An image in the text that is still being unlocked. */
+.editor img[src^="data:image/gif"] { min-width: 64px; min-height: 64px; border-radius: 8px; background: var(--raised); }
 
 /* ---------- Larger screens ---------- */
 @media (min-width: 700px) {

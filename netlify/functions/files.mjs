@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { bumpRev, json, parseSheet, requireUser } from '../lib/auth.mjs';
-import { deleteFileForGood, fileStores, publicRecord, readRecords, visibleFiles } from '../lib/files.mjs';
+import { SEALED_OVERHEAD, deleteFileForGood, fileStores, publicRecord, readRecords, visibleFiles } from '../lib/files.mjs';
+import { isSealed, isWrappedKey } from '../lib/sheets.mjs';
 import { overQuota } from '../lib/usage.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
@@ -33,6 +34,11 @@ export default async req => {
     for (const record of records) {
       if (!record.complete && Date.now() - record.startedAt > STALE_UPLOAD_MS) await deleteFileForGood(store, record);
     }
+    // ?all=1: also Recently Deleted, for locking files from before encryption.
+    if (url.searchParams.get('all') === '1') {
+      const all = records.filter(r => r.complete).map(r => ({ ...publicRecord(r, sheet), deletedAt: r.deletedAt || null }));
+      return json({ files: all, maxBytes: MAX_FILE_BYTES });
+    }
     return json({ files: visibleFiles(records, sheet), maxBytes: MAX_FILE_BYTES });
   }
 
@@ -44,18 +50,30 @@ export default async req => {
     const size = Number(body?.size);
     if (!Number.isInteger(size) || size < 0) return json({ error: 'Invalid size' }, 400);
     if (size > MAX_FILE_BYTES) return json({ error: 'File is over 100 MB' }, 413);
-    const full = await overQuota(auth.user, auth.ns, size);
-    if (full) return json({ error: full, quota: true }, 413);
+    // An encrypted account sends only locked files: a locked name and the file's locked key.
+    const sealed = Boolean(body?.enc);
+    if ((auth.user.keyring || sealed) && !(sealed && isWrappedKey(body.key) && isSealed(body.name))) {
+      return json({ error: 'Reload Scratch Pad to keep uploading.' }, 400);
+    }
+    // Locking a file from before encryption: a locked copy replaces it, keeping
+    // its dates, and the old one is erased once the copy is complete.
+    const old = sealed && validId(body.migrateFrom) ? await store.records.get(body.migrateFrom, { type: 'json' }) : null;
+    if (!old) {
+      const full = await overQuota(auth.user, auth.ns, size);
+      if (full) return json({ error: full, quota: true }, 413);
+    }
 
     const record = {
       id: randomUUID(),
-      name: String(body?.name || 'file').slice(0, 200),
+      name: sealed ? body.name : String(body?.name || 'file').slice(0, 200),
       type: String(body?.type || 'application/octet-stream').slice(0, 200),
       size,
       chunkSize: CHUNK_BYTES,
       chunks: Math.max(1, Math.ceil(size / CHUNK_BYTES)),
       complete: false,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      ...(sealed ? { enc: 1, key: body.key } : {}),
+      ...(old ? { migrateFrom: old.id, keepDates: { uploadedAt: old.uploadedAt, kept: Boolean(old.kept), deletedAt: old.deletedAt || null } } : {})
     };
     await store.records.setJSON(record.id, record);
     return json({ id: record.id, chunkSize: record.chunkSize, chunks: record.chunks });
@@ -74,7 +92,7 @@ export default async req => {
   if (req.method === 'PUT' && chunkIndex !== null) {
     if (record.complete) return json({ error: 'Upload already finished' }, 409);
     const data = await req.arrayBuffer();
-    const expected = Math.min(record.chunkSize, record.size - chunkIndex * record.chunkSize);
+    const expected = Math.min(record.chunkSize, record.size - chunkIndex * record.chunkSize) + (record.enc ? SEALED_OVERHEAD : 0);
     if (data.byteLength !== expected) return json({ error: 'Wrong chunk size' }, 400);
     await store.chunks.set(chunkKey(id, chunkIndex), data);
     return json({ ok: true });
@@ -85,7 +103,7 @@ export default async req => {
   if (url.searchParams.get('thumb') === '1') {
     if (req.method === 'PUT') {
       const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!THUMB_TYPES.has(type)) return json({ error: 'Unsupported thumbnail type' }, 415);
+      if (!THUMB_TYPES.has(type) && !(record.enc && type === 'application/octet-stream')) return json({ error: 'Unsupported thumbnail type' }, 415);
       const data = await req.arrayBuffer();
       if (!data.byteLength || data.byteLength > MAX_THUMB_BYTES) return json({ error: 'Thumbnail too large' }, 413);
       await store.thumbs.set(id, data);
@@ -111,8 +129,17 @@ export default async req => {
     );
     const missing = present.findIndex(meta => !meta);
     if (missing !== -1) return json({ error: `Chunk ${missing} missing` }, 400);
-    const done = { ...record, complete: true, uploadedAt: Date.now() };
-    await store.records.setJSON(id, done);
+    let done = { ...record, complete: true, uploadedAt: Date.now() };
+    if (record.migrateFrom) {
+      // The locked copy takes the old file's place: same dates, then the old one goes.
+      const { migrateFrom, keepDates, ...rest } = done;
+      done = { ...rest, uploadedAt: keepDates.uploadedAt || done.uploadedAt, kept: keepDates.kept, ...(keepDates.deletedAt ? { deletedAt: keepDates.deletedAt } : {}) };
+      const old = await store.records.get(migrateFrom, { type: 'json' });
+      await store.records.setJSON(id, done);
+      if (old) await deleteFileForGood(store, old);
+    } else {
+      await store.records.setJSON(id, done);
+    }
     await bumpRev(auth.ns, `files-${sheet}`);
     return json(publicRecord(done, sheet));
   }

@@ -27,8 +27,15 @@ export const publicRecord = (record, sheet) => ({
   chunks: record.chunks,
   uploadedAt: record.uploadedAt,
   kept: Boolean(record.kept),
-  thumb: Boolean(record.thumb)
+  thumb: Boolean(record.thumb),
+  // End-to-end encrypted: name, contents and thumbnail are locked with the
+  // file's key, which is itself locked with its sheet's key.
+  enc: Boolean(record.enc),
+  key: record.key || null
 });
+
+// Each 4 MB piece of a locked file is 28 bytes bigger (its IV and tag).
+export const SEALED_OVERHEAD = 28;
 
 export async function deleteFileForGood({ records, chunks, thumbs }, record) {
   await Promise.all([

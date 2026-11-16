@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import {
-  allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
-  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify
+  MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
+  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, userStore, validEmail, verify
 } from '../lib/auth.mjs';
+import { wipeSheet } from '../lib/files.mjs';
+import { readShares, sharesStore } from '../lib/shares.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
 // password, then sign in with email and password. The same code steps reset
@@ -37,8 +39,35 @@ async function sendCodeEmail(to, code, link) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${await r.text()}`);
 }
 
+// End-to-end encryption: the page turns the password into an auth secret (what
+// we check, stored only as a scrypt hash) and a key we never see. Accounts from
+// before that send the plain password once more, and are upgraded on the spot.
+// The keyring holds the account's master key, locked by that password key and
+// by the recovery key; we can't open it.
+
+const validAuth = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+const b64ish = (value, max = 400) => typeof value === 'string' && value.length <= max && /^[A-Za-z0-9_-]+$/.test(value);
+const validKeyring = k => k && k.v === 1 && b64ish(k.byPassword) && b64ish(k.byRecovery) && b64ish(k.recoverySalt, 40);
+const cleanKeyring = k => ({ v: 1, byPassword: k.byPassword, byRecovery: k.byRecovery, recoverySalt: k.recoverySalt });
+
+// Checks what a sign-in sent against the stored hash: the auth secret, or (for
+// accounts not yet upgraded) the plain password. Returns the account as it
+// should be saved, or null.
+async function checkSecret(user, body) {
+  if (user.authV === 2) return validAuth(body.auth) && (await checkPassword(body.auth, user)) ? user : null;
+  const password = String(body.password || '');
+  if (!password || !validAuth(body.auth) || !(await checkPassword(password, user))) return null;
+  return { ...user, ...(await hashPassword(body.auth)), authV: 2 };
+}
+
 async function signedIn(user, body = {}) {
-  return json({ email: user.email, admin: isAdmin(user), ...body }, 200, { 'Set-Cookie': await sessionCookie(user) });
+  return json({
+    email: user.email,
+    admin: isAdmin(user),
+    keyring: user.keyring || null,
+    locked: Boolean(user.keyring) && !user.migratedAt ? 'migrating' : user.keyring ? 'on' : 'off',
+    ...body
+  }, 200, { 'Set-Cookie': await sessionCookie(user) });
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -51,6 +80,21 @@ function withSignIn(user) {
 function withVisit(user) {
   const days = (user.visitDays || []).filter(day => day !== today());
   return { lastSeenAt: Date.now(), visitDays: [...days, today()].slice(-60) };
+}
+
+// Every sheet slot (text, files, images), the account's lists and markers,
+// and its share links.
+async function deleteAccountData(ns) {
+  const shares = await readShares(ns);
+  const links = sharesStore();
+  await Promise.all(shares.map(async s => {
+    const { blobs } = await links.list({ prefix: `count/${s.token}/` });
+    await Promise.all([links.delete(`shares/${s.token}`), ...blobs.map(({ key }) => links.delete(key))]);
+  }));
+  await Promise.all(Array.from({ length: MAX_SHEETS }, (_, i) => wipeSheet(ns, i + 1)));
+  const state = userStore(ns, 'state');
+  const { blobs } = await state.list();
+  await Promise.all(blobs.map(({ key }) => state.delete(key)));
 }
 
 export default async (req, context) => {
@@ -89,6 +133,55 @@ export default async (req, context) => {
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 
+  // Signed in on this device from before encryption: the password proves it's
+  // the owner once more, and becomes an auth secret.
+  if (action === 'upgrade') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const ek = emailKey(auth.user.email);
+    if (!(await allow(`login-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
+    // Also checked when already upgraded: the keyring made next must match the real password.
+    const checked = await checkSecret(auth.user, body);
+    // 400, not 401: a 401 would send the page back to sign-in.
+    if (!checked) return json({ error: 'That password isn’t right.' }, 400);
+    if (checked !== auth.user) await store.setJSON(`users/${ek}`, checked);
+    return json({ ok: true });
+  }
+
+  // The first keyring for an account from before encryption. Only one is ever
+  // kept: if another device got there first, its keyring comes back instead.
+  if (action === 'keyring') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    if (auth.user.keyring) return json({ keyring: auth.user.keyring, existing: true }, 409);
+    if (!validKeyring(body.keyring)) return json({ error: 'Bad keyring' }, 400);
+    await store.setJSON(`users/${emailKey(auth.user.email)}`, { ...auth.user, keyring: cleanKeyring(body.keyring) });
+    return json({ ok: true, keyring: cleanKeyring(body.keyring) });
+  }
+
+  // A new recovery key (the old one stops working). Needs the password.
+  if (action === 'recovery') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    if (!auth.user.keyring) return json({ error: 'Set up encryption first.' }, 409);
+    const ek = emailKey(auth.user.email);
+    if (!(await allow(`login-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
+    if (!(await checkSecret(auth.user, body))) return json({ error: 'That password isn’t right.' }, 400);
+    if (!b64ish(body.byRecovery) || !b64ish(body.recoverySalt, 40)) return json({ error: 'Bad recovery key' }, 400);
+    const keyring = { ...auth.user.keyring, byRecovery: body.byRecovery, recoverySalt: body.recoverySalt };
+    await store.setJSON(`users/${ek}`, { ...auth.user, keyring });
+    return json({ ok: true, keyring });
+  }
+
+  // Everything from before encryption is now locked.
+  if (action === 'migrated') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    if (!auth.user.keyring) return json({ error: 'No keyring' }, 409);
+    await store.setJSON(`users/${emailKey(auth.user.email)}`, { ...auth.user, migratedAt: Date.now() });
+    return json({ ok: true });
+  }
+
   const email = normalizeEmail(body.email);
 
   if (action === 'request-code') {
@@ -123,13 +216,15 @@ export default async (req, context) => {
       return json({ error: 'That code isn’t right.' }, 400);
     }
     await store.delete(`codes/${ek}`);
-    // A single-use pass to choose a password in the next step.
+    // A single-use pass to choose a password in the next step. An encrypted
+    // account also gets its recovery-locked key: only the recovery key opens it.
     const nonce = randomBytes(16).toString('hex');
     const expiresAt = Date.now() + SET_PASSWORD_MS;
     await store.setJSON(`pending/${ek}`, { nonce, expiresAt });
     const token = await sign({ t: 'pw', ek, email, n: nonce, exp: expiresAt });
     const existing = await store.get(`users/${ek}`, { type: 'json' });
-    return json({ token, existing: Boolean(existing) });
+    const recovery = existing?.keyring ? { byRecovery: existing.keyring.byRecovery, recoverySalt: existing.keyring.recoverySalt } : null;
+    return json({ token, existing: Boolean(existing), recovery });
   }
 
   if (action === 'set-password') {
@@ -139,17 +234,32 @@ export default async (req, context) => {
     if (!pending || pending.nonce !== pass.n || pending.expiresAt < Date.now()) {
       return json({ error: 'This step has expired. Ask for a new code.' }, 400);
     }
-    const password = String(body.password || '');
-    if (password.length < 8) return json({ error: 'Use at least 8 characters.' }, 400);
-    if (password.length > 200) return json({ error: 'That password is too long.' }, 400);
+    if (!validAuth(body.auth)) return json({ error: 'Update Scratch Pad (reload the page) and try again.' }, 400);
+    const existing = await store.get(`users/${pass.ek}`, { type: 'json' });
+    // What the master key will be locked with: a whole new keyring (new
+    // account, starting over, or an account from before encryption), or, after
+    // the recovery key opened the old one, the same key locked for the new password.
+    let keyring;
+    if (existing?.keyring && !body.startOver) {
+      if (!b64ish(body.byPassword)) return json({ error: 'Enter your recovery key first.' }, 400);
+      keyring = { ...existing.keyring, byPassword: body.byPassword };
+    } else {
+      if (!validKeyring(body.keyring)) return json({ error: 'Update Scratch Pad (reload the page) and try again.' }, 400);
+      keyring = cleanKeyring(body.keyring);
+    }
     await store.delete(`pending/${pass.ek}`);
 
-    const { hash, salt } = await hashPassword(password);
-    const existing = await store.get(`users/${pass.ek}`, { type: 'json' });
+    const { hash, salt } = await hashPassword(body.auth);
     let user;
     if (existing) {
+      // Starting over: nothing in the old account can be opened without its
+      // keys, so it is erased first.
+      if (body.startOver) await deleteAccountData(existing.ns);
       // A reset signs out every other device.
-      user = { ...existing, hash, salt, version: existing.version + 1 };
+      user = { ...existing, hash, salt, authV: 2, keyring, version: existing.version + 1 };
+      // Starting over leaves nothing to lock. Otherwise an account from before
+      // encryption keeps no migratedAt until this device has locked its data.
+      if (body.startOver) user.migratedAt = Date.now();
     } else {
       const uid = randomBytes(8).toString('hex');
       let ns = uid;
@@ -158,7 +268,9 @@ export default async (req, context) => {
         const { modified } = await store.set('legacy-owner', pass.ek, { onlyIfNew: true });
         if (modified) ns = '';
       }
-      user = { uid, ns, email: pass.email, hash, salt, version: 1, createdAt: Date.now() };
+      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, version: 1, createdAt: Date.now() };
+      // The owner's account takes over the data from before accounts: that still needs locking.
+      if (!ns) delete user.migratedAt;
     }
     user = withSignIn(user);
     await store.setJSON(`users/${pass.ek}`, user);
@@ -168,15 +280,16 @@ export default async (req, context) => {
 
   if (action === 'login') {
     const ek = emailKey(email);
-    const password = String(body.password || '');
     if (!(await allow(`login-${ek}`, 10, 15 * 60 * 1000))) {
       return json({ error: 'Too many tries. Wait 15 minutes, or reset your password with a code.' }, 429);
     }
     const user = validEmail(email) ? await store.get(`users/${ek}`, { type: 'json' }) : null;
-    if (!user || !(await checkPassword(password, user))) {
-      return json({ error: 'Wrong email or password.' }, 401);
-    }
-    const updated = withSignIn(user);
+    // Not upgraded yet (or no such account, so nothing is given away): ask the
+    // page to send the plain password once.
+    if ((!user || user.authV !== 2) && !body.password) return json({ legacy: true }, 409);
+    const checked = user ? await checkSecret(user, body) : null;
+    if (!checked) return json({ error: 'Wrong email or password.' }, 401);
+    const updated = withSignIn(checked);
     await store.setJSON(`users/${ek}`, updated);
     return signedIn(updated);
   }

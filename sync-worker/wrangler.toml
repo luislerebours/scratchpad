@@ -15,5 +15,5 @@ tag = "v1"
 new_sqlite_classes = ["Room"]
 
 [vars]
-# Netlify's sync public key: GET https://scratch.sector809labs.com/.netlify/functions/sync?action=key
+# Netlify's sync public key: GET https://scrap.sector809labs.com/.netlify/functions/sync?action=key
 PUBLIC_KEY = "M7dqzUBr/6KCRGsNpqJLTCFQJgaHgd6TtcHoAtPp86A="

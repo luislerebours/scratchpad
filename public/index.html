@@ -86,17 +86,21 @@
 
     <section id="filesSection" class="files" aria-labelledby="filesHeading">
       <div class="files-head">
-        <h2 id="filesHeading" class="files-title" tabindex="-1">Files <span class="sep" aria-hidden="true">·</span> <span id="filesSheetLabel">Sheet 1</span></h2>
-        <button id="uploadBtn" class="btn upload-btn" type="button">
-          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          Upload
-        </button>
-        <input id="fileInput" type="file" multiple hidden />
-      </div>
-      <div class="files-subrow">
-        <p id="filesHint" class="files-sub">Up to 100 MB per file</p>
+        <div class="files-titles">
+          <h2 id="filesHeading" class="files-title" tabindex="-1">Files</h2>
+          <p id="filesHint" class="files-sub">Sheet 1</p>
+        </div>
         <button id="selectBtn" class="link-btn" type="button" hidden>Select</button>
       </div>
+      <button id="uploadBtn" class="drop-zone" type="button">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+        <span class="dz-title">
+          <span class="dz-pointer">Drop files here or <span class="dz-link">browse</span></span>
+          <span class="dz-touch">Tap to upload files</span>
+        </span>
+        <span class="dz-sub">Up to 100 MB per file</span>
+      </button>
+      <input id="fileInput" type="file" multiple hidden />
       <div id="transferList" class="transfer-list" aria-live="polite"></div>
       <div id="oldFilesNote" class="old-files-note" hidden>
         <strong id="oldFilesTitle" class="old-files-title"></strong>
@@ -111,21 +115,15 @@
         <span id="selectTotal"></span>
       </div>
       <div id="fileList" class="file-list" role="list" aria-label="Files"></div>
-      <div id="emptyFiles" class="empty-state">No files on this sheet yet.<span>Upload anything up to 100 MB. On a computer, you can drag files here.</span></div>
-      <div id="storageText" class="files-foot"></div>
-      <div class="drop-overlay" aria-hidden="true">
-        <div>
-          <svg class="i" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-          <strong>Drop to upload</strong>
-          <span id="dropTarget">to Sheet 1</span>
-        </div>
+      <div id="emptyFiles" class="empty-state">No files on this sheet yet.</div>
+      <div class="files-foot-row">
+        <div id="storageText" class="files-foot"></div>
+        <p class="privacy">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+          Private to your account
+        </p>
       </div>
     </section>
-
-    <footer class="privacy">
-      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-      Private to your account
-    </footer>
   </main>
 
   <div id="adminModal" class="modal-backdrop" hidden>

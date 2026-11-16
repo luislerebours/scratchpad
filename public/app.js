@@ -34,7 +34,6 @@ const tipsEl = document.querySelector('#tips');
 const tabsScroller = document.querySelector('#tabsScroller');
 const filesSection = document.querySelector('#filesSection');
 const filesHeading = document.querySelector('#filesHeading');
-const dropTarget = document.querySelector('#dropTarget');
 const avatarEl = document.querySelector('#avatar');
 const fileInput = document.querySelector('#fileInput');
 const fileList = document.querySelector('#fileList');
@@ -67,7 +66,6 @@ const accountBtn = document.querySelector('#accountBtn');
 const authScreen = document.querySelector('#authScreen');
 const adminModal = document.querySelector('#adminModal');
 const adminBody = document.querySelector('#adminBody');
-const filesSheetLabel = document.querySelector('#filesSheetLabel');
 const renameModal = document.querySelector('#renameModal');
 const renameForm = document.querySelector('#renameForm');
 const renameInput = document.querySelector('#renameInput');
@@ -322,6 +320,7 @@ const ICON_PATHS = {
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   pin: '<path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5L5 20"/>',
   shield: '<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/>',
   logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/>',
@@ -492,8 +491,7 @@ function renderTabs() {
     return tab;
   }));
   addSheetBtn.hidden = sheets.length >= MAX_SHEETS;
-  filesSheetLabel.textContent = currentSheetName();
-  dropTarget.textContent = `to ${currentSheetName()}`;
+  updateFilesSubtitle();
   requestAnimationFrame(() => revealActiveTab());
 }
 
@@ -1242,7 +1240,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
   pad.classList.toggle('is-loading', !cached);
   updateEmptyState();
   showCachedFiles(nextSheet);
-  filesSheetLabel.textContent = currentSheetName();
+  updateFilesSubtitle();
 
   renderTabs();
   revealActiveTab(true);
@@ -1595,7 +1593,7 @@ function fileIconHtml(f, { view = false } = {}) {
     const src = escapeHtml(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&thumb=1`));
     return `<span class="file-icon kind-img has-thumb" aria-hidden="true"${opens}><img src="${src}" alt="" loading="lazy" decoding="async" /></span>`;
   }
-  return `<span class="file-icon kind-${kind}" aria-hidden="true"${opens}>${kind === 'img' ? icon('image') : escapeHtml(label)}</span>`;
+  return `<span class="file-icon kind-${kind}" aria-hidden="true"${opens}>${kind === 'img' ? icon('landscape') : escapeHtml(label)}</span>`;
 }
 
 // ---- Thumbnails for image files ----
@@ -1672,7 +1670,7 @@ fileList.addEventListener('error', e => {
   if (!(img instanceof HTMLImageElement) || !img.closest('.file-icon')) return;
   const span = img.parentElement;
   span.classList.remove('has-thumb');
-  span.innerHTML = icon('image');
+  span.innerHTML = icon('landscape');
 }, true);
 
 function renderFiles() {
@@ -1803,12 +1801,23 @@ function setSelecting(on) {
   renderFiles();
 }
 
+// "Sheet 5 · 3 files" under the Files title (just the sheet while loading).
+function updateFilesSubtitle() {
+  if (selecting) {
+    filesHint.textContent = 'Tap files to select them';
+    return;
+  }
+  const loading = !currentFiles.length && emptyFiles.hidden;
+  const n = currentFiles.length;
+  filesHint.textContent = loading ? currentSheetName() : `${currentSheetName()} · ${n} file${n === 1 ? '' : 's'}`;
+}
+
 function updateSelectionUi() {
   const files = selectedFiles();
   const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
   selectBtn.textContent = selecting ? 'Done' : 'Select';
   uploadBtn.hidden = selecting;
-  filesHint.textContent = selecting ? 'Tap files to select them' : 'Up to 100 MB per file';
+  updateFilesSubtitle();
   selectBar.hidden = !selecting;
   bulkBar.hidden = !selecting;
   const all = currentFiles.length > 0 && files.length === currentFiles.length;

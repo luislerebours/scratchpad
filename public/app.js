@@ -4139,6 +4139,10 @@ accountBtn.addEventListener('click', () => {
     { heading: 'Appearance' },
     ...appearanceItems(),
     'separator',
+    { label: 'Privacy policy', icon: 'shield', run: () => window.open('/privacy', '_blank', 'noopener') },
+    { label: 'Terms of service', icon: 'lines', run: () => window.open('/terms', '_blank', 'noopener') },
+    { label: 'Help & support', icon: 'link', run: () => { location.href = 'mailto:support@sector809labs.com'; } },
+    'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
     { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere }

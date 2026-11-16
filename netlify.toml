@@ -17,6 +17,17 @@
   [headers.values]
     Content-Type = "application/manifest+json"
 
+# Privacy policy and terms at short addresses.
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
 # Share links: /s/<token> opens the viewer page; never indexed, and the link
 # isn't passed on to other sites.
 [[redirects]]

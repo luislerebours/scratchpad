@@ -66,6 +66,8 @@ async function signedIn(user, body = {}) {
     admin: isAdmin(user),
     keyring: user.keyring || null,
     locked: Boolean(user.keyring) && !user.migratedAt ? 'migrating' : user.keyring ? 'on' : 'off',
+    // Whether files and images uploaded before their types were locked have been done.
+    typesSealed: Boolean(user.typesSealedAt),
     ...body
   }, 200, { 'Set-Cookie': await sessionCookie(user) });
 }
@@ -173,6 +175,15 @@ export default async (req, context) => {
     return json({ ok: true, keyring });
   }
 
+  // Every file and image type is now locked too.
+  if (action === 'types-sealed') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    if (!auth.user.keyring || !auth.user.migratedAt) return json({ error: 'Not yet' }, 409);
+    await store.setJSON(`users/${emailKey(auth.user.email)}`, { ...auth.user, typesSealedAt: Date.now() });
+    return json({ ok: true });
+  }
+
   // Everything from before encryption is now locked.
   if (action === 'migrated') {
     const auth = await requireUser(req);
@@ -259,7 +270,7 @@ export default async (req, context) => {
       user = { ...existing, hash, salt, authV: 2, keyring, version: existing.version + 1 };
       // Starting over leaves nothing to lock. Otherwise an account from before
       // encryption keeps no migratedAt until this device has locked its data.
-      if (body.startOver) user.migratedAt = Date.now();
+      if (body.startOver) Object.assign(user, { migratedAt: Date.now(), typesSealedAt: Date.now() });
     } else {
       const uid = randomBytes(8).toString('hex');
       let ns = uid;
@@ -268,7 +279,7 @@ export default async (req, context) => {
         const { modified } = await store.set('legacy-owner', pass.ek, { onlyIfNew: true });
         if (modified) ns = '';
       }
-      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, version: 1, createdAt: Date.now() };
+      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, typesSealedAt: Date.now(), version: 1, createdAt: Date.now() };
       // The owner's account takes over the data from before accounts: that still needs locking.
       if (!ns) delete user.migratedAt;
     }

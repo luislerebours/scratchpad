@@ -26,7 +26,8 @@ async function lockedBlob(url, key, type) {
   const data = new Uint8Array(await r.arrayBuffer());
   const sealed = r.headers.get('X-Sealed') === '1' || r.headers.get('Content-Type') === 'application/octet-stream';
   if (!key || !sealed) return new Blob([data], { type: type || r.headers.get('Content-Type') || '' });
-  return new Blob([await vault.decryptBytes(key, data)], { type: r.headers.get('X-Image-Type') || type || '' });
+  const shownAs = await vault.decryptText(key, r.headers.get('X-Image-Type') || '').catch(() => '');
+  return new Blob([await vault.decryptBytes(key, data)], { type: shownAs || type || '' });
 }
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -316,10 +317,14 @@ async function unlock(data) {
     itemKey = await vault.importKey(fragment, false);
     data.name = await vault.decryptText(itemKey, data.name);
     if (data.kind === 'file') {
-      data.file = { ...data.file, shared: true, name: await vault.decryptText(itemKey, data.file.name) };
+      data.file = { ...data.file, shared: true, name: await vault.decryptText(itemKey, data.file.name), type: await vault.decryptText(itemKey, data.file.type) };
     } else {
       data.html = data.html == null ? data.html : await vault.decryptText(itemKey, data.html);
-      data.files = await Promise.all(data.files.map(async f => f.enc ? { ...f, name: await vault.decryptText(await keyOf(f), f.name) } : f));
+      data.files = await Promise.all(data.files.map(async f => {
+        if (!f.enc) return f;
+        const key = await keyOf(f);
+        return { ...f, name: await vault.decryptText(key, f.name), type: await vault.decryptText(key, f.type) };
+      }));
     }
     return true;
   } catch {

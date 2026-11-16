@@ -238,7 +238,7 @@ body:not(.selecting) .select-row:has(#selectBtn:not([hidden])) + .transfer-list:
 .check:indeterminate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304121f' stroke-width='3.2' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E"); }
 
 .select-bar { display: flex; align-items: center; margin-top: 6px; }
-.select-all { display: inline-flex; align-items: center; gap: 14px; min-height: 44px; color: var(--text); font-size: 1rem; font-weight: 600; cursor: pointer; }
+.select-all { display: inline-flex; align-items: center; gap: 14px; white-space: nowrap; min-height: 44px; color: var(--text); font-size: 1rem; font-weight: 600; cursor: pointer; }
 .bulk-bar { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
 .sb-sep { flex: 0 0 auto; width: 1px; height: 26px; background: var(--line-strong); }
 .bulk-count { color: var(--muted); font-size: 1rem; white-space: nowrap; }
@@ -246,7 +246,7 @@ body:not(.selecting) .select-row:has(#selectBtn:not([hidden])) + .transfer-list:
 .bulk-btn .i { width: 22px; height: 22px; stroke-width: 2; }
 .bulk-btn:hover:not(:disabled) { background: var(--hover); }
 .bulk-btn:disabled { opacity: .4; cursor: default; }
-.bulk-save { color: var(--accent); }
+.bulk-save, .bulk-share { color: var(--accent); }
 .bulk-delete { color: var(--danger); }
 
 /* Rows while selecting: checkbox, mark, name; picked rows tinted as one block */
@@ -260,12 +260,13 @@ body:not(.selecting) .select-row:has(#selectBtn:not([hidden])) + .transfer-list:
 @media (max-width: 699px) {
   body.selecting .app-shell { padding-bottom: 110px; }
   body.selecting .toast { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 76px); }
-  .bulk-bar { position: fixed; z-index: 800; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); justify-content: space-between; gap: 6px; height: 60px; padding: 0 10px 0 20px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--raised); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
-  .sb-sep-lead, .sb-sep-cancel { display: none; }
-  .bulk-count { color: var(--text); font-weight: 600; }
-  .bulk-save { flex: 1 1 auto; }
-  .bulk-delete { width: 48px; padding: 0; }
-  .bulk-delete-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* "3 selected" | Share · Download · Delete, each an icon over its label */
+  .bulk-bar { position: fixed; z-index: 800; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); gap: 0; height: 58px; padding: 0 2px 0 20px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--raised); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+  .sb-sep-lead, .sb-sep-cancel, .bulk-bar .sb-sep:not(.sb-sep-count) { display: none; }
+  .bulk-bar .sb-sep-count { height: 26px; margin: 0 4px 0 16px; }
+  .bulk-count { flex: 0 0 auto; color: var(--text); font-weight: 600; font-size: 1rem; }
+  .bulk-bar .bulk-btn { flex: 1 1 0; flex-direction: column; gap: 2px; min-width: 0; height: 52px; padding: 0 2px; border-radius: 12px; font-size: .71875rem; font-weight: 600; }
+  .bulk-bar .bulk-btn .i { width: 27px; height: 27px; stroke-width: 1.9; }
 }
 
 .empty-state { padding: 16px 0 4px; color: var(--muted); font-size: .9375rem; }
@@ -507,10 +508,13 @@ body.dragging-files .files.drag-active
   .dz-sub { font-size: .9375rem; }
   .files-foot-row { flex-direction: row; align-items: center; justify-content: space-between; margin-top: 18px; }
   .select-bar { gap: 0; min-height: 58px; padding: 0 12px 0 22px; border: 1px solid var(--line-strong); border-radius: 12px; background: rgba(25, 38, 59, .7); }
-  .select-all { padding-right: 24px; }
-  .sb-sep-lead { margin-right: 24px; }
+  .select-all { padding-right: 18px; }
+  .sb-sep-lead { margin-right: 18px; }
   .sb-sep-count { flex: 1 1 auto; height: 0; background: none; }
-  .bulk-btn { padding: 0 14px; }
+  .bulk-btn { padding: 0 12px; }
+  /* Delete is the trash icon here; its name is read out and shown on hover */
+  .bulk-delete { width: 44px; padding: 0; }
+  .bulk-delete-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .select-bar .sb-sep:not(.sb-sep-lead):not(.sb-sep-count) { margin: 0 8px; }
   .select-cancel { margin: 0; padding: 0 14px; font-size: 1rem; }
 }

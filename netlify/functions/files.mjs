@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { bumpRev, json, parseSheet, requireUser } from '../lib/auth.mjs';
 import { SEALED_OVERHEAD, deleteFileForGood, fileStores, publicRecord, readRecords, visibleFiles } from '../lib/files.mjs';
 import { isSealed, isWrappedKey } from '../lib/sheets.mjs';
-import { overQuota } from '../lib/usage.mjs';
+import { limitsFor, needsPro } from '../lib/plans.mjs';
+import { accountUsage, overQuota } from '../lib/usage.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
@@ -60,6 +61,11 @@ export default async req => {
     // its dates, and the old one is erased once the copy is complete.
     const old = sealed && validId(body.migrateFrom) ? await store.records.get(body.migrateFrom, { type: 'json' }) : null;
     if (!old) {
+      const limits = limitsFor(auth.user);
+      if (size > limits.fileBytes) return needsPro('On the Free plan, files can be up to 10 MB. Pro takes files up to 100 MB each.');
+      if (Number.isFinite(limits.files) && (await accountUsage(auth.ns)).files >= limits.files) {
+        return needsPro('The Free plan holds 1 file. Pro holds as many as fit in 5 GB.');
+      }
       const full = await overQuota(auth.user, auth.ns, size);
       if (full) return json({ error: full, quota: true }, 413);
     }

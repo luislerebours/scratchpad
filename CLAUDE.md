@@ -43,6 +43,24 @@ Pushes to `main` deploy straight to the live site.
   admin has none by default), enforced when an upload starts; the admin can
   change it from Admin. Files show their age; ones over 30 days (not "Kept")
   prompt a gentle "still need them?" card. Nothing is deleted automatically.
+- Plans (`netlify/lib/plans.mjs`): Free (1 sheet, 1 file, files up to 10 MB,
+  10 MB storage, no share links) and Pro (10 sheets, 5 GB, 100 MB files, share
+  links). New accounts get `plan: 'free'`; accounts from before plans have no
+  `plan` and stay Pro; the owner is never limited. Limits apply to adding
+  things (`needsPro` → 403 `{ upgrade: true }`, the page shows its upgrade
+  card). Admin can switch an account's plan.
+- Billing is Stripe with Managed Payments (Stripe is merchant of record: tax,
+  fraud, disputes). Sandbox account "Sector 809 Labs LLC sandbox"
+  (acct_1UcXIzE4JMAT8oxx); never touch the FinestIQ account. Product
+  "ScrapSheet Pro" (tax code txcd_10103000) with prices found by lookup key
+  `scrapsheet_pro_month` ($0.99) and `scrapsheet_pro_year` ($9.99), tax
+  inclusive. `billing.mjs`: Checkout (subscription, managed_payments) and the
+  customer portal (default config: card, invoices, switch monthly/yearly,
+  cancel at period end). `stripe-webhook.mjs` checks the signature, re-reads
+  the subscription and sets `plan` + `user.stripe` (active/trialing/past_due
+  keep Pro). REST via fetch, API version 2026-04-22.dahlia. Env:
+  `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`; `NEW_ACCOUNT_PLAN=pro` is for
+  local tests only.
 - Netlify functions take about 4.5 MB per request, so anything larger travels
   in chunks.
 - `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,

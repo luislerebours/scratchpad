@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 import { isSealed } from '../lib/sheets.mjs';
+import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { overQuota } from '../lib/usage.mjs';
 
 // Images pasted into a sheet's text. Netlify functions take about 4.5 MB per
@@ -88,6 +89,7 @@ export default async (req, context) => {
     if (sealed ? !isSealed(type) : !TYPES.has(type)) return json({ error: 'Unsupported image type' }, 415);
     if (!Number.isInteger(size) || size <= 0) return json({ error: 'Invalid size' }, 400);
     if (size > MAX_IMAGE_BYTES) return json({ error: 'Image is over 100 MB' }, 413);
+    if (size > limitsFor(auth.user).fileBytes) return needsPro('On the Free plan, images can be up to 10 MB. Pro takes images up to 100 MB.');
     const full = await overQuota(auth.user, ns, size);
     if (full) return json({ error: full, quota: true }, 413);
 

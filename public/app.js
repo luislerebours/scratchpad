@@ -4471,6 +4471,15 @@ function setEmailMode(mode) {
   document.querySelector('#emailSubmit').textContent = create ? 'Continue' : 'Email me a code';
 }
 
+// Plan cards act as buttons from the keyboard too.
+authScreen.addEventListener('keydown', e => {
+  const card = e.target.closest('.plan-card[data-go]');
+  if (card && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    card.click();
+  }
+});
+
 authScreen.addEventListener('click', async e => {
   const go = e.target.closest('[data-go]');
   if (go) {

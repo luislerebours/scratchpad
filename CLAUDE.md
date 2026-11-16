@@ -74,7 +74,7 @@ Pushes to `main` deploy straight to the live site.
 - Sign-in page (`#authScreen` in `index.html`) doubles as the front page:
   pitch, device row, Free/Pro plan cards, features and footer around the
   sign-in card, where every auth step (code, password, unlock, recovery) shows.
-  Its own type is Plus Jakarta Sans served from `public/fonts/` (no Google
+  Its own type is Montserrat served from `public/fonts/` (no Google
   requests) and its own `--auth-*` tokens (brighter cyan on dark, teal on
   light). `.only-wide` / `.only-narrow` swap copy at 860px; the sun/moon is
   `#authThemeBtn`. Help/Support go to support@sector809labs.com; `/privacy` and

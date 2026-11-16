@@ -196,6 +196,25 @@
     </section>
   </div>
 
+  <div id="deleteAccountModal" class="modal-backdrop" hidden>
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="deleteAccountTitle">
+      <div class="modal-header">
+        <h2 id="deleteAccountTitle">Delete your account?</h2>
+        <button class="modal-close" type="button" data-close-delete aria-label="Close">×</button>
+      </div>
+      <form id="deleteAccountForm" class="delete-account-body">
+        <p class="delete-account-text">This erases every sheet, file, image and share link in <strong id="deleteAccountEmail"></strong>, on all your devices, and signs you out everywhere. This can’t be undone.</p>
+        <label class="field-label" for="deleteAccountPassword">Enter your password to confirm</label>
+        <input id="deleteAccountPassword" class="rename-input" type="password" autocomplete="current-password" required />
+        <p class="auth-error" id="deleteAccountError" role="alert"></p>
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" data-close-delete>Cancel</button>
+          <button class="btn danger-solid" type="submit">Delete account</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <div id="adminModal" class="modal-backdrop" hidden>
     <section class="modal-card admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
       <div class="modal-header">
@@ -272,6 +291,7 @@
         <p class="auth-error" role="alert"></p>
         <button class="btn auth-submit" type="submit">Save and sign in</button>
       </form>
+      <p class="auth-legal"><a href="/privacy.html">Privacy</a> · <a href="/support.html">Help &amp; support</a></p>
     </div>
   </section>
 

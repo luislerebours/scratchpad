@@ -1,8 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import {
-  allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
-  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify
+  MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
+  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, userStore, validEmail, verify
 } from '../lib/auth.mjs';
+import { planInfo } from '../lib/plans.mjs';
+import { wipeSheet } from '../lib/files.mjs';
+import { readShares, sharesStore } from '../lib/shares.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
 // password, then sign in with email and password. The same code steps reset
@@ -38,7 +41,7 @@ async function sendCodeEmail(to, code, link) {
 }
 
 async function signedIn(user, body = {}) {
-  return json({ email: user.email, admin: isAdmin(user), ...body }, 200, { 'Set-Cookie': await sessionCookie(user) });
+  return json({ email: user.email, admin: isAdmin(user), plan: planInfo(user), ...body }, 200, { 'Set-Cookie': await sessionCookie(user) });
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -51,6 +54,21 @@ function withSignIn(user) {
 function withVisit(user) {
   const days = (user.visitDays || []).filter(day => day !== today());
   return { lastSeenAt: Date.now(), visitDays: [...days, today()].slice(-60) };
+}
+
+// Every sheet slot (text, files, images), the account's lists and markers,
+// and its share links.
+async function deleteAccountData(ns) {
+  const shares = await readShares(ns);
+  const links = sharesStore();
+  await Promise.all(shares.map(async s => {
+    const { blobs } = await links.list({ prefix: `count/${s.token}/` });
+    await Promise.all([links.delete(`shares/${s.token}`), ...blobs.map(({ key }) => links.delete(key))]);
+  }));
+  await Promise.all(Array.from({ length: MAX_SHEETS }, (_, i) => wipeSheet(ns, i + 1)));
+  const state = userStore(ns, 'state');
+  const { blobs } = await state.list();
+  await Promise.all(blobs.map(({ key }) => state.delete(key)));
 }
 
 export default async (req, context) => {
@@ -86,6 +104,23 @@ export default async (req, context) => {
     await store.setJSON(`users/${ek}`, { ...auth.user, version: auth.user.version + 1 });
     // Open devices re-check right away and find themselves signed out.
     await notifySync(auth.user.ns, 'session', String(Date.now()));
+    return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
+  }
+
+  // Delete the account and everything in it, after checking the password.
+  if (action === 'delete-account') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const { user, ns } = auth;
+    if (isAdmin(user)) return json({ error: 'The owner account can’t be deleted from here.' }, 403);
+    if (!(await allow(`delete-${emailKey(user.email)}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
+    // 400, not 401: a 401 would send the page back to sign-in.
+    if (!(await checkPassword(String(body.password || ''), user))) return json({ error: 'That password isn’t right.' }, 400);
+    await deleteAccountData(ns);
+    const ek = emailKey(user.email);
+    await Promise.all([`users/${ek}`, `codes/${ek}`, `pending/${ek}`].map(key => store.delete(key)));
+    // Other devices check right away and find the account gone.
+    await notifySync(ns, 'session', String(Date.now()));
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 
@@ -158,7 +193,8 @@ export default async (req, context) => {
         const { modified } = await store.set('legacy-owner', pass.ek, { onlyIfNew: true });
         if (modified) ns = '';
       }
-      user = { uid, ns, email: pass.email, hash, salt, version: 1, createdAt: Date.now() };
+      // New accounts start on Free (accounts from before plans have none: Pro).
+      user = { uid, ns, email: pass.email, hash, salt, version: 1, createdAt: Date.now(), plan: 'free' };
     }
     user = withSignIn(user);
     await store.setJSON(`users/${pass.ek}`, user);

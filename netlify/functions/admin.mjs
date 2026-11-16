@@ -1,5 +1,6 @@
 import { authStore, emailKey, isAdmin, json, normalizeEmail, requireUser } from '../lib/auth.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
+import { planOf } from '../lib/plans.mjs';
 
 // Admin only (the OWNER_EMAIL account): every account, its data use and activity.
 const DAY = 24 * 60 * 60 * 1000;
@@ -16,6 +17,12 @@ export default async req => {
     const key = `users/${emailKey(normalizeEmail(body.email))}`;
     const user = await store.get(key, { type: 'json' });
     if (!user) return json({ error: 'No such account' }, 404);
+    if (body.plan !== undefined) {
+      if (!['free', 'pro'].includes(body.plan)) return json({ error: 'Choose Free or Pro' }, 400);
+      const updated = { ...user, plan: body.plan };
+      await store.setJSON(key, updated);
+      return json({ ok: true, plan: planOf(updated), quota: quotaFor(updated) });
+    }
     const gb = body.limitGb === null || body.limitGb === '' ? null : Number(body.limitGb);
     if (gb !== null && !(Number.isFinite(gb) && gb >= 0 && gb <= 10_000)) return json({ error: 'Enter a number of GB' }, 400);
     const quotaBytes = gb === null ? undefined : gb === 0 ? -1 : Math.round(gb * 1024 ** 3);
@@ -41,6 +48,7 @@ export default async req => {
     lastSeenAt: user.lastSeenAt || null,
     activeDays30: user.visitDays ? user.visitDays.filter(day => day > since).length : null,
     quota: quotaFor(user),
+    plan: planOf(user),
     ...(await accountUsage(user.ns))
   })));
   accounts.sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));

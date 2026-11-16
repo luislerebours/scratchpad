@@ -1,4 +1,5 @@
 import { MAX_SHEETS, isAdmin, userStore } from './auth.mjs';
+import { limitsFor } from './plans.mjs';
 
 // Storage per account: what it holds, and its limit.
 export const DEFAULT_QUOTA_BYTES = 5 * 1024 ** 3;
@@ -8,7 +9,7 @@ export const DEFAULT_QUOTA_BYTES = 5 * 1024 ** 3;
 export function quotaFor(user) {
   if (user.quotaBytes === -1) return null;
   if (Number.isFinite(user.quotaBytes) && user.quotaBytes > 0) return user.quotaBytes;
-  return isAdmin(user) ? null : DEFAULT_QUOTA_BYTES;
+  return isAdmin(user) ? null : limitsFor(user).quotaBytes;
 }
 
 async function recordsSize(store, sizeOf) {

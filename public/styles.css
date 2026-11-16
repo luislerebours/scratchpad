@@ -399,6 +399,13 @@ body.dragging-files .files.drag-active
 @keyframes row-flash { from { background-color: rgba(56, 189, 248, .22); } to { background-color: var(--files-bg); } }
 .file-row.flash .file-row-inner { animation: row-flash 2.2s ease-out; }
 
+/* Delete account */
+.delete-account-body { display: grid; gap: 4px; padding: 18px 20px 20px; }
+.delete-account-text { margin-bottom: 14px; color: var(--muted); font-size: .9375rem; line-height: 1.5; }
+.delete-account-text strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.auth-legal { margin-top: 18px; color: var(--faint); font-size: .8125rem; text-align: center; }
+.auth-legal a { color: var(--muted); }
+
 /* Share links */
 .share-modal { width: min(500px, 100%); }
 .share-head { min-width: 0; }
@@ -454,6 +461,7 @@ body.dragging-files .files.drag-active
 .admin-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 14px; margin-top: 8px; color: var(--muted); font-size: .8125rem; }
 .admin-facts b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .admin-limit { min-height: 36px; margin-top: 4px; font-size: .8125rem; }
+.admin-actions { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .admin-note { margin-top: 14px; color: var(--faint); font-size: .8125rem; }
 
 /* ---------- Sign-in ---------- */

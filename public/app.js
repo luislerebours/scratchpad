@@ -378,6 +378,7 @@ const ICON_PATHS = {
   pin: '<path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3-1-6Z"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
   lines: '<path d="M5 7h14M5 12h14M5 17h14"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.6M12 17.2v.1"/>',
   link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
   share: '<path d="M12 15V4M7 8.5 12 4l5 4.5M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4v4.5h4.5"/>',
@@ -1047,7 +1048,8 @@ async function uploadPadImage(img, blob) {
     loadUsage();
   } catch (err) {
     img.remove();
-    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota ? err.message : 'Image upload failed');
+    if (err?.upgrade) showUpgrade(err.message);
+    if (transfer) transfer.fail(err?.name === 'AbortError' ? 'Upload cancelled' : err?.quota || err?.upgrade ? err.message : 'Image upload failed');
     else showToast(err?.message?.includes('over') ? err.message : 'Image upload failed');
   } finally {
     if (localUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(localUrl), 10000);
@@ -1366,7 +1368,14 @@ sheetTabsEl.addEventListener('dblclick', e => {
   else openRenameModal();
 });
 
-addSheetBtn.addEventListener('click', () => addSheet());
+addSheetBtn.addEventListener('click', () => {
+  const { sheets: most, name } = myPlan();
+  if (sheets.length >= most && most < MAX_SHEETS) {
+    showUpgrade(`The ${name} plan has ${most} sheet.`);
+    return;
+  }
+  addSheet();
+});
 
 async function addSheet(purge) {
   addSheetBtn.disabled = true;
@@ -1380,7 +1389,9 @@ async function addSheet(purge) {
     openRenameModal();
   } catch (err) {
     const held = err.data?.purge;
-    if (held) {
+    if (err.data?.upgrade) {
+      showUpgrade(err.message);
+    } else if (held) {
       openSheet({
         title: 'Make room for a new sheet?',
         text: `All 10 sheets are in use, counting ${held.name} in Recently Deleted. To add a sheet, ${held.name} has to be deleted for good. This can’t be undone.`,
@@ -2246,6 +2257,7 @@ previewSaveBtn.addEventListener('click', async () => {
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!searchModal.hidden) closeSearch();
+  else if (!deleteAccountModal.hidden) closeDeleteAccount();
   else if (!sheetModal.hidden) closeSheet();
   else if (!shareModal.hidden) closeShare();
   else if (!linksModal.hidden) closeLinks();
@@ -2717,6 +2729,7 @@ async function postJson(url, body) {
     const err = new Error(data.error || 'Request failed');
     err.status = r.status;
     err.quota = Boolean(data.quota);
+    err.upgrade = Boolean(data.upgrade);
     throw err;
   }
   return r.json();
@@ -2757,6 +2770,10 @@ async function uploadFile(file, targetSheet, transfer) {
     if (id) fetch(filesUrl(targetSheet, `id=${encodeURIComponent(id)}`), { method:'DELETE' }).catch(() => {});
     if (err?.name === 'AbortError') transfer.fail('Upload cancelled');
     else if (err?.quota) transfer.fail(err.message);
+    else if (err?.upgrade) {
+      transfer.fail(err.message);
+      showUpgrade(err.message);
+    }
     else transfer.fail('Upload failed. Check your connection and retry.', () => uploadFiles([file], targetSheet));
     return false;
   }
@@ -2766,6 +2783,12 @@ async function uploadFiles(files, targetSheet = activeSheet) {
   fileInput.value = '';
   if (!hasSheet(targetSheet)) return;
   const queue = [];
+  const limit = myPlan().fileBytes;
+  const tooBig = files.filter(f => f.size > limit && f.size <= MAX_FILE_BYTES);
+  if (tooBig.length) {
+    showUpgrade(`On the ${myPlan().name} plan, files can be up to ${bytes(limit)}. ${tooBig.length === 1 ? `${tooBig[0].name} is` : `${tooBig.length} files are`} bigger.`);
+    files = files.filter(f => !tooBig.includes(f));
+  }
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) {
       showToast(`${file.name} is over ${bytes(MAX_FILE_BYTES)}`);
@@ -3406,7 +3429,10 @@ const viewsText = n => n ? `Opened ${n} time${n === 1 ? '' : 's'}` : 'Not opened
 async function sharePost(body) {
   const r = await fetch(API_SHARE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  if (!r.ok) {
+    if (data.upgrade) showUpgrade(data.error);
+    throw new Error(data.error || 'Something went wrong. Try again.');
+  }
   return data;
 }
 
@@ -3425,6 +3451,10 @@ function segHtml(selected) {
 }
 
 async function openShare(target) {
+  if (!myPlan().share) {
+    showUpgrade('Share links are part of Pro.');
+    return;
+  }
   shareTarget = target;
   shareLink = null;
   rememberFocus('share');
@@ -3654,6 +3684,77 @@ linksBody.addEventListener('click', async e => {
 linksModal.querySelector('[data-close-links]').addEventListener('click', closeLinks);
 linksModal.addEventListener('click', e => { if (e.target === linksModal) closeLinks(); });
 
+// ---- Plans: Free and Pro ----
+// The server enforces every limit; the page checks first to save a wasted upload.
+
+const PRO_PITCH = 'Pro is $0.99 a month: 10 sheets, 5 GB of storage, files up to 100 MB each, and share links.';
+
+function myPlan() {
+  return account?.plan || { plan: 'pro', name: 'Pro', sheets: MAX_SHEETS, files: null, fileBytes: MAX_FILE_BYTES, share: true };
+}
+
+function showUpgrade(reason) {
+  openSheet({
+    title: 'That’s part of Pro',
+    text: `${reason} ${PRO_PITCH} Upgrading will be available in the Scratch Pad app soon.`,
+    actions: [{ label: 'OK', kind: 'primary', full: true }]
+  });
+}
+
+function applyPlan() {
+  const sub = document.querySelector('.dz-sub');
+  if (sub) sub.textContent = `Up to ${bytes(myPlan().fileBytes)} per file`;
+}
+
+// ---- Delete my account ----
+
+const deleteAccountModal = document.querySelector('#deleteAccountModal');
+const deleteAccountForm = document.querySelector('#deleteAccountForm');
+const deleteAccountError = document.querySelector('#deleteAccountError');
+const deleteAccountPassword = document.querySelector('#deleteAccountPassword');
+
+function openDeleteAccount() {
+  rememberFocus('delete');
+  deleteAccountModal.querySelector('#deleteAccountEmail').textContent = account?.email || 'this account';
+  deleteAccountError.textContent = '';
+  deleteAccountPassword.value = '';
+  deleteAccountModal.hidden = false;
+  updateModalOpen();
+  deleteAccountPassword.focus();
+}
+
+function closeDeleteAccount() {
+  if (deleteAccountModal.hidden) return;
+  deleteAccountModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('delete');
+}
+
+deleteAccountModal.querySelectorAll('[data-close-delete]').forEach(btn => btn.addEventListener('click', closeDeleteAccount));
+deleteAccountModal.addEventListener('click', e => { if (e.target === deleteAccountModal) closeDeleteAccount(); });
+deleteAccountForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const submit = deleteAccountForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  deleteAccountError.textContent = '';
+  try {
+    const r = await fetch(`${API_AUTH}?action=delete-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: deleteAccountPassword.value })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Couldn’t delete the account. Try again.');
+    appStarted = false;
+    try { localStorage.clear(); } catch { /* nothing kept */ }
+    deleteAccountForm.innerHTML = '<p class="delete-account-text"><strong>Your account was deleted.</strong> Everything in it is gone, and you’re signed out on every device.</p>';
+    setTimeout(() => location.replace('/'), 2500);
+  } catch (err) {
+    deleteAccountError.textContent = err.message;
+    submit.disabled = false;
+  }
+});
+
 // ---- Account ----
 
 const rawFetch = window.fetch.bind(window);
@@ -3669,13 +3770,18 @@ window.fetch = async (...args) => {
 accountBtn.addEventListener('click', () => {
   openMenu(accountBtn, [
     { heading: account?.email || 'Account' },
+    { heading: `${myPlan().name} plan${myPlan().plan === 'free' ? ' · Pro is $0.99 a month' : ''}` },
     account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
     { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
     'separator',
+    { label: 'Help & support', icon: 'help', run: () => { location.href = '/support.html'; } },
+    { label: 'Privacy policy', icon: 'shield', run: () => { location.href = '/privacy.html'; } },
+    'separator',
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
-    { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere }
+    { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere },
+    account?.admin ? null : { label: 'Delete account…', icon: 'trash', danger: true, run: openDeleteAccount }
   ], 'Account');
 });
 
@@ -3745,6 +3851,7 @@ function renderAdmin(data) {
     const facts = document.createElement('div');
     facts.className = 'admin-facts';
     facts.append(
+      adminFact('Plan', a.owner ? 'Owner (no limits)' : a.plan === 'free' ? 'Free' : 'Pro'),
       adminFact('Storage', `${bytes(a.bytes)} of ${a.quota ? bytes(a.quota) : 'no limit'} · ${a.files} file${a.files === 1 ? '' : 's'} · ${a.images} image${a.images === 1 ? '' : 's'}`),
       adminFact('Active', a.activeDays30 === null ? '—' : `${a.activeDays30} of last 30 days`),
       adminFact('Last seen', timeAgo(a.lastSeenAt)),
@@ -3756,13 +3863,40 @@ function renderAdmin(data) {
     change.className = 'link-btn admin-limit';
     change.textContent = 'Change storage limit';
     change.addEventListener('click', () => changeLimit(a));
-    row.append(email, facts, change);
+    const actions = document.createElement('div');
+    actions.className = 'admin-actions';
+    actions.append(change);
+    if (!a.owner) {
+      const plan = document.createElement('button');
+      plan.type = 'button';
+      plan.className = 'link-btn admin-limit';
+      plan.textContent = a.plan === 'free' ? 'Switch to Pro' : 'Switch to Free';
+      plan.addEventListener('click', () => switchPlan(a, a.plan === 'free' ? 'pro' : 'free'));
+      actions.append(plan);
+    }
+    row.append(email, facts, actions);
     list.append(row);
   }
   const note = document.createElement('p');
   note.className = 'admin-note';
   note.textContent = '“Active” counts the days an account opened Scratch Pad. Sign-ins count password and email-code sign-ins.';
   adminBody.replaceChildren(summary, list, note);
+}
+
+async function switchPlan(a, plan) {
+  try {
+    const r = await fetch('/.netlify/functions/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: a.email, plan })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Couldn’t change the plan');
+    showToast(`${a.email} is now on ${plan === 'pro' ? 'Pro' : 'Free'}`);
+    await openAdmin();
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 async function changeLimit(a) {
@@ -3945,6 +4079,7 @@ async function startApp() {
   document.body.classList.remove('signed-out');
   authScreen.hidden = true;
   avatarEl.textContent = (account.email || '?').charAt(0).toUpperCase();
+  applyPlan();
   accountBtn.title = account.email;
   accountBtn.setAttribute('aria-label', `Account: ${account.email}`);
   await fetchSheets();

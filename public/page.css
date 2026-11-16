@@ -1,0 +1,25 @@
+/* Plain reading pages (Privacy, Help & support), on the app's tokens in styles.css. */
+
+body.doc-page { min-height: 100dvh; }
+.doc { width: 100%; max-width: 720px; margin: 0 auto; padding: max(16px, calc(env(safe-area-inset-top) + 12px)) max(18px, env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); }
+.doc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; margin-bottom: 18px; }
+.doc-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
+.doc-brand img { width: 28px; height: 28px; }
+.doc-back { color: var(--accent); font-weight: 600; text-decoration: none; }
+.doc h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+.doc .updated { margin-top: 6px; color: var(--muted); font-size: .9375rem; }
+.doc h2 { margin: 34px 0 10px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
+.doc h3 { margin: 22px 0 6px; font-size: 1.0625rem; font-weight: 600; }
+.doc p, .doc li { color: #d3dbe7; font-size: 1rem; line-height: 1.65; }
+.doc p + p { margin-top: 12px; }
+.doc ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.doc strong { color: var(--text); font-weight: 600; }
+.doc a { color: var(--accent); }
+.doc .lede { margin-top: 18px; font-size: 1.0625rem; color: var(--text); }
+.doc .contact { margin-top: 34px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.doc .contact p { color: var(--muted); }
+.doc .contact .addr { margin-top: 4px; color: var(--text); font-size: 1.125rem; font-weight: 600; user-select: all; overflow-wrap: anywhere; }
+.doc table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: .9375rem; }
+.doc th, .doc td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.doc th { color: var(--muted); font-weight: 600; }
+.doc .table-wrap { overflow-x: auto; }

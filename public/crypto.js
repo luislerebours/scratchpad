@@ -1,4 +1,4 @@
-// End-to-end encryption for Scratch Pad, using only the browser's Web Crypto.
+// End-to-end encryption for ScrapSheet, using only the browser's Web Crypto.
 //
 // Keys:
 //   password ──PBKDF2──► auth secret (sent to the server, which stores only a hash of it)

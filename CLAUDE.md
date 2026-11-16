@@ -1,4 +1,4 @@
-# Scratch Pad
+# ScrapSheet (formerly Scratch Pad)
 
 A shared scratch pad (five sheets of text, images and files) hosted on Netlify
 at https://scratch.sector809labs.com (Netlify site `scratchpadx`; DNS is a
@@ -6,6 +6,9 @@ DNS-only CNAME in Cloudflare). https://scratchpadx.netlify.app must keep working
 too (some networks block new domains): never redirect it to the new one. The two
 are separate sites to the browser (own sign-in, own kept keys), and share links
 use whichever address they were made on.
+The app is called ScrapSheet everywhere people see it. Internal names keep
+"scratchpad" (repo, stores, keys, the `scratchpad-e2ee-v1` salt): never rename
+those, the salt least of all (it would lock every account out).
 Pushes to `main` deploy straight to the live site.
 
 ## Rules

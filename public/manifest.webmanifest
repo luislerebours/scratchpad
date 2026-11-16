@@ -1,7 +1,7 @@
 {
-  "name": "Scratch Pad",
-  "short_name": "Scratch Pad",
-  "description": "A shared scratch pad that stays synchronized across devices.",
+  "name": "ScrapSheet",
+  "short_name": "ScrapSheet",
+  "description": "Notes, files and photos on every device, end-to-end encrypted.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b1220",

@@ -234,7 +234,7 @@ async function keyForSheet(id) {
   if (entry?.key) return sheetKeyFrom(id, entry.key);
   const known = sheetKeys.get(id)?.key;
   if (known) return known;
-  throw new Error('This sheet isn’t ready yet. Reload Scratch Pad and try again.');
+  throw new Error('This sheet isn’t ready yet. Reload ScrapSheet and try again.');
 }
 
 async function fileKeyFor(file, sheet = file.sheet) {
@@ -2385,7 +2385,7 @@ async function saveOriginalImage(src) {
     if (info.enc) info.type = await vault.decryptText(await keyForSheet(sheet), info.type);
     const ext = ((info.type.split('/')[1] || 'png').replace('jpeg', 'jpg'));
     const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-    const name = `Scratch Pad image ${stamp}.${ext}`;
+    const name = `ScrapSheet image ${stamp}.${ext}`;
     const file = { name, type: info.type, size: info.size, chunks: info.chunks, sheet, enc: info.enc, cryptoKey: info.enc ? await keyForSheet(sheet) : null, chunkUrl: i => imageUrl(sheet, `id=${id}&chunk=${i}`) };
     const transfer = createTransfer(name, 'Downloading original', info.size);
     transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
@@ -4005,7 +4005,7 @@ function appearanceItems() {
 const brandBtn = document.querySelector('#brandBtn');
 function updateBrandLabel() {
   const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-  brandBtn.setAttribute('aria-label', `Scratch Pad: switch to ${next} mode`);
+  brandBtn.setAttribute('aria-label', `ScrapSheet: switch to ${next} mode`);
   brandBtn.title = `Switch to ${next} mode`;
 }
 function flipTheme() {
@@ -4104,7 +4104,7 @@ function renderAdmin(data) {
   }
   const note = document.createElement('p');
   note.className = 'admin-note';
-  note.textContent = '“Active” counts the days an account opened Scratch Pad. Sign-ins count password and email-code sign-ins.';
+  note.textContent = '“Active” counts the days an account opened ScrapSheet. Sign-ins count password and email-code sign-ins.';
   adminBody.replaceChildren(summary, list, note);
 }
 
@@ -4290,7 +4290,7 @@ function showUnlock(purpose = 'open') {
     title.textContent = account.keyring ? 'Unlock your sheets' : 'Turn on encryption';
     text.textContent = account.keyring
       ? 'Your sheets and files are end-to-end encrypted. Enter your password to open them on this device.'
-      : 'Scratch Pad now locks your sheets and files with your password, so only you can read them. Enter it once to turn this on.';
+      : 'ScrapSheet now locks your sheets and files with your password, so only you can read them. Enter it once to turn this on.';
     alt.innerHTML = '<button class="link-btn" type="button" data-go="email" data-mode="reset">Forgot password?</button> · <button class="link-btn" type="button" data-sign-out>Sign out</button>';
   }
   authEmail = account.email;
@@ -4362,11 +4362,11 @@ authScreen.addEventListener('click', async e => {
       showToast('Selected: copy it from here');
     }
   } else if (e.target.closest('[data-save-recovery]')) {
-    const text = `Scratch Pad recovery key\n\nAccount: ${authEmail || account?.email || ''}\nRecovery key: ${key}\n\nThis key opens your encrypted sheets and files if you forget your password.\nKeep it private and somewhere safe.\n`;
+    const text = `ScrapSheet recovery key\n\nAccount: ${authEmail || account?.email || ''}\nRecovery key: ${key}\n\nThis key opens your encrypted sheets and files if you forget your password.\nKeep it private and somewhere safe.\n`;
     const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'Scratch Pad recovery key.txt';
+    a.download = 'ScrapSheet recovery key.txt';
     document.body.append(a);
     a.click();
     a.remove();
@@ -4770,7 +4770,7 @@ function onSyncNotice(notice) {
   if (notice.rev !== known) checkForChanges();
 }
 
-// One small request every 2 seconds while Scratch Pad is on screen; the
+// One small request every 2 seconds while ScrapSheet is on screen; the
 // text, tabs or file list are fetched only when their marker changed.
 async function checkForChanges() {
   if (!appStarted || document.visibilityState !== 'visible') return;

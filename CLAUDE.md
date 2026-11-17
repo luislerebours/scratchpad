@@ -206,6 +206,9 @@ the current policies before building the Android app.
   do nothing; viewing, search, copy stay. A save that can't reach the server
   counts as offline. While view only the 2-second check runs; when the server
   answers, words typed just before the drop are saved and editing unlocks.
+  The notice "You’re offline. Reconnect to edit." shows once on going
+  offline, then only when someone tries to type (a tap on the text or a key) or
+  to change something.
   Guard new actions that change data with `if (blockedOffline()) return;`.
 - Search runs on the device over the kept copies of every sheet and its file
   list (`state?meta=all` returns both), so typing makes no requests.

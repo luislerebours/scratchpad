@@ -27,7 +27,9 @@ manifest and icons stay complete, no browser-only shortcuts that an app shell
 can't offer. Store billing rules (Google Play Billing, Apple in-app purchase)
 may require their own billing beside Stripe for Pro bought in the app: check
 the current policies before building the Android app. `docs/android.md` has the
-researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps.
+researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps;
+`docs/play-console-answers.md` the Data safety and rating answers (keep them true
+to what the app collects); `branding/play-store/` the listing kit.
 
 ## Rules
 
@@ -132,6 +134,9 @@ researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps.
   only: no special cases for particular accounts.
 - Netlify functions take about 4.5 MB per request, so anything larger travels
   in chunks.
+- Rate limits (`allow()` in `netlify/lib/auth.mjs`) keep counters under a sha256
+  of their key (an email or IP address, never readable) and clear ones untouched
+  for a day (`pruneRates`), so the privacy policy's "IP addresses, briefly" holds.
 - `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,
   which keeps each account's data in its own stores (`u-<id>-…`). The account
   with `ns: ''` holds the original `scratchpad…` stores from before accounts

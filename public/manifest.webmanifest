@@ -4,8 +4,8 @@
   "description": "Notes, files and photos on every device, end-to-end encrypted.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b1220",
-  "theme_color": "#0b1220",
+  "background_color": "#f5f1eb",
+  "theme_color": "#f5f1eb",
   "icons": [
     {
       "src": "/assets/icon-192.png?v=2",

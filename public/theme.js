@@ -1,5 +1,5 @@
 // Light or dark, set on <html> before the page draws so it never flashes the
-// wrong colors. "System" (the default) follows the device and changes with it.
+// wrong colors. Light is the default; "System" follows the device and changes with it.
 (function () {
   var KEY = 'scratchpad-theme';
   var media = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
@@ -8,9 +8,9 @@
   function chosen() {
     try {
       var v = localStorage.getItem(KEY);
-      return v === 'light' || v === 'dark' ? v : 'system';
+      return v === 'dark' || v === 'system' ? v : 'light';
     } catch (e) {
-      return 'system';
+      return 'light';
     }
   }
 
@@ -27,7 +27,7 @@
     get: chosen,
     set: function (pick) {
       try {
-        if (pick === 'system') localStorage.removeItem(KEY);
+        if (pick === 'light') localStorage.removeItem(KEY);
         else localStorage.setItem(KEY, pick);
       } catch (e) {}
       return apply();

@@ -5747,6 +5747,7 @@ async function startApp() {
   scheduleSnapshot();
   afterCheckout();
   offerProIfChosen();
+  receiveShared();
   if (locking) lockTheRest().then(() => { if (account.locked === 'on') sealOldTypes(); });
   else if (masterKey && account.locked === 'on' && !account.typesSealed) sealOldTypes();
   connectSync();
@@ -5755,6 +5756,88 @@ async function startApp() {
   setInterval(() => {
     if (!socketHealthy || viewOnly || Date.now() - lastCheckAt > SAFETY_CHECK_MS) checkForChanges();
   }, POLL_MS);
+}
+
+// ---- Share to ScrapSheet ----
+// Installed on Android, ScrapSheet is in the system Share menu. The service
+// worker (sw.js) keeps what was shared on this device and opens /?shared=1;
+// here it's offered for the open sheet, then the files are locked and uploaded
+// like any other, and text is added at the end of the sheet. Nothing shared
+// reaches the server unlocked.
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+function shareInbox(mode, run) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('scratchpad-share', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('inbox', { autoIncrement: true });
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('inbox', mode);
+      const result = run(tx.objectStore('inbox'));
+      tx.oncomplete = () => { db.close(); resolve(result.value); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+}
+
+// Everything waiting, oldest first, as one: { files, text }.
+function peekShared() {
+  return shareInbox('readonly', store => {
+    const out = { value: null };
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const items = req.result || [];
+      if (items.length) out.value = { files: items.flatMap(i => i.files || []), text: items.map(i => i.text).filter(Boolean).join('\n\n') };
+    };
+    return out;
+  }).catch(() => null);
+}
+
+const clearShared = () => shareInbox('readwrite', store => { store.clear(); return { value: true }; }).catch(() => {});
+
+function addSharedText(text) {
+  const nodes = cleanHtml(textToHtml(text));
+  if (!editorIsEmpty()) pad.append(document.createElement('div'));
+  pad.append(...nodes.childNodes);
+  onEditorChanged();
+  showPadImages(pad);
+}
+
+async function receiveShared() {
+  if (new URLSearchParams(location.search).has('shared')) history.replaceState(null, '', location.pathname);
+  if (!('indexedDB' in window)) return;
+  const shared = await peekShared();
+  if (!shared || (!shared.files.length && !shared.text)) return;
+  // Kept on the device until there's a connection to add it.
+  if (viewOnly) {
+    showToast('Reconnect to add what you shared.', { duration: 3000 });
+    return;
+  }
+  const { files, text } = shared;
+  const count = files.length ? `${files.length} file${files.length === 1 ? '' : 's'}` : '';
+  const what = [count, text ? 'text' : ''].filter(Boolean).join(' and ');
+  const preview = text ? `“${text.length > 140 ? `${text.slice(0, 140).trim()}…` : text}”` : '';
+  openSheet({
+    title: 'Add what you shared',
+    text: [`Adds ${what} to ${currentSheetName()}.`, preview].filter(Boolean).join('\n'),
+    files,
+    actions: [
+      { label: 'Discard', kind: 'secondary', run: () => clearShared() },
+      {
+        label: `Add to ${currentSheetName()}`,
+        kind: 'primary',
+        run: async () => {
+          if (blockedOffline()) return;
+          await clearShared();
+          if (text) addSharedText(text);
+          if (files.length) uploadFiles(files, activeSheet);
+          else showToast(`Added to ${currentSheetName()}`);
+        }
+      }
+    ]
+  });
 }
 
 // ---- Real-time sync: the relay tells this device when something changed ----

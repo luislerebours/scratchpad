@@ -95,9 +95,14 @@ researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps.
   pointing at `images/`) and `.txt`, its pasted images (originals) and `files/`.
   Recently Deleted isn't included. Needs a connection.
 - Delete account (account menu, `auth?action=delete-account`): needs the password
-  as the sign-in secret; cancels an active Stripe subscription first (stops if
-  that fails), then erases every sheet, file, image, share link and the account;
-  other devices are signed out.
+  as the sign-in secret. `deleteAccount()` in `netlify/lib/account.mjs` cancels
+  a paying Stripe or Google Play subscription first (stops if that fails), then
+  erases every sheet, file, image, share link and the account; other devices
+  are signed out. Support can do the same for someone who can't sign in (asked
+  from the account's email) from the admin dashboard (Accounts → Delete
+  account…, email typed to confirm, audited, owner emailed). The public page
+  `/delete-account` (`public/delete-account.html`, also Play's deletion URL)
+  explains both; keep it true to what deletion does.
 - Admin dashboard at `/admin` (`public/admin.html`/`admin.js`/`admin.css`,
   `netlify/functions/admin-api.mjs`, `netlify/lib/admin.mjs`). Admins are their
   own records in the `scratchpad-admin` store, never ScrapSheet accounts: email,
@@ -136,7 +141,7 @@ researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps.
   button, and the footer "Drop it here. Pull it up anywhere." / "ScrapSheet by
   Sector 809 Labs". New emails pass content only (heading, intro, box, button,
   note), never their own HTML; a plain-text part is made from the same content.
-- Security notices (`securityNotice()` in `auth.mjs`): one email when the
+- Security notices (`securityNotice()` in `netlify/lib/notices.mjs`): one email when the
   password changes (reset), the account is started over, a new recovery key is
   made, every device is signed out, or the account is deleted (says if Pro was
   cancelled). Box: time (UTC) and the kind of device from the browser

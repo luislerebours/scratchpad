@@ -489,7 +489,7 @@ body.dragging-files .files.drag-active
 .sheet-card { width: min(520px, 100%); padding: 20px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 18px 18px 0 0; background: var(--surface); border: 1px solid var(--line-strong); border-bottom: 0; }
 .sheet-grabber { width: 36px; height: 4px; margin: -6px auto 16px; border-radius: 2px; background: var(--line-strong); }
 .sheet-card h2 { font-size: 1.1875rem; overflow-wrap: anywhere; }
-.sheet-text { margin: 6px 0 14px; color: var(--muted); font-size: .9375rem; line-height: 1.45; }
+.sheet-text { margin: 6px 0 14px; color: var(--muted); font-size: .9375rem; line-height: 1.45; white-space: pre-line; overflow-wrap: anywhere; }
 .sheet-items { display: grid; gap: 6px; max-height: 32vh; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: .875rem; }
 .sheet-item { display: flex; justify-content: space-between; gap: 10px; }
 .sheet-item span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

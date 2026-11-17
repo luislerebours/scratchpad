@@ -241,5 +241,13 @@ the current policies before building the Android app.
   (`restartIfStuck`). Only a refusal from the server (4xx) or Cancel ends one.
   Upload rows say "Keep ScrapSheet open until uploads finish."; a page that is
   closed (or that the phone discards) still loses its upload.
+- Share to ScrapSheet (installed app on Android): `share_target` in the
+  manifest posts to `/share-target`; `public/sw.js` (the only service worker
+  job: it caches nothing and passes every other request through) keeps the
+  files and text in IndexedDB `scratchpad-share` and opens `/?shared=1`.
+  `receiveShared()` (after `startApp`) offers them for the open sheet ("Add to
+  <sheet>" / Discard): files go through `uploadFiles` (locked like any other),
+  text is added at the end of the sheet. Kept while signed out or offline.
+  Without the worker, netlify.toml sends `/share-target` home (303).
 - Search runs on the device over the kept copies of every sheet and its file
   list (`state?meta=all` returns both), so typing makes no requests.

@@ -13,6 +13,20 @@
     Referrer-Policy = "same-origin"
 
 [[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Service-Worker-Allowed = "/"
+
+# Shares are caught by the service worker on the device (public/sw.js). If one
+# ever reaches the site without it, ScrapSheet just opens.
+[[redirects]]
+  from = "/share-target"
+  to = "/"
+  status = 303
+  force = true
+
+[[headers]]
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json"

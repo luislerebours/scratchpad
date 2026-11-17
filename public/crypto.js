@@ -220,6 +220,24 @@ export async function recallMaster(account) {
   }
 }
 
+// An encrypted copy of what the app last showed (see "Instant open" in app.js),
+// kept beside the key and cleared with it.
+export async function keepSnapshot(sealed) {
+  try {
+    await tx('readwrite', s => s.put(sealed, 'snapshot'));
+  } catch {
+    // Not kept: the app just opens the slower way next time.
+  }
+}
+
+export async function recallSnapshot() {
+  try {
+    return (await tx('readonly', s => s.get('snapshot'))) || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function forgetKeys() {
   try {
     await tx('readwrite', s => s.clear());

@@ -89,6 +89,11 @@ let lastFileRefresh = 0;
 let sheets = [{ id: 1, name: 'Sheet 1' }];
 let sheetsSignature = '';
 let account = null;
+// Instant open (see near the end): the kept copy's size cap, its save timer,
+// and whether it's on screen and not yet checked against the server.
+const SNAPSHOT_MAX_CHARS = 4_000_000;
+let snapshotTimer = null;
+let painted = null;
 // Last change markers seen; the 2-second check compares against these.
 let revs = {};
 let checking = false;
@@ -302,6 +307,7 @@ function cacheSheet(sheet, html, updatedAt) {
   if (known && known.updatedAt > updatedAt) return;
   sheetCache.set(sheet, { html, updatedAt, content: htmlHasContent(html) });
   scheduleTabStatus();
+  scheduleSnapshot();
 }
 
 // Text (ignoring whitespace) or an image counts as content.
@@ -718,6 +724,7 @@ function applySheets(data) {
   sheets = data.sheets.map(s => ({ id: Number(s.id), name: String(s.name || `Sheet ${s.id}`), ...(s.key ? { key: s.key } : {}) }));
   for (const id of [...sheetCache.keys(), ...filesCache.keys()]) if (!hasSheet(id)) forgetSheet(id);
   renderTabs();
+  scheduleSnapshot();
   // The open sheet was deleted on another device.
   if (!hasSheet(activeSheet)) switchSheet(sheets[0].id, { remember:false, force:true });
 }
@@ -1477,6 +1484,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
   localUpdatedAt = cached ? cached.updatedAt : 0;
   if (cached) renderEditor(cached.html);
   else pad.replaceChildren();
+  painted = null;
   pad.classList.toggle('is-loading', !cached);
   updateEmptyState();
   showCachedFiles(nextSheet);
@@ -1804,6 +1812,7 @@ async function loadFiles(force = false, sheet = activeSheet) {
     const data = await r.json();
     const files = await openFiles(Array.isArray(data.files) ? data.files : [], requestedSheet);
     filesCache.set(requestedSheet, files);
+    scheduleSnapshot();
     if (requestedSheet !== activeSheet) return false;
 
     lastFileRefresh = Date.now();
@@ -4614,6 +4623,9 @@ deleteAccountForm.addEventListener('submit', async e => {
   submit.textContent = 'Deleting…';
   try {
     const { auth } = await vault.passwordKeys(account.email, password);
+    // The server signs every device out before it answers: this page waits for
+    // its own answer instead of reacting to that (and carries on if it fails).
+    appStarted = false;
     const r = await rawFetch(`${API_AUTH}?action=delete-account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4621,12 +4633,12 @@ deleteAccountForm.addEventListener('submit', async e => {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || 'Couldn’t delete the account. Try again.');
-    appStarted = false;
     await vault.forgetKeys();
     try { localStorage.clear(); sessionStorage.clear(); } catch { /* nothing kept */ }
     deleteAccountForm.innerHTML = '<p class="delete-account-text"><strong>Your account was deleted.</strong> Everything in it is gone, and you’re signed out on every device.</p>';
     setTimeout(() => location.replace('/'), 2500);
   } catch (err) {
+    appStarted = true;
     deleteAccountError.textContent = err.message;
     submit.disabled = false;
     submit.textContent = 'Delete account';
@@ -5184,6 +5196,7 @@ async function startApp() {
   prefetchSheets();
   await switchSheet(startSheet, { remember:false, force:true });
   appStarted = true;
+  scheduleSnapshot();
   afterCheckout();
   offerProIfChosen();
   if (locking) lockTheRest().then(() => { if (account.locked === 'on') sealOldTypes(); });
@@ -5326,14 +5339,149 @@ async function checkForChanges() {
   }
 }
 
-// Checking who is signed in also renews the one-year cookie.
-const me = await rawFetch(API_AUTH, { cache:'no-store' }).catch(() => null);
+// ---- Instant open: an encrypted copy of what the app last showed ----
+// Tabs, the open sheet (and other kept sheets), file lists and plan, sealed
+// with this device's master key and kept beside it in IndexedDB. On the next
+// open it's drawn before any request; the usual sync then brings in anything
+// newer. Signing out (or a 401) clears it with the key.
+
+
+function scheduleSnapshot() {
+  if (!appStarted || !masterKey) return;
+  clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(saveSnapshot, 1500);
+}
+
+async function saveSnapshot() {
+  clearTimeout(snapshotTimer);
+  snapshotTimer = null;
+  if (!appStarted || !masterKey || !account?.email || !sheets.length) return;
+  try {
+    // The open sheet first, then the rest while they fit.
+    let room = SNAPSHOT_MAX_CHARS;
+    const html = {};
+    for (const id of [activeSheet, ...sheets.map(s => s.id).filter(id => id !== activeSheet)]) {
+      const kept = sheetCache.get(id);
+      if (!kept || kept.html.length > room) continue;
+      room -= kept.html.length;
+      html[id] = { html: kept.html, updatedAt: kept.updatedAt };
+    }
+    const files = {};
+    for (const [id, list] of filesCache) if (hasSheet(id)) files[id] = { list: [...list], signature: list.signature || '' };
+    const data = {
+      v: 1,
+      at: Date.now(),
+      email: account.email,
+      plan: account.plan || null,
+      sheets,
+      sheetsSignature,
+      activeSheet,
+      html,
+      files,
+      status: [...sheetStatus]
+    };
+    await vault.keepSnapshot({ email: account.email, data: await vault.encryptText(masterKey, JSON.stringify(data)) });
+  } catch (err) {
+    console.error('Keeping a copy for next time failed', err);
+  }
+}
+
+// Kept as the page goes to the background, so the next open matches.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && appStarted) saveSnapshot();
+});
+
+// Draws the kept copy, read-only until the server has been checked. Returns
+// the account's email, or null when there's nothing to draw.
+async function paintFromSnapshot() {
+  try {
+    const kept = await vault.recallSnapshot();
+    if (!kept?.email) return null;
+    const key = await vault.recallMaster(kept.email);
+    if (!key) return null;
+    const data = JSON.parse(await vault.decryptText(key, kept.data));
+    if (data?.v !== 1 || data.email !== kept.email || !Array.isArray(data.sheets) || !data.sheets.length) return null;
+
+    masterKey = key;
+    account = { email: data.email, plan: data.plan || undefined, keyring: true, locked: 'on' };
+    sheets = data.sheets;
+    sheetsSignature = data.sheetsSignature || '';
+    for (const [id, c] of Object.entries(data.html || {})) sheetCache.set(Number(id), { html: c.html, updatedAt: c.updatedAt, content: htmlHasContent(c.html) });
+    for (const [id, f] of Object.entries(data.files || {})) {
+      const list = f.list || [];
+      list.signature = f.signature;
+      filesCache.set(Number(id), list);
+      for (const file of list) knownFiles.set(file.id, file);
+    }
+    for (const [id, st] of data.status || []) sheetStatus.set(Number(id), st);
+
+    document.body.classList.remove('signed-out');
+    authScreen.hidden = true;
+    avatarEl.textContent = data.email.charAt(0).toUpperCase();
+    applyPlan();
+    const remembered = rememberedSheet();
+    activeSheet = hasSheet(remembered) ? remembered : hasSheet(data.activeSheet) ? data.activeSheet : sheets[0].id;
+    const cached = sheetCache.get(activeSheet);
+    localUpdatedAt = cached ? cached.updatedAt : 0;
+    pad.contentEditable = 'false';
+    if (cached) renderEditor(cached.html);
+    pad.classList.toggle('is-loading', !cached);
+    updateEmptyState();
+    showCachedFiles(activeSheet);
+    updateFilesSubtitle();
+    renderTabs();
+    revealActiveTab(false);
+    setSaveState(cached ? 'saved' : 'loading');
+    painted = { email: data.email };
+    return data.email;
+  } catch (err) {
+    console.error('Couldn’t open the kept copy', err);
+    return null;
+  }
+}
+
+// The kept copy belonged to someone else, or can't be used: back to a blank start.
+function clearPainted() {
+  painted = null;
+  masterKey = null;
+  account = null;
+  sheetCache.clear();
+  filesCache.clear();
+  sheetStatus.clear();
+  knownFiles.clear();
+  sheets = [{ id: 1, name: 'Sheet 1' }];
+  sheetsSignature = '';
+  pad.replaceChildren();
+  showCachedFiles(activeSheet);
+  renderTabs();
+}
+
+// Who is signed in, retrying while the network is down (a failed request
+// isn't a sign-out: only the server saying so is).
+async function whoAmI() {
+  for (let delay = 1500; ; delay = Math.min(delay * 2, 15000)) {
+    const r = await rawFetch(API_AUTH, { cache: 'no-store' }).catch(() => null);
+    if (r) return r;
+    setConnection('offline');
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+}
+
+// Draw what this device kept from last time, then check who is signed in
+// (which also renews the one-year cookie) and carry on from there.
+const paintedEmail = await paintFromSnapshot();
+const me = paintedEmail ? await whoAmI() : await rawFetch(API_AUTH, { cache:'no-store' }).catch(() => null);
 if (me?.ok) {
   account = await me.json();
+  if (paintedEmail && paintedEmail !== account.email) clearPainted();
   masterKey = account.keyring ? await vault.recallMaster(account.email) : null;
   if (masterKey) await startApp();
-  else showUnlock();
+  else {
+    if (paintedEmail) clearPainted();
+    showUnlock();
+  }
 } else {
+  if (paintedEmail) clearPainted();
   // Signed out (here or everywhere): this device forgets its keys.
   await vault.forgetKeys();
   // The emailed link opens straight at the code step.

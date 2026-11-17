@@ -163,11 +163,13 @@ the current policies before building the Android app.
   (served at `/privacy` and `/terms`, styled by `legal.css`; also in the account
   menu). Keep them true to what the app does: update them when data handling,
   providers, plans or prices change. Terms are governed by New York law.
-- Branding lives in `branding/` (see its README). `branding/app-icon.png` is
-  the app icon to use for every installed or store icon (web app home screen
-  and taskbar, Android, iOS); not yet wired into `public/`.
-- Icons: `public/assets/icon-source.png` is the 1024px master; the other
-  sizes and the header's see-through `mark.png` are made from it.
+- Branding lives in `branding/` (see its README): `app-icon.png` is the approved
+  app icon; every installed or store icon (web app home screen/taskbar, Android,
+  iOS) is made from it (`app-icon-full-bleed-1024.png`, maskable version for
+  Android). `branding/kit/` is the full brand kit (logos, marks, social, email,
+  print, guidelines). Tab favicons and the link-preview card come from the kit.
+  Bump the `?v=` on icon links when icons change. The header's see-through
+  `mark.png` / teal `mark-light.png` are separate.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

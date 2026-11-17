@@ -14,7 +14,8 @@ const POLL_MS = 2000;
 const SAVE_DELAY_MS = 450;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const PARALLEL_CHUNKS = 3;
-const CHUNK_RETRIES = 3;
+const CHUNK_RETRIES = 5;
+const STUCK_AFTER_RETURN_MS = 8000;
 const LAST_SHEET_KEY = 'scratchpad:lastSheet';
 const MAX_PREVIEW_BYTES = 3_900_000;
 const PREVIEW_DIM = 2560;
@@ -1270,14 +1271,16 @@ async function uploadPadImage(img, blob) {
     // Locked with the sheet's key: the display copy and every piece of the original.
     const key = isLocked() ? await keyForSheet(sheet) : null;
     const seal = async part => key ? new Blob([await vault.encryptBytes(key, new Uint8Array(await part.arrayBuffer()))]) : part;
-    const start = await postJson(imageUrl(sheet, 'action=start'), { type: key ? await vault.encryptText(key, type) : type, size: blob.size, ...(key ? { enc: 1 } : {}) });
+    const wait = why => transfer.waiting(why);
+    const startBody = { type: key ? await vault.encryptText(key, type) : type, size: blob.size, ...(key ? { enc: 1 } : {}) };
+    const start = await withRetry(() => postJson(imageUrl(sheet, 'action=start'), startBody), transfer.signal, wait);
     const id = encodeURIComponent(start.id);
     const loaded = new Array(start.chunks).fill(0);
     const report = () => transfer.update(loaded.reduce((a, b) => a + b, 0));
     if (preview) {
       const sealedPreview = await seal(preview);
       const previewType = key ? await vault.encryptText(key, preview.type) : preview.type;
-      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1&type=${encodeURIComponent(previewType)}`), sealedPreview, transfer.signal, () => {}, key ? 'application/octet-stream' : preview.type), transfer.signal);
+      await withRetry(() => putChunk(imageUrl(sheet, `id=${id}&preview=1&type=${encodeURIComponent(previewType)}`), sealedPreview, transfer.signal, () => {}, key ? 'application/octet-stream' : preview.type), transfer.signal, wait);
     }
     await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
       const part = await seal(blob.slice(i * start.chunkSize, Math.min(blob.size, (i + 1) * start.chunkSize)));
@@ -1286,10 +1289,14 @@ async function uploadPadImage(img, blob) {
         return putChunk(imageUrl(sheet, `id=${id}&chunk=${i}`), part, transfer.signal, n => {
           loaded[i] = n;
           report();
+        }).catch(err => {
+          loaded[i] = 0;
+          report();
+          throw err;
         });
-      }, transfer.signal);
+      }, transfer.signal, wait);
     });
-    const { src } = await postJson(imageUrl(sheet, `id=${id}&action=finish`));
+    const { src } = await withRetry(() => postJson(imageUrl(sheet, `id=${id}&action=finish`)), transfer.signal, wait);
     // Keeps showing the local copy, which is also what this address now shows.
     img.dataset.src = src;
     imageUrls.set(src, Promise.resolve(localUrl));
@@ -1792,20 +1799,94 @@ async function runPool(count, limit, job) {
   await Promise.all(Array.from({ length: Math.min(limit, count) }, worker));
 }
 
-async function withRetry(fn, signal) {
-  for (let attempt = 1; ; attempt++) {
+// ---- Patient transfers ----
+// Phones pause a page that's in the background, and connections drop. A
+// transfer then waits, without using up its tries, and carries on from the
+// piece it was on once ScrapSheet is in front and online again (pieces already
+// sent stay sent). Only a refusal from the server, or Cancel, ends it.
+
+let lastHiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') lastHiddenAt = Date.now();
+});
+const pageActive = () => document.visibilityState === 'visible' && navigator.onLine && !viewOnly;
+
+// Resolves once the page is in front and online (at once if it already is).
+function whenActive(signal) {
+  if (pageActive()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const check = () => { if (pageActive()) { stop(); resolve(); } };
+    const cancel = () => { stop(); reject(abortError()); };
+    const timer = setInterval(check, 1000);
+    const stop = () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('online', check);
+      signal?.removeEventListener('abort', cancel);
+    };
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('online', check);
+    signal?.addEventListener('abort', cancel, { once: true });
+  });
+}
+
+// Worth trying again: no answer at all, or a server hiccup (not a refusal).
+const retryable = err => !err?.status || err.status >= 500 || err.status === 408 || err.status === 429;
+
+const pause = (ms, signal) => new Promise((resolve, reject) => {
+  const t = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); reject(abortError()); }, { once: true });
+});
+
+// `onWait(why)`: 'hidden' (paused in the background) or 'offline'.
+async function withRetry(fn, signal, onWait) {
+  for (let attempt = 1; ;) {
+    const startedAt = Date.now();
     try {
       return await fn();
     } catch (err) {
-      if (signal?.aborted || err?.name === 'AbortError' || attempt >= CHUNK_RETRIES) throw err;
-      await new Promise(resolve => setTimeout(resolve, 600 * attempt));
+      if (signal?.aborted || err?.name === 'AbortError' || !retryable(err)) throw err;
+      // No answer counts as offline (confirmed by one more check, as for saves).
+      if (!err?.status && !viewOnly && appStarted) setConnection('offline');
+      if (lastHiddenAt >= startedAt || !pageActive()) {
+        // The page was away (or the connection is): wait, and this try doesn't count.
+        if (!pageActive()) onWait?.(document.visibilityState === 'visible' ? 'offline' : 'hidden');
+        await whenActive(signal);
+        continue;
+      }
+      if (attempt >= CHUNK_RETRIES) throw err;
+      await pause(800 * 2 ** (attempt - 1), signal);
+      attempt++;
+      if (!pageActive()) {
+        onWait?.(document.visibilityState === 'visible' ? 'offline' : 'hidden');
+        await whenActive(signal);
+      }
     }
   }
 }
 
+// A request that went quiet while the page was away can hang once it's back:
+// if nothing moves within a few seconds of returning, it's started again.
+function restartIfStuck(isBusy, lastActivity, restart) {
+  let timer = null;
+  const onVisible = () => {
+    if (document.visibilityState !== 'visible') return;
+    const back = Date.now();
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (isBusy() && lastActivity() < back) restart(); }, STUCK_AFTER_RETURN_MS);
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  return () => {
+    clearTimeout(timer);
+    document.removeEventListener('visibilitychange', onVisible);
+  };
+}
+
+const networkError = () => new Error('Network error');
+
 // ---- Transfer progress rows ----
 
-function createTransfer(name, verb, total, items = null) {
+function createTransfer(name, verb, total, items = null, { note = '' } = {}) {
   const row = document.createElement('div');
   row.className = 'transfer-row';
   row.innerHTML = `
@@ -1814,8 +1895,14 @@ function createTransfer(name, verb, total, items = null) {
       <button class="transfer-cancel" type="button" aria-label="Cancel">Cancel</button>
     </div>
     <div class="transfer-bar"><div class="transfer-fill"></div></div>
-    <div class="transfer-meta"></div>`;
+    <div class="transfer-meta"></div>
+    <div class="transfer-note" hidden></div>`;
   row.querySelector('.transfer-name').textContent = name;
+  const noteEl = row.querySelector('.transfer-note');
+  if (note) {
+    noteEl.textContent = note;
+    noteEl.hidden = false;
+  }
   const itemEls = (items || []).map(itemName => {
     const el = document.createElement('div');
     el.className = 'transfer-item';
@@ -1839,6 +1926,7 @@ function createTransfer(name, verb, total, items = null) {
   meta.textContent = `Waiting… · ${bytes(total)}`;
 
   const finish = (state, text) => {
+    noteEl.remove();
     row.classList.add(state);
     cancelBtn.remove();
     meta.textContent = text;
@@ -1853,6 +1941,10 @@ function createTransfer(name, verb, total, items = null) {
       const speed = seconds > 0.5 ? ` · ${bytes(Math.round(loaded / seconds))}/s` : '';
       fill.style.width = `${pct}%`;
       meta.textContent = `${verb} · ${bytes(loaded)} of ${bytes(total)} · ${pct}%${speed}`;
+    },
+    // Paused: in the background, or offline. Carries on by itself.
+    waiting(why) {
+      meta.textContent = why === 'offline' ? 'Waiting for a connection… · continues by itself' : 'Paused while ScrapSheet was in the background · continuing…';
     },
     status(text) {
       meta.textContent = text;
@@ -2309,28 +2401,50 @@ sheetModal.addEventListener('click', e => { if (e.target === sheetModal) closeSh
 
 // Fetches one chunk, reporting bytes as they stream in.
 async function fetchChunk(url, signal, onBytes) {
-  // Chunks never change, so the browser may keep them (opening again is free).
-  const r = await fetch(url, { signal });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  if (!r.body) {
-    const buf = await r.arrayBuffer();
-    onBytes(buf.byteLength);
-    return buf;
+  const own = new AbortController();
+  const onAbort = () => own.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  let busy = true;
+  let lastActivity = Date.now();
+  let restarted = false;
+  const unwatch = restartIfStuck(() => busy, () => lastActivity, () => { restarted = true; own.abort(); });
+  try {
+    // Chunks never change, so the browser may keep them (opening again is free).
+    const r = await fetch(url, { signal: own.signal });
+    if (!r.ok) {
+      const err = new Error(`HTTP ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    if (!r.body) {
+      const buf = await r.arrayBuffer();
+      onBytes(buf.byteLength);
+      return buf;
+    }
+    const reader = r.body.getReader();
+    const parts = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      lastActivity = Date.now();
+      parts.push(value);
+      received += value.byteLength;
+      onBytes(received);
+    }
+    return new Blob(parts);
+  } catch (err) {
+    if (restarted && !signal?.aborted) throw networkError();
+    if (signal?.aborted) throw abortError();
+    throw err?.name === 'TypeError' ? networkError() : err;
+  } finally {
+    busy = false;
+    unwatch();
+    signal?.removeEventListener('abort', onAbort);
   }
-  const reader = r.body.getReader();
-  const parts = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    parts.push(value);
-    received += value.byteLength;
-    onBytes(received);
-  }
-  return new Blob(parts);
 }
 
-async function fetchSharedFile(file, { signal, onProgress } = {}) {
+async function fetchSharedFile(file, { signal, onProgress, onWait } = {}) {
   const loaded = new Array(file.chunks).fill(0);
   const parts = new Array(file.chunks);
   const report = () => onProgress?.(loaded.reduce((a, b) => a + b, 0));
@@ -2342,8 +2456,12 @@ async function fetchSharedFile(file, { signal, onProgress } = {}) {
       return fetchChunk(url, signal, n => {
         loaded[i] = n;
         report();
+      }).catch(err => {
+        loaded[i] = 0;
+        report();
+        throw err;
       });
-    }, signal);
+    }, signal, onWait);
   });
 
   if (file.enc) {
@@ -2387,7 +2505,7 @@ async function sharePreparedFile(file) {
 async function saveSharedFile(file) {
   const transfer = createTransfer(file.name, 'Downloading', file.size);
   try {
-    const prepared = await fetchSharedFile(file, { signal: transfer.signal, onProgress: transfer.update });
+    const prepared = await fetchSharedFile(file, { signal: transfer.signal, onWait: transfer.waiting, onProgress: transfer.update });
     transfer.done(`Downloaded · ${bytes(file.size)}`);
 
     if (isIOS()) {
@@ -2532,7 +2650,7 @@ async function saveOriginalImage(src) {
     const transfer = createTransfer(name, 'Downloading original', info.size);
     transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
     try {
-      const prepared = await fetchSharedFile(file, { signal: transfer.signal, onProgress: transfer.update });
+      const prepared = await fetchSharedFile(file, { signal: transfer.signal, onWait: transfer.waiting, onProgress: transfer.update });
       await deliverFiles([prepared], transfer, name);
     } catch (err) {
       transfer.fail(err?.name === 'AbortError' ? 'Download cancelled' : 'Download failed');
@@ -2877,6 +2995,7 @@ async function saveFiles(files, asZip) {
       transfer.item(i, '0%');
       prepared.push(await fetchSharedFile(file, {
         signal: transfer.signal,
+        onWait: transfer.waiting,
         onProgress: loaded => {
           transfer.update(finishedBytes + loaded);
           transfer.item(i, `${file.size ? Math.floor((loaded / file.size) * 100) : 100}%`);
@@ -2934,6 +3053,7 @@ async function shareSelected(files) {
       transfer.item(i, '0%');
       prepared.push(await fetchSharedFile(file, {
         signal: transfer.signal,
+        onWait: transfer.waiting,
         onProgress: loaded => {
           transfer.update(finishedBytes + loaded);
           transfer.item(i, `${file.size ? Math.floor((loaded / file.size) * 100) : 100}%`);
@@ -3102,21 +3222,38 @@ function putChunk(url, blob, signal, onBytes, contentType = 'application/octet-s
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(abortError());
     const xhr = new XMLHttpRequest();
+    let busy = true;
+    let lastActivity = Date.now();
+    let restarted = false;
+    const unwatch = restartIfStuck(() => busy, () => lastActivity, () => { restarted = true; xhr.abort(); });
+    const end = () => {
+      busy = false;
+      unwatch();
+      signal.removeEventListener('abort', onAbort);
+    };
     const onAbort = () => xhr.abort();
     signal.addEventListener('abort', onAbort, { once:true });
     xhr.open('PUT', url);
     xhr.setRequestHeader('Content-Type', contentType);
-    xhr.upload.onprogress = e => onBytes(e.loaded);
+    xhr.upload.onprogress = e => {
+      lastActivity = Date.now();
+      onBytes(e.loaded);
+    };
     xhr.onload = () => {
-      signal.removeEventListener('abort', onAbort);
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`HTTP ${xhr.status}`));
+      end();
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      const err = new Error(`HTTP ${xhr.status}`);
+      err.status = xhr.status;
+      reject(err);
     };
     xhr.onerror = () => {
-      signal.removeEventListener('abort', onAbort);
-      reject(new Error('Network error'));
+      end();
+      reject(networkError());
     };
-    xhr.onabort = () => reject(abortError());
+    xhr.onabort = () => {
+      end();
+      reject(restarted ? networkError() : abortError());
+    };
     xhr.send(blob);
   });
 }
@@ -3147,7 +3284,8 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
     const meta = key
       ? { name: await vault.encryptText(key, file.name), type: await vault.encryptText(key, file.type || 'application/octet-stream'), size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), ...extra }
       : { name: file.name, type: file.type, size: file.size };
-    const start = await postJson(filesUrl(targetSheet, 'action=start'), meta);
+    const wait = why => transfer.waiting(why);
+    const start = await withRetry(() => postJson(filesUrl(targetSheet, 'action=start'), meta), transfer.signal, wait);
     id = start.id;
     if (key) fileKeys.set(id, key);
     const thumbPromise = fileKind({ name: file.name, type: file.type })[0] === 'img' ? makeThumb(file) : Promise.resolve(null);
@@ -3165,8 +3303,13 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
         return putChunk(url, blob, transfer.signal, n => {
           loaded[i] = n;
           report();
+        }).catch(err => {
+          // A piece cut off midway doesn't count until it's sent again.
+          loaded[i] = 0;
+          report();
+          throw err;
         });
-      }, transfer.signal);
+      }, transfer.signal, wait);
       loaded[i] = plain.size;
       report();
     });
@@ -3174,7 +3317,7 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
     transfer.status('Finishing…');
     const thumb = await thumbPromise;
     if (thumb) await sendThumb(targetSheet, id, thumb, key);
-    await postJson(filesUrl(targetSheet, `id=${encodeURIComponent(id)}&action=finish`));
+    await withRetry(() => postJson(filesUrl(targetSheet, `id=${encodeURIComponent(id)}&action=finish`)), transfer.signal, wait);
     transfer.done(`Uploaded to ${currentSheetName(targetSheet)} · ${bytes(file.size)}`);
     return true;
   } catch (err) {
@@ -3215,7 +3358,7 @@ async function uploadFiles(files, targetSheet = activeSheet) {
       showToast(`${file.name} is over ${bytes(MAX_FILE_BYTES)}`);
       continue;
     }
-    queue.push({ file, transfer: createTransfer(file.name, 'Uploading', file.size) });
+    queue.push({ file, transfer: createTransfer(file.name, 'Uploading', file.size, null, { note: 'Keep ScrapSheet open until uploads finish.' }) });
   }
 
   for (const { file, transfer } of queue) {

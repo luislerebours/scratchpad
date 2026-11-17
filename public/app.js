@@ -154,8 +154,9 @@ function setConnection(state) {
   statusEl.querySelector('.conn-label').textContent = label;
 }
 
-// Save state of the open sheet, shown in the editor toolbar. "Saved" only
-// ever follows a confirmed write (or content loaded from the server).
+// Save state of the open sheet, shown in the editor toolbar beside the
+// connection dot. "Synced" only ever follows a confirmed write (or content
+// loaded from the server).
 let saveStateName = 'loading';
 
 function setSaveState(state) {
@@ -169,7 +170,7 @@ function renderSaveStatus() {
     unsaved: 'Unsaved changes',
     saving: 'Saving…',
     failed: 'Couldn’t save'
-  }[saveStateName] || (localUpdatedAt ? `Saved · ${formatSavedTime(localUpdatedAt)}` : 'Nothing saved yet');
+  }[saveStateName] || (localUpdatedAt ? `Synced · ${formatSavedTime(localUpdatedAt)}` : 'Nothing saved yet');
   saveStatusText.textContent = text;
   saveStatusEl.dataset.state = saveStateName;
   retrySaveBtn.hidden = saveStateName !== 'failed';

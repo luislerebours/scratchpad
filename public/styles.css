@@ -248,6 +248,8 @@ body.signed-out .app-shell { display: none; }
 .save-status[data-state="failed"] { color: var(--danger); }
 .save-status[data-state="unsaved"], .save-status[data-state="saving"], .save-status[data-state="loading"] { color: var(--faint); }
 .save-status .link-btn { min-height: 36px; font-size: .8125rem; }
+.save-status > .conn { flex: 0 0 auto; gap: 6px; padding: 0; }
+.save-status > .conn .conn-dot, .save-status > .conn .conn-label { overflow: visible; }
 .pad-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 
 .editor { position: relative; min-height: clamp(200px, 32vh, 340px); padding: 22px 24px 28px; outline: 0; color: var(--text); font-size: 1.0625rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }

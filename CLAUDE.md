@@ -146,9 +146,9 @@ the current policies before building the Android app.
   (`state?meta=usage`), a search, and every file across the sheets (fresh lists
   per sheet, names unlocked on the device) with type, size, sheet, Open sheet and
   the usual ••• file actions; table on desktop, compact list on phones. Shared
-  links tab: every link with its file/sheet, status, Copy/Share and Turn off. The header dot is the
-  server connection; the toolbar text is the save state, which shows
-  "Saved" only after the server confirms.
+  links tab: every link with its file/sheet, status, Copy/Share and Turn off. The green dot (server
+  connection) sits in the editor toolbar beside the save state, which shows
+  "Synced" only after the server confirms.
 - Sign-in page (`#authScreen` in `index.html`) doubles as the front page:
   pitch, device row, Free/Pro plan cards, features and footer around the
   sign-in card, where every auth step (code, password, unlock, recovery) shows.

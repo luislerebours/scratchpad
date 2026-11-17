@@ -599,11 +599,13 @@ body.signed-out { background: var(--auth-bg); }
 .auth-hero { margin: 0; font-size: 3.3rem; font-weight: 700; line-height: 1.07; letter-spacing: -.005em; }
 .auth-hero span { display: block; color: var(--auth-accent); }
 .auth-lede { margin: 22px 0 0; max-width: 600px; font-size: 1.5rem; font-weight: 400; line-height: 1.32; }
-.auth-devices { display: flex; align-items: flex-start; gap: 0; margin: 42px 0 0; padding: 0 0 0 30px; list-style: none; }
-.auth-devices li { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 1.25rem; font-weight: 500; line-height: 1.2; }
-.auth-devices svg { width: 54px; height: 54px; fill: none; stroke: var(--auth-accent); stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
-.auth-devices .auth-arrow { padding: 0 26px; }
-.auth-devices .auth-arrow svg { width: 44px; height: 54px; stroke-width: 1.6; }
+.auth-hero, .auth-lede { text-align: center; }
+.auth-lede { margin-left: auto !important; margin-right: auto; }
+.auth-cycle { display: block; width: 100%; max-width: 640px; height: auto; margin: 16px auto 0; overflow: visible; }
+.auth-cycle .cycle-arcs path { fill: none; stroke: var(--auth-accent); stroke-width: 2.2; stroke-linecap: round; marker-end: url(#cycleHead); }
+.auth-cycle marker path { fill: none; stroke: var(--auth-accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.auth-cycle .cycle-icon { fill: none; stroke: var(--auth-accent); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
+.auth-cycle text { fill: var(--auth-text); font-family: "Montserrat", var(--font); font-size: 19px; font-weight: 500; text-anchor: middle; }
 .auth-punch { margin: 34px 0 0; font-size: 1.5rem; line-height: 1.45; }
 .auth-punch strong { display: block; font-size: 1.6875rem; font-weight: 700; }
 
@@ -656,20 +658,15 @@ body.signed-out { background: var(--auth-bg); }
   .auth-pitch { padding-left: 22px; padding-top: 16px; }
   .auth-hero { font-size: 3.6rem; line-height: 1.06; }
   .auth-lede { margin-top: 26px; max-width: 680px; font-size: 1.625rem; }
-  .auth-devices { margin-top: 48px; padding-left: 36px; }
-  .auth-devices li { font-size: 1.375rem; gap: 8px; }
-  .auth-devices svg { width: 62px; height: 62px; }
-  .auth-devices .auth-arrow { padding: 0 30px; }
-  .auth-devices .auth-arrow svg { width: 48px; height: 62px; }
-  .auth-punch { margin-top: 38px; font-size: 1.625rem; }
+  .auth-punch { margin-top: 26px; font-size: 1.625rem; }
   .auth-punch strong { font-size: 1.875rem; }
-  .auth-plans { gap: 22px; margin-top: 44px; }
-  .plan-card { padding: 28px 16px 36px 30px; border-radius: 14px; }
+  .auth-plans { gap: 22px; margin-top: 30px; }
+  .plan-card { padding: 24px 16px 28px 30px; border-radius: 14px; }
   .plan-name { font-size: 1.75rem; }
   .plan-price { margin-top: 16px; font-size: 2.5rem; }
   .plan-per { font-size: 1.5rem; }
   .plan-blurb { margin-top: 14px; font-size: 1.3rem; }
-  .plan-list { gap: 13px; margin-top: 26px; font-size: 1.15rem; }
+  .plan-list { gap: 11px; margin-top: 22px; font-size: 1.15rem; }
   .plan-list li { gap: 16px; }
   .auth-card { padding: 44px 36px 46px 42px; border-radius: 22px; }
   .auth-kicker { font-size: 1.125rem; margin-bottom: 14px; }
@@ -693,8 +690,6 @@ body.signed-out { background: var(--auth-bg); }
   .auth-hero { font-size: clamp(2.5rem, 4.9vw, 3.65rem); }
   .auth-lede, .auth-punch { font-size: clamp(1.125rem, 1.9vw, 1.3125rem); }
   .auth-punch strong { font-size: clamp(1.25rem, 2.1vw, 1.6rem); }
-  .auth-devices { padding-left: 0; flex-wrap: wrap; }
-  .auth-devices .auth-arrow { padding: 0 clamp(4px, 1vw, 16px); }
   .plan-list, .plan-blurb, .plan-price { white-space: normal; }
   .plan-card { padding: 20px 12px 24px 20px; }
   .plan-price { font-size: clamp(1.6rem, 2.7vw, 2.2rem); }
@@ -704,6 +699,8 @@ body.signed-out { background: var(--auth-bg); }
 /* Phones: pitch, then sign-in, then plans side by side. */
 @media (max-width: 860px) {
   .only-wide { display: none !important; }
+  .auth-hero, .auth-lede { text-align: left; }
+  .auth-lede { margin-left: 0 !important; }
   .only-narrow { display: revert !important; }
   .plan-list .only-narrow, .plan-price .only-narrow { display: inline !important; }
   .auth-page { padding: max(14px, env(safe-area-inset-top)) max(21px, env(safe-area-inset-right)) max(26px, env(safe-area-inset-bottom)) max(21px, env(safe-area-inset-left)); }

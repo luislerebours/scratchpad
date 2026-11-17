@@ -163,6 +163,8 @@ function enterViewOnly() {
   pad.contentEditable = 'false';
   if (document.activeElement === pad) pad.blur();
   renderConnectionLabel();
+  // Said once as it happens; again only if they try to type.
+  offlineNotice();
 }
 
 function exitViewOnly() {
@@ -194,8 +196,13 @@ async function confirmOffline() {
 // Changes need the server: offline, say why and do nothing.
 function blockedOffline() {
   if (!viewOnly) return false;
-  showToast('You’re offline: view only until you reconnect', { duration: 2600 });
+  offlineNotice();
   return true;
+}
+
+const OFFLINE_NOTICE = 'You’re offline. Reconnect to edit.';
+function offlineNotice() {
+  showToast(OFFLINE_NOTICE, { duration: 2600 });
 }
 
 function renderConnectionLabel() {
@@ -1342,8 +1349,17 @@ function sortFiles(fileList) {
   };
 }
 
-// Tapping the text while offline explains why it can't be edited.
-pad.addEventListener('pointerdown', () => { if (viewOnly) blockedOffline(); });
+// Trying to type while offline says why it can't be edited: a tap on the text
+// (not a scroll or a text selection to copy), or a typed key.
+pad.addEventListener('click', () => {
+  if (viewOnly && getSelection().isCollapsed) blockedOffline();
+});
+document.addEventListener('keydown', e => {
+  if (!viewOnly || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key.length !== 1 && e.key !== 'Enter' && e.key !== 'Backspace') return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  blockedOffline();
+});
 
 pad.addEventListener('paste', e => {
   if (viewOnly) {

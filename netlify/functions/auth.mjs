@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
-  DEACTIVATED, MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
+  DEACTIVATED, MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, json, notifySync,
   makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, userStore, validEmail, verify
 } from '../lib/auth.mjs';
 import { wipeSheet } from '../lib/files.mjs';
@@ -67,7 +67,6 @@ async function checkSecret(user, body) {
 async function signedIn(user, body = {}) {
   return json({
     email: user.email,
-    admin: isAdmin(user),
     keyring: user.keyring || null,
     locked: Boolean(user.keyring) && !user.migratedAt ? 'migrating' : user.keyring ? 'on' : 'off',
     // Whether files and images uploaded before their types were locked have been done.
@@ -196,7 +195,6 @@ export default withErrors('auth', async (req, context) => {
     const auth = await requireUser(req);
     if (auth.error) return auth.error;
     const { user, ns } = auth;
-    if (isAdmin(user) || !ns) return json({ error: 'The owner account can’t be deleted from here.' }, 403);
     const ek = emailKey(user.email);
     if (!(await allow(`delete-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
     // 400, not 401: a 401 would send the page back to sign-in.
@@ -318,16 +316,8 @@ export default withErrors('auth', async (req, context) => {
       if (body.startOver) Object.assign(user, { migratedAt: Date.now(), typesSealedAt: Date.now() });
     } else {
       const uid = randomBytes(8).toString('hex');
-      let ns = uid;
-      const owner = normalizeEmail(env('OWNER_EMAIL'));
-      if (owner && owner === pass.email) {
-        const { modified } = await store.set('legacy-owner', pass.ek, { onlyIfNew: true });
-        if (modified) ns = '';
-      }
-      user = { uid, ns, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: ns ? Date.now() : undefined, typesSealedAt: Date.now(), version: 1, createdAt: Date.now(), plan: env('NEW_ACCOUNT_PLAN') === 'pro' ? 'pro' : 'free' };
       // New accounts start on Free (NEW_ACCOUNT_PLAN=pro is for local testing only).
-      // The owner's account takes over the data from before accounts: that still needs locking.
-      if (!ns) delete user.migratedAt;
+      user = { uid, ns: uid, email: pass.email, hash, salt, authV: 2, keyring, migratedAt: Date.now(), typesSealedAt: Date.now(), version: 1, createdAt: Date.now(), plan: env('NEW_ACCOUNT_PLAN') === 'pro' ? 'pro' : 'free' };
     }
     user = withSignIn(user);
     await store.setJSON(`users/${pass.ek}`, user);

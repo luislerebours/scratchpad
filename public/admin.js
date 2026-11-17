@@ -334,7 +334,6 @@ function billingText(a) {
 function accountRow(a) {
   const tags = [
     a.disabledAt ? h('span', { class: 'ad-tag ad-tag-danger', text: 'Deactivated' }) : null,
-    a.legacyAdmin ? h('span', { class: 'ad-tag ad-tag-warn', text: 'Legacy admin' }) : null,
     a.originalData ? h('span', { class: 'ad-tag', text: 'Original data' }) : null
   ];
   return h('tr', { class: a.disabledAt ? 'ad-row-off' : null },
@@ -391,7 +390,6 @@ function fillAccount(a) {
     ...fact('Last sign-in', fmtTime(a.lastLoginAt)),
     ...fact('Last seen', fmtTime(a.lastSeenAt)),
     ...fact('Sign-ins', String(a.loginCount ?? '—')),
-    ...(a.legacyAdmin ? fact('Note', 'Legacy admin account (OWNER_EMAIL). Retire it once this dashboard works for you.') : []),
     ...(a.originalData ? fact('Data', 'Holds the original data from before accounts') : [])
   );
   $('planSelect').value = a.plan;
@@ -451,7 +449,6 @@ $('deactivateBtn').addEventListener('click', async e => {
       h('li', { text: 'turns off its share links (they stay off after reactivating).' }))
   ];
   if (a.paying) body.push(h('p', { class: 'ad-warn', text: 'This account has an active Stripe subscription. Deactivating doesn’t cancel it: cancel or refund it in Stripe if needed.' }));
-  if (a.legacyAdmin) body.push(h('p', { class: 'ad-warn', text: 'This is the legacy admin account. Make sure you can sign in to this dashboard first: after this, its owner can’t open its sheets until it’s reactivated.' }));
   const result = await confirmBox({ title: `Deactivate ${a.email}?`, body, ok: 'Deactivate', reason: true, typeToConfirm: a.email });
   if (result) accountOp(button, 'deactivate', { reason: result.reason }, 'Account deactivated');
 });
@@ -703,7 +700,7 @@ const SERVICE_LABELS = {
   stripeWebhook: ['Stripe webhook secret', v => (v ? 'set' : 'not set')],
   email: ['Sign-in email (Resend)', v => (v ? 'set up' : 'not set up')],
   sync: ['Real-time sync relay', v => (v ? 'set up' : 'off (devices check every 2 s)')],
-  legacyOwnerEmail: ['Legacy OWNER_EMAIL', v => (v ? 'still set: remove it once the legacy admin is retired' : 'not set')],
+  legacyOwnerEmail: ['OWNER_EMAIL', v => (v ? 'still set but no longer used: you can remove it' : 'not set (not needed)')],
   setupToken: ['ADMIN_SETUP_TOKEN', v => (v ? 'set: no longer needed after the first admin, you can remove it' : 'not set')]
 };
 

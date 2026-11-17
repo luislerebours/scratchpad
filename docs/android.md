@@ -98,13 +98,9 @@ again right before submitting.
   (`public/delete-account.html`): the in-app steps, what's deleted and kept,
   and email to support for people who can't sign in (support deletes it from
   the admin dashboard: Accounts → Delete account…).
-- **Data safety form:** email address (account, security notices), purchase
-  history (Stripe), app activity (sign-in times, for the admin view); content
-  is end-to-end encrypted and not readable by us; data is encrypted in
-  transit; people can delete their data.
-- Content rating questionnaire, target audience (not under 13), app access
-  instructions for review (a test account; it's Free unless set to Pro from
-  the admin dashboard).
+- **Data safety, content rating, target audience (13 and older), ads, app
+  access:** answers ready in `docs/play-console-answers.md`. The reviewer
+  account is made on the live site at submission time.
 
 ## Steps
 

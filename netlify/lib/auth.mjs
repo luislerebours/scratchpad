@@ -189,14 +189,38 @@ export const hashCode = (code, key) => createHash('sha256').update(`${key}:${cod
 
 // ---- Rate limits (approximate; fine at this scale) ----
 
+// Counters are stored under a hash of their key (an email, an IP address), so
+// neither is kept readable, and counters untouched for a day are cleared now
+// and then, so an IP address is only kept briefly.
+const RATE_KEEP_MS = 24 * 60 * 60 * 1000;
+const rateKey = key => `rate/${createHash('sha256').update(String(key)).digest('hex')}`;
+
 export async function allow(key, limit, windowMs) {
   const store = authStore();
   const now = Date.now();
-  const recent = ((await store.get(`rate/${key}`, { type: 'json' })) || []).filter(t => now - t < windowMs);
+  const recent = ((await store.get(rateKey(key), { type: 'json' })) || []).filter(t => now - t < windowMs);
   if (recent.length >= limit) return false;
   recent.push(now);
-  await store.setJSON(`rate/${key}`, recent);
+  await store.setJSON(rateKey(key), recent);
+  if (Math.random() < 0.05) pruneRates().catch(err => console.error('Clearing old rate counters', err.message));
   return true;
+}
+
+// Deletes counters (and any from before hashing) with nothing in the last day.
+export async function pruneRates({ max = 300 } = {}) {
+  const store = authStore();
+  // Listed in full, then filtered (the local test store ignores list prefixes).
+  const { blobs } = await store.list();
+  const now = Date.now();
+  let cleared = 0;
+  for (const { key } of blobs.filter(b => b.key.startsWith('rate/')).slice(0, max)) {
+    const times = (await store.get(key, { type: 'json' }).catch(() => null)) || [];
+    if (!Array.isArray(times) || times.every(t => now - t > RATE_KEEP_MS)) {
+      await store.delete(key);
+      cleared++;
+    }
+  }
+  return cleared;
 }
 
 // ---- Sessions ----

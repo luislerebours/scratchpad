@@ -617,6 +617,10 @@ body.signed-out { background: var(--auth-bg); }
 .plan-name { margin: 0; font-size: 1.5rem; font-weight: 700; line-height: 1.15; }
 .plan-price { margin: 12px 0 0; font-size: 2.2rem; font-weight: 700; line-height: 1.05; white-space: nowrap; }
 .plan-per { font-size: 1.3rem; font-weight: 500; }
+.plan-alt { margin: 10px 0 0; color: var(--auth-text); font-size: 1.125rem; font-weight: 600; white-space: nowrap; }
+.plan-alt strong { font-weight: 700; }
+.plan-or { color: var(--auth-soft); font-weight: 500; }
+.plan-save { color: var(--auth-accent); font-weight: 700; }
 .plan-blurb { margin: 10px 0 0; color: var(--auth-text); font-size: 1.125rem; white-space: nowrap; }
 .plan-list { display: grid; gap: 9px; margin: 22px 0 0; padding: 0; list-style: none; font-size: 1.02rem; line-height: 1.4; white-space: nowrap; }
 .plan-list li { display: flex; align-items: center; gap: 16px; }
@@ -665,6 +669,7 @@ body.signed-out { background: var(--auth-bg); }
   .plan-name { font-size: 1.75rem; }
   .plan-price { margin-top: 16px; font-size: 2.5rem; }
   .plan-per { font-size: 1.5rem; }
+  .plan-alt { margin-top: 12px; font-size: 1.3rem; }
   .plan-blurb { margin-top: 14px; font-size: 1.3rem; }
   .plan-list { gap: 11px; margin-top: 22px; font-size: 1.15rem; }
   .plan-list li { gap: 16px; }
@@ -690,7 +695,8 @@ body.signed-out { background: var(--auth-bg); }
   .auth-hero { font-size: clamp(2.5rem, 4.9vw, 3.65rem); }
   .auth-lede, .auth-punch { font-size: clamp(1.125rem, 1.9vw, 1.3125rem); }
   .auth-punch strong { font-size: clamp(1.25rem, 2.1vw, 1.6rem); }
-  .plan-list, .plan-blurb, .plan-price { white-space: normal; }
+  .plan-list, .plan-blurb, .plan-price, .plan-alt { white-space: normal; }
+  .plan-alt { font-size: clamp(.9375rem, 1.5vw, 1.125rem); }
   .plan-card { padding: 20px 12px 24px 20px; }
   .plan-price { font-size: clamp(1.6rem, 2.7vw, 2.2rem); }
   .plan-per { font-size: clamp(1rem, 1.5vw, 1.3rem); }
@@ -699,6 +705,7 @@ body.signed-out { background: var(--auth-bg); }
 /* Phones: pitch, then sign-in, then plans side by side. */
 @media (max-width: 860px) {
   .only-wide { display: none !important; }
+  .plan-alt { margin-top: 4px; font-size: .875rem; }
   .auth-hero, .auth-lede { text-align: left; }
   .auth-lede { margin-left: 0 !important; }
   .only-narrow { display: revert !important; }
@@ -805,6 +812,7 @@ body.signed-out { background: var(--auth-bg); }
   .plan-card { padding: 12px 8px 14px 12px; }
   .plan-price { font-size: 1.3rem; }
   .plan-list { white-space: normal; font-size: .8125rem; }
+  .plan-alt { font-size: .8125rem; }
   .plan-list li { gap: 8px; }
   .plan-list svg { width: 16px; height: 16px; }
   .auth-hero { font-size: min(2rem, 8vw); }

@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import {
-  MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
+  DEACTIVATED, MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, isAdmin, json, notifySync,
   makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, userStore, validEmail, verify
 } from '../lib/auth.mjs';
 import { wipeSheet } from '../lib/files.mjs';
+import { readSettings } from '../lib/admin.mjs';
+import { withErrors } from '../lib/errors.mjs';
 import { planInfo } from '../lib/plans.mjs';
 import { customerKey, stripe, stripeReady } from '../lib/stripe.mjs';
 import { readShares, sharesStore } from '../lib/shares.mjs';
@@ -102,7 +104,7 @@ async function deleteAccountData(ns) {
   await Promise.all(blobs.map(({ key }) => state.delete(key)));
 }
 
-export default async (req, context) => {
+export default withErrors('auth', async (req, context) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action');
   const store = authStore();
@@ -234,6 +236,10 @@ export default async (req, context) => {
     if (!validEmail(email)) return json({ error: 'Enter a valid email address' }, 400);
     const ek = emailKey(email);
     const ip = context?.ip || 'unknown';
+    // New sign-ups can be paused from the admin dashboard; existing accounts still get codes.
+    if (!(await readSettings()).signupsOpen && !(await store.get(`users/${ek}`))) {
+      return json({ error: 'New sign-ups are paused right now. Please try again later.' }, 403);
+    }
     if (!(await allow(`code-email-${ek}`, 5, HOUR)) || !(await allow(`code-ip-${ip}`, 20, HOUR))) {
       return json({ error: 'Too many codes requested. Try again in an hour.' }, 429);
     }
@@ -262,13 +268,15 @@ export default async (req, context) => {
       return json({ error: 'That code isn’t right.' }, 400);
     }
     await store.delete(`codes/${ek}`);
+    const existingUser = await store.get(`users/${ek}`, { type: 'json' });
+    if (existingUser?.disabledAt) return json({ error: DEACTIVATED }, 403);
     // A single-use pass to choose a password in the next step. An encrypted
     // account also gets its recovery-locked key: only the recovery key opens it.
     const nonce = randomBytes(16).toString('hex');
     const expiresAt = Date.now() + SET_PASSWORD_MS;
     await store.setJSON(`pending/${ek}`, { nonce, expiresAt });
     const token = await sign({ t: 'pw', ek, email, n: nonce, exp: expiresAt });
-    const existing = await store.get(`users/${ek}`, { type: 'json' });
+    const existing = existingUser;
     const recovery = existing?.keyring ? { byRecovery: existing.keyring.byRecovery, recoverySalt: existing.keyring.recoverySalt } : null;
     return json({ token, existing: Boolean(existing), recovery });
   }
@@ -282,6 +290,8 @@ export default async (req, context) => {
     }
     if (!validAuth(body.auth)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
     const existing = await store.get(`users/${pass.ek}`, { type: 'json' });
+    if (existing?.disabledAt) return json({ error: DEACTIVATED }, 403);
+    if (!existing && !(await readSettings()).signupsOpen) return json({ error: 'New sign-ups are paused right now. Please try again later.' }, 403);
     // What the master key will be locked with: a whole new keyring (new
     // account, starting over, or an account from before encryption), or, after
     // the recovery key opened the old one, the same key locked for the new password.
@@ -336,10 +346,11 @@ export default async (req, context) => {
     if ((!user || user.authV !== 2) && !body.password) return json({ legacy: true }, 409);
     const checked = user ? await checkSecret(user, body) : null;
     if (!checked) return json({ error: 'Wrong email or password.' }, 401);
+    if (checked.disabledAt) return json({ error: DEACTIVATED }, 403);
     const updated = withSignIn(checked);
     await store.setJSON(`users/${ek}`, updated);
     return signedIn(updated);
   }
 
   return json({ error: 'Unknown action' }, 400);
-};
+});

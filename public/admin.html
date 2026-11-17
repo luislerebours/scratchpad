@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="robots" content="noindex, nofollow" />
+  <script src="/theme.js"></script>
+  <title>Admin · ScrapSheet</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/assets/favicon.png?v=2" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body class="admin-page">
+  <header class="ad-top">
+    <div class="ad-brand">
+      <img class="mark-dark" data-mark src="/assets/mark.png?v=2" alt="" width="26" height="26" />
+      <img class="mark-light" data-mark src="/assets/mark-light.png?v=2" alt="" width="26" height="26" />
+      <span>ScrapSheet</span><span class="ad-badge">Admin</span>
+    </div>
+    <div class="ad-who" id="who" hidden>
+      <span id="whoName"></span>
+      <button class="ad-btn ad-btn-quiet" id="logoutBtn" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <!-- Before sign-in: one card at a time -->
+  <main class="ad-gate" id="gate">
+    <section class="ad-card" id="loading"><p class="ad-muted">Loading…</p></section>
+
+    <form class="ad-card" id="loginForm" hidden novalidate>
+      <h1>Admin sign-in</h1>
+      <p class="ad-muted">For ScrapSheet administrators. This is separate from ScrapSheet accounts.</p>
+      <label>Email<input id="loginEmail" type="email" autocomplete="username" required /></label>
+      <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required /></label>
+      <label id="loginCodeRow">Authenticator code<input id="loginCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" /></label>
+      <label id="loginRecoveryRow" hidden>Recovery code<input id="loginRecovery" autocomplete="off" spellcheck="false" /></label>
+      <button class="ad-link" id="loginToggle" type="button">Use a recovery code instead</button>
+      <p class="ad-error" role="alert"></p>
+      <button class="ad-btn ad-btn-primary" type="submit">Sign in</button>
+    </form>
+
+    <form class="ad-card" id="setupForm" hidden novalidate>
+      <h1>Set up the first admin</h1>
+      <p class="ad-muted">Enter the setup token from the site’s <code>ADMIN_SETUP_TOKEN</code> setting in Netlify. This works once: after the first admin is set up, more admins are added by invite.</p>
+      <label>Setup token<input id="setupToken" type="password" autocomplete="off" required /></label>
+      <label>Your name<input id="setupName" autocomplete="name" maxlength="80" /></label>
+      <label>Email<input id="setupEmail" type="email" autocomplete="username" required /></label>
+      <label>Password <span class="ad-hint">at least 12 characters</span><input id="setupPassword" type="password" autocomplete="new-password" minlength="12" required /></label>
+      <p class="ad-error" role="alert"></p>
+      <button class="ad-btn ad-btn-primary" type="submit">Continue</button>
+      <button class="ad-link" type="button" data-show="loginForm">Already set up? Sign in</button>
+    </form>
+
+    <form class="ad-card" id="inviteForm" hidden novalidate>
+      <h1>Join as an admin</h1>
+      <p class="ad-muted">You were invited as <strong id="inviteEmail"></strong>. Choose a password, then set up an authenticator app.</p>
+      <label>Your name<input id="inviteName" autocomplete="name" maxlength="80" /></label>
+      <label>Password <span class="ad-hint">at least 12 characters</span><input id="invitePassword" type="password" autocomplete="new-password" minlength="12" required /></label>
+      <p class="ad-error" role="alert"></p>
+      <button class="ad-btn ad-btn-primary" type="submit">Continue</button>
+    </form>
+
+    <form class="ad-card" id="enrollForm" hidden novalidate>
+      <h1>Set up two-step sign-in</h1>
+      <p class="ad-muted">Scan this with an authenticator app (1Password, Google Authenticator, Microsoft Authenticator, Authy…), then enter the 6-digit code it shows.</p>
+      <img class="ad-qr" id="enrollQr" alt="QR code for your authenticator app" width="200" height="200" />
+      <details class="ad-secret"><summary>Can’t scan? Enter this key instead</summary><code id="enrollSecret"></code></details>
+      <label>6-digit code<input id="enrollCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required /></label>
+      <p class="ad-error" role="alert"></p>
+      <button class="ad-btn ad-btn-primary" type="submit">Confirm</button>
+    </form>
+
+    <form class="ad-card" id="recoveryForm" hidden novalidate>
+      <h1>Save your recovery codes</h1>
+      <p class="ad-muted">Each code signs you in once if you lose your authenticator. Keep them somewhere safe, like a password manager. They won’t be shown again.</p>
+      <ol class="ad-codes" id="recoveryCodes"></ol>
+      <div class="ad-row"><button class="ad-btn" id="copyCodes" type="button">Copy codes</button><button class="ad-btn" id="downloadCodes" type="button">Download</button></div>
+      <label class="ad-check"><input id="codesSaved" type="checkbox" /> I’ve saved these codes</label>
+      <button class="ad-btn ad-btn-primary" type="submit">Continue</button>
+    </form>
+
+    <section class="ad-card" id="setupOff" hidden>
+      <h1>Admin sign-in</h1>
+      <p class="ad-muted">No admin has been set up yet. To set one up, add an <code>ADMIN_SETUP_TOKEN</code> environment variable (at least 24 random characters) in Netlify and redeploy, then reload this page.</p>
+    </section>
+  </main>
+
+  <!-- The dashboard -->
+  <div class="ad-shell" id="dash" hidden>
+    <nav class="ad-tabs" role="tablist" aria-label="Admin sections">
+      <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button role="tab" data-tab="accounts">Accounts</button>
+      <button role="tab" data-tab="errors">Errors</button>
+      <button role="tab" data-tab="audit">Audit log</button>
+      <button role="tab" data-tab="admins">Admins</button>
+      <button role="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <section class="ad-panel" id="tab-overview" role="tabpanel">
+      <div class="ad-stats" id="stats"></div>
+      <p class="ad-note">Admins see account details, plans, billing status, storage numbers and activity. Sheet text, names, images and files are end-to-end encrypted and never shown here.</p>
+    </section>
+
+    <section class="ad-panel" id="tab-accounts" role="tabpanel" hidden>
+      <div class="ad-toolbar">
+        <input class="ad-search" id="accountSearch" type="search" placeholder="Search by email" aria-label="Search accounts by email" />
+        <select id="accountFilter" aria-label="Filter accounts">
+          <option value="all">All accounts</option>
+          <option value="free">Free</option>
+          <option value="pro">Pro</option>
+          <option value="paying">Paying</option>
+          <option value="disabled">Deactivated</option>
+        </select>
+        <button class="ad-btn" id="refreshAccounts" type="button">Refresh</button>
+      </div>
+      <div class="ad-table-wrap"><table class="ad-table" id="accountsTable">
+        <thead><tr><th>Account</th><th>Plan</th><th>Billing</th><th>Storage</th><th>Activity</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="ad-panel" id="tab-errors" role="tabpanel" hidden>
+      <div class="ad-toolbar"><p class="ad-muted">Server errors from the last 30 days (no request contents).</p><button class="ad-btn" id="refreshErrors" type="button">Refresh</button><button class="ad-btn" id="clearErrors" type="button">Clear all</button></div>
+      <div class="ad-table-wrap"><table class="ad-table" id="errorsTable">
+        <thead><tr><th>When</th><th>Where</th><th>Status</th><th>Message</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="ad-panel" id="tab-audit" role="tabpanel" hidden>
+      <div class="ad-toolbar"><p class="ad-muted">Every admin sign-in and change, newest first.</p><button class="ad-btn" id="refreshAudit" type="button">Refresh</button></div>
+      <div class="ad-table-wrap"><table class="ad-table" id="auditTable">
+        <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="ad-panel" id="tab-admins" role="tabpanel" hidden>
+      <div class="ad-table-wrap"><table class="ad-table" id="adminsTable">
+        <thead><tr><th>Admin</th><th>Last sign-in</th><th>Recovery codes</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="ad-grid2">
+        <form class="ad-box" id="inviteAdminForm" novalidate>
+          <h2>Invite an admin</h2>
+          <p class="ad-muted">Each admin gets their own sign-in and authenticator. The invite link works once, for 72 hours.</p>
+          <label>Email<input id="inviteAdminEmail" type="email" required /></label>
+          <label>Name<input id="inviteAdminName" maxlength="80" /></label>
+          <p class="ad-error" role="alert"></p>
+          <button class="ad-btn ad-btn-primary" type="submit">Create invite link</button>
+          <div class="ad-invite-out" id="inviteOut" hidden>
+            <p class="ad-muted">Send this link to them privately:</p>
+            <input id="inviteLink" readonly aria-label="Invite link" />
+            <button class="ad-btn" id="copyInvite" type="button">Copy link</button>
+          </div>
+          <div class="ad-pending" id="pendingInvites"></div>
+        </form>
+        <div class="ad-box">
+          <h2>Your sign-in</h2>
+          <form id="myRecoveryForm" novalidate>
+            <label>New recovery codes <span class="ad-hint">the old ones stop working</span><input id="myRecoveryCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="Authenticator code" /></label>
+            <p class="ad-error" role="alert"></p>
+            <button class="ad-btn" type="submit">Make new recovery codes</button>
+          </form>
+          <form id="myPasswordForm" novalidate>
+            <label>Current password<input id="myPassword" type="password" autocomplete="current-password" /></label>
+            <label>New password <span class="ad-hint">at least 12 characters</span><input id="myNewPassword" type="password" autocomplete="new-password" minlength="12" /></label>
+            <label>Authenticator code<input id="myPasswordCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" /></label>
+            <p class="ad-error" role="alert"></p>
+            <button class="ad-btn" type="submit">Change password</button>
+          </form>
+          <form id="myMfaForm" novalidate>
+            <label>New authenticator <span class="ad-hint">lost your phone? set up a new one</span><input id="myMfaPassword" type="password" autocomplete="current-password" placeholder="Your password" /></label>
+            <p class="ad-error" role="alert"></p>
+            <button class="ad-btn" type="submit">Set up a new authenticator</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="ad-panel" id="tab-settings" role="tabpanel" hidden>
+      <div class="ad-grid2">
+        <div class="ad-box">
+          <h2>Sign-ups</h2>
+          <label class="ad-switch"><input id="signupsOpen" type="checkbox" /> <span>Allow new accounts</span></label>
+          <p class="ad-muted">When off, existing accounts still sign in, but nobody can create a new one.</p>
+          <p class="ad-error" role="alert" id="settingsError"></p>
+        </div>
+        <div class="ad-box">
+          <h2>Services</h2>
+          <p class="ad-muted">Whether each service is set up in Netlify’s environment variables. Values are never shown.</p>
+          <ul class="ad-services" id="services"></ul>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- One account: details and actions -->
+  <dialog class="ad-dialog" id="accountDialog" aria-labelledby="accountTitle">
+    <form method="dialog" class="ad-dialog-x"><button class="ad-btn ad-btn-quiet" aria-label="Close">✕</button></form>
+    <h2 id="accountTitle"></h2>
+    <dl class="ad-facts" id="accountFacts"></dl>
+    <div class="ad-actions">
+      <div class="ad-action">
+        <h3>Plan</h3>
+        <div class="ad-row"><select id="planSelect" aria-label="Plan"><option value="free">Free</option><option value="pro">Pro</option></select><button class="ad-btn" id="planSave" type="button">Change plan</button></div>
+        <p class="ad-hint" id="planHint"></p>
+      </div>
+      <div class="ad-action">
+        <h3>Storage limit</h3>
+        <div class="ad-row"><input id="quotaInput" inputmode="decimal" placeholder="Plan default" aria-label="Storage limit in GB" /><span class="ad-muted">GB</span><button class="ad-btn" id="quotaSave" type="button">Save</button></div>
+        <p class="ad-hint">Empty = the plan’s limit · 0 = no limit</p>
+      </div>
+      <div class="ad-action">
+        <h3>Billing</h3>
+        <div class="ad-row"><button class="ad-btn" id="resyncBtn" type="button">Refresh from Stripe</button><a class="ad-btn" id="stripeLink" target="_blank" rel="noopener noreferrer" hidden>Open in Stripe</a></div>
+      </div>
+      <div class="ad-action">
+        <h3>Access</h3>
+        <div class="ad-row"><button class="ad-btn" id="signoutBtn" type="button">Sign out all devices</button><button class="ad-btn ad-btn-danger" id="deactivateBtn" type="button">Deactivate…</button><button class="ad-btn" id="reactivateBtn" type="button" hidden>Reactivate</button></div>
+      </div>
+    </div>
+    <p class="ad-error" role="alert" id="accountError"></p>
+  </dialog>
+
+  <dialog class="ad-dialog ad-dialog-sm" id="confirmDialog" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle"></h2>
+    <div id="confirmBody" class="ad-confirm-body"></div>
+    <label id="confirmReasonRow" hidden>Reason (for the audit log)<input id="confirmReason" maxlength="80" /></label>
+    <label id="confirmTypeRow" hidden><span id="confirmTypeLabel"></span><input id="confirmType" autocomplete="off" spellcheck="false" /></label>
+    <div class="ad-row ad-row-end">
+      <button class="ad-btn" id="confirmCancel" type="button">Cancel</button>
+      <button class="ad-btn ad-btn-danger" id="confirmOk" type="button"></button>
+    </div>
+  </dialog>
+
+  <div class="ad-toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>

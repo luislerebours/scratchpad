@@ -4,6 +4,7 @@ import { SEALED_OVERHEAD, deleteFileForGood, fileStores, publicRecord, readRecor
 import { isSealed, isWrappedKey } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { accountUsage, overQuota } from '../lib/usage.mjs';
+import { withErrors } from '../lib/errors.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
@@ -17,7 +18,7 @@ const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
 const chunkKey = (id, index) => `${id}-${index}`;
 
-export default async req => {
+export default withErrors('files', async req => {
   const auth = await requireUser(req);
   if (auth.error) return auth.error;
   const url = new URL(req.url);
@@ -195,4 +196,4 @@ export default async req => {
   }
 
   return json({ error: 'Method not allowed' }, 405);
-};
+});

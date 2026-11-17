@@ -4,6 +4,7 @@ import { fileStores, publicRecord } from '../lib/files.mjs';
 import { ended, readShareIndex as readIndex, readShares, sharesStore, writeShareIndex as writeIndex } from '../lib/shares.mjs';
 import { readSheets } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
+import { withErrors } from '../lib/errors.mjs';
 
 // Share links: anyone with the link can view and download a file, or a sheet
 // with its text, images and files, until the link expires or is turned off.
@@ -232,8 +233,8 @@ async function visitor(req, url, token) {
   });
 }
 
-export default async req => {
+export default withErrors('share', async req => {
   const url = new URL(req.url);
   const token = url.searchParams.get('t');
   return token === null ? owner(req, url) : visitor(req, url, token);
-};
+});

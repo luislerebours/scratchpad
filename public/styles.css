@@ -287,8 +287,8 @@ body.signed-out .app-shell { display: none; }
 .image-tools-sep { width: 1px; margin: 6px 2px; background: var(--line-strong); }
 
 .pad-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 8px 4px 16px; }
-.attach-link { font-size: .875rem; }
-.attach-link .i { width: 17px; height: 17px; }
+/* Paperclip + file count beside Copy: jumps to the Files section. */
+.attach-btn { font-variant-numeric: tabular-nums; }
 .tips { position: relative; margin-left: auto; }
 .tips summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px; border-radius: var(--r-control); color: var(--faint); font-size: .8125rem; cursor: pointer; }
 .tips summary::-webkit-details-marker { display: none; }
@@ -846,6 +846,8 @@ body.signed-out { background: var(--auth-bg); }
   .pad-toolbar { padding-left: 16px; }
   .ghost-btn span { display: none; }
   .ghost-btn { width: 44px; justify-content: center; padding: 0; }
+  .ghost-btn.attach-btn { width: auto; min-width: 44px; padding: 0 10px; gap: 4px; }
+  .ghost-btn.attach-btn span { display: inline; }
   .sheet-tab { min-width: 0; max-width: 150px; padding: 0 14px; }
 }
 

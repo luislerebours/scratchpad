@@ -2145,7 +2145,10 @@ function renderFiles() {
 function updateAttachLink() {
   const count = currentFiles.length;
   attachLink.hidden = !count;
-  attachText.textContent = `${count} attachment${count === 1 ? '' : 's'}`;
+  attachText.textContent = String(count);
+  const label = `${count} attachment${count === 1 ? '' : 's'}: go to Files`;
+  attachLink.setAttribute('aria-label', label);
+  attachLink.title = label;
 }
 
 attachLink.addEventListener('click', () => {

@@ -972,3 +972,10 @@ body.signed-out { background: var(--auth-bg); }
   .lib-actions .link-btn { padding: 0 8px; }
 }
 
+/* Offline: view only (see "Offline: view only" in app.js). Text stays at full
+   strength; things that add or change show they're off for now. */
+.view-only .add-sheet-btn, .view-only .drop-zone, .view-only #dropZone { opacity: .45; }
+.view-only .editor { cursor: default; }
+.view-only .save-status > .conn .conn-label { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+
+.view-only .save-status[data-state="saved"] #saveStatusText, .view-only .save-status[data-state="loading"] #saveStatusText { display: none; }

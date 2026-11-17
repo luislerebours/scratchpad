@@ -144,7 +144,84 @@ function currentSheetName(sheet = activeSheet) {
 
 // Connection to the server, shown as a quiet dot in the header; words only
 // appear when something is wrong.
+// ---- Offline: view only ----
+// Sync has no merge (the last save wins), so nothing is edited while this
+// device can't reach the server. A blip doesn't count: view-only starts after
+// OFFLINE_GRACE_MS without a connection (at once if the device says it has no
+// network). Words typed just before stay on screen and are saved on return.
+const OFFLINE_GRACE_MS = 3000;
+let viewOnly = false;
+let appStarted = false;
+let offlineTimer = null;
+
+function enterViewOnly() {
+  clearTimeout(offlineTimer);
+  offlineTimer = null;
+  if (viewOnly || !appStarted) return;
+  viewOnly = true;
+  document.body.classList.add('view-only');
+  pad.contentEditable = 'false';
+  if (document.activeElement === pad) pad.blur();
+  renderConnectionLabel();
+}
+
+function exitViewOnly() {
+  clearTimeout(offlineTimer);
+  offlineTimer = null;
+  if (!viewOnly) return;
+  viewOnly = false;
+  document.body.classList.remove('view-only');
+  // Words typed just before the connection dropped are saved first.
+  if ((saveTimer || saveStateName === 'failed' || saveStateName === 'unsaved') && !saving) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    saveState(activeSheet);
+  }
+  if (!pad.classList.contains('is-loading')) pad.contentEditable = 'true';
+  renderConnectionLabel();
+}
+
+// Still no connection after the grace period? Ask the server once more before
+// locking (one failed request elsewhere isn't being offline).
+async function confirmOffline() {
+  offlineTimer = null;
+  if (viewOnly || !appStarted) return;
+  const r = await rawFetch(`${API_CHECK}?sheet=${activeSheet}`, { cache: 'no-store' }).catch(() => null);
+  if (r?.ok) setConnection('live');
+  else if (statusEl.dataset.state !== 'live') enterViewOnly();
+}
+
+// Changes need the server: offline, say why and do nothing.
+function blockedOffline() {
+  if (!viewOnly) return false;
+  showToast('You’re offline: view only until you reconnect', { duration: 2600 });
+  return true;
+}
+
+function renderConnectionLabel() {
+  const state = statusEl.dataset.state;
+  const label = state === 'live' ? 'Connected' : state === 'offline' ? (viewOnly ? 'Offline · view only' : 'Offline') : 'Connecting…';
+  statusEl.title = state === 'live' ? 'Connected: changes sync across your devices' : viewOnly ? 'Offline: view only until you’re connected again' : label;
+  statusEl.querySelector('.conn-label').textContent = label;
+}
+
+window.addEventListener('offline', () => {
+  setConnection('offline');
+  enterViewOnly();
+});
+window.addEventListener('online', () => { if (appStarted) checkForChanges(); });
+
 function setConnection(state) {
+  if (state === 'offline' && appStarted && !viewOnly && !offlineTimer) offlineTimer = setTimeout(confirmOffline, OFFLINE_GRACE_MS);
+  if (state === 'live') {
+    clearTimeout(offlineTimer);
+    offlineTimer = null;
+    if (viewOnly) {
+      statusEl.dataset.state = state;
+      exitViewOnly();
+      return;
+    }
+  }
   if (statusEl.dataset.state === state) return;
   const wasOffline = statusEl.dataset.state === 'offline';
   statusEl.dataset.state = state;
@@ -154,9 +231,7 @@ function setConnection(state) {
       if (saveStateName === 'failed' && !saving && !saveTimer) saveState(activeSheet);
     }, 0);
   }
-  const label = state === 'live' ? 'Connected' : state === 'offline' ? 'Offline' : 'Connecting…';
-  statusEl.title = state === 'live' ? 'Connected: changes sync across your devices' : label;
-  statusEl.querySelector('.conn-label').textContent = label;
+  renderConnectionLabel();
 }
 
 // Save state of the open sheet, shown in the editor toolbar beside the
@@ -827,6 +902,9 @@ async function saveState(sheet = activeSheet) {
       setSaveState(saveTimer ? 'unsaved' : 'saved');
     }
   } catch (err) {
+    // A save that can't reach the server counts as being offline (view only
+    // follows if it lasts); one the server refused doesn't.
+    if (err instanceof TypeError) setConnection('offline');
     if (targetSheet === activeSheet && !saveTimer) setSaveState('failed');
   } finally {
     saving = false;
@@ -869,6 +947,7 @@ copyBtn.addEventListener('click', async () => {
 
 // Clearing empties the text and images; the sheet and its files stay.
 function confirmClearSheet() {
+  if (blockedOffline()) return;
   const name = currentSheetName();
   if (editorIsEmpty()) {
     showToast(`${name} is already empty`);
@@ -1263,7 +1342,15 @@ function sortFiles(fileList) {
   };
 }
 
+// Tapping the text while offline explains why it can't be edited.
+pad.addEventListener('pointerdown', () => { if (viewOnly) blockedOffline(); });
+
 pad.addEventListener('paste', e => {
+  if (viewOnly) {
+    e.preventDefault();
+    blockedOffline();
+    return;
+  }
   const data = e.clipboardData;
   if (!data) return;
   const { images, others } = sortFiles(data.files);
@@ -1302,6 +1389,11 @@ pad.addEventListener('dragover', e => {
 });
 
 pad.addEventListener('drop', e => {
+  if (viewOnly) {
+    e.preventDefault();
+    blockedOffline();
+    return;
+  }
   const { images, others } = sortFiles(e.dataTransfer?.files);
   if (!images.length && !others.length) return;
   e.preventDefault();
@@ -1503,7 +1595,7 @@ async function switchSheet(nextSheet, { remember = true, force = false } = {}) {
   }
   if (nextSheet !== activeSheet) return;
   pad.classList.remove('is-loading');
-  pad.contentEditable = 'true';
+  pad.contentEditable = viewOnly ? 'false' : 'true';
   scheduleTabStatus();
 }
 
@@ -1539,6 +1631,7 @@ sheetTabsEl.addEventListener('dblclick', e => {
 });
 
 addSheetBtn.addEventListener('click', () => {
+  if (blockedOffline()) return;
   if (sheets.length >= myPlan().sheets && myPlan().sheets < MAX_SHEETS) {
     showUpgrade('The Free plan has 1 sheet.');
     return;
@@ -1588,6 +1681,7 @@ async function addSheet(purge) {
 
 // From the sheet menu (••• in the editor toolbar).
 function confirmDeleteSheet() {
+  if (blockedOffline()) return;
   const sheet = activeSheet;
   const name = currentSheetName(sheet);
   closeRenameModal();
@@ -1620,6 +1714,7 @@ function confirmDeleteSheet() {
 }
 
 function openRenameModal() {
+  if (blockedOffline()) return;
   rememberFocus('rename');
   renameInput.value = currentSheetName();
   renameModal.hidden = false;
@@ -2577,6 +2672,11 @@ document.addEventListener('pointerdown', e => {
 });
 
 function swipeDelete(row) {
+  if (viewOnly) {
+    setRowOffset(row, 0);
+    blockedOffline();
+    return;
+  }
   const file = fileIndex.get(row.dataset.id);
   if (!file || pendingDeletes.has(file.id)) return;
   if (row === openSwipeRow) openSwipeRow = null;
@@ -2629,6 +2729,7 @@ function flushFileDeletes() {
 window.addEventListener('pagehide', flushFileDeletes);
 
 async function toggleKeep(file) {
+  if (blockedOffline()) return;
   try {
     await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
     showToast(file.kept ? 'Reminders back on for this file' : 'Kept: no more reminders about this file');
@@ -2640,6 +2741,7 @@ async function toggleKeep(file) {
 }
 
 function confirmDeleteFile(file) {
+  if (blockedOffline()) return;
   openSheet({
     title: 'Delete this file?',
     text: `It moves to Recently Deleted on every device. You can restore it for 30 days.`,
@@ -2861,6 +2963,7 @@ bulkShareBtn.addEventListener('click', () => {
 });
 
 bulkDeleteBtn.addEventListener('click', () => {
+  if (blockedOffline()) return;
   const files = selectedFiles();
   if (!files.length) return;
   const sheetName = currentSheetName(files[0].sheet);
@@ -3069,6 +3172,7 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
 }
 
 async function uploadFiles(files, targetSheet = activeSheet) {
+  if (blockedOffline()) return;
   fileInput.value = '';
   if (!hasSheet(targetSheet)) return;
   const queue = [];
@@ -3105,7 +3209,7 @@ async function uploadFiles(files, targetSheet = activeSheet) {
   }
 }
 
-uploadBtn.addEventListener('click', () => fileInput.click());
+uploadBtn.addEventListener('click', () => { if (!blockedOffline()) fileInput.click(); });
 fileInput.addEventListener('change', () => uploadFiles([...fileInput.files]));
 
 // Dragging files from the computer: the files section becomes a drop target
@@ -3619,6 +3723,7 @@ async function restoreSheet(id, { open = true } = {}) {
 }
 
 async function restoreFiles(files) {
+  if (blockedOffline()) return;
   const results = await Promise.all(files.map(f => trashPost({ action: 'restore-file', sheet: f.sheet, id: f.id }).then(() => true, () => false)));
   await Promise.all([...new Set(files.map(f => f.sheet))].map(refreshFilesFor));
   const failed = results.filter(ok => !ok).length;
@@ -3627,6 +3732,7 @@ async function restoreFiles(files) {
 }
 
 trashBody.addEventListener('click', async e => {
+  if (e.target.closest('button') && blockedOffline()) return;
   const btn = e.target.closest('button');
   if (!btn || !trashData) return;
   const fileAt = i => trashData.files[Number(i)];
@@ -3667,6 +3773,7 @@ trashBody.addEventListener('click', async e => {
 });
 
 trashEmptyBtn.addEventListener('click', () => {
+  if (blockedOffline()) return;
   const n = (trashData?.sheets?.length || 0) + (trashData?.files?.length || 0);
   openSheet({
     title: 'Empty Recently Deleted?',
@@ -3787,6 +3894,7 @@ function segHtml(selected) {
 }
 
 async function openShare(target) {
+  if (blockedOffline()) return;
   if (!myPlan().share) {
     showUpgrade('Share links are part of Pro.');
     return;
@@ -4353,7 +4461,6 @@ function offerProIfChosen() {
 // ---- Account ----
 
 const rawFetch = window.fetch.bind(window);
-let appStarted = false;
 
 // Signed out elsewhere ("sign out everywhere", a password reset): back to sign-in.
 window.fetch = async (...args) => {
@@ -5202,9 +5309,10 @@ async function startApp() {
   if (locking) lockTheRest().then(() => { if (account.locked === 'on') sealOldTypes(); });
   else if (masterKey && account.locked === 'on' && !account.typesSealed) sealOldTypes();
   connectSync();
-  // Every 2 seconds while the relay is down; once a minute as a safety net otherwise.
+  // Every 2 seconds while the relay is down or this device is offline (view
+  // only); once a minute as a safety net otherwise.
   setInterval(() => {
-    if (!socketHealthy || Date.now() - lastCheckAt > SAFETY_CHECK_MS) checkForChanges();
+    if (!socketHealthy || viewOnly || Date.now() - lastCheckAt > SAFETY_CHECK_MS) checkForChanges();
   }, POLL_MS);
 }
 

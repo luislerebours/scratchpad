@@ -678,14 +678,25 @@ body.signed-out { background: var(--auth-bg); }
 .auth-legal a { color: var(--auth-text); text-decoration: underline; text-underline-offset: 3px; }
 @media (hover: hover) { .auth-legal a:hover { color: var(--auth-accent); } }
 .auth-secure { display: flex; align-items: center; gap: 12px; margin: 22px 0 0; color: var(--auth-text); font-size: .875rem; line-height: 1.45; text-align: left; }
-.auth-secure svg { flex: 0 0 auto; width: 22px; height: 22px; fill: none; stroke: var(--auth-accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.auth-secure > svg { flex: 0 0 auto; width: 22px; height: 22px; fill: none; stroke: var(--auth-accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 /* Bottom of the sign-in card on desktop: why ScrapSheet, pinned to the bottom
    so the card never looks empty whatever its height. */
 .auth-perks { display: grid; gap: 10px; margin: auto 0 0; padding: 18px 0 0; border-top: 1px solid var(--auth-line); list-style: none; }
 .auth-card > .auth-step { margin-bottom: 22px; }
 .auth-perks li { display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start; color: var(--auth-text); font-size: .9375rem; line-height: 1.38; }
 .auth-perks strong { font-weight: 700; }
-.auth-perks svg { width: 24px; height: 24px; margin-top: 1px; fill: none; stroke: var(--auth-accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* "AES-256 (i)": opens a small box (hover on desktop, tap or keyboard anywhere) */
+.tip-term { display: inline-flex; align-items: center; gap: 3px; margin: 0; padding: 0; border: 0; background: none; font: inherit; font-weight: 700; color: var(--auth-accent); text-decoration: underline dotted; text-decoration-thickness: 1.5px; text-underline-offset: 3px; cursor: pointer; -webkit-tap-highlight-color: transparent; vertical-align: baseline; }
+.tip-term svg { width: 1.05em; height: 1.05em; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.tip-term:focus-visible { outline: 2px solid var(--auth-accent); outline-offset: 2px; border-radius: 4px; }
+.tip-pop { position: fixed; z-index: 60; width: min(300px, calc(100vw - 32px)); padding: 14px 16px; border: 1px solid var(--auth-line); border-radius: 12px; background: var(--auth-input); color: var(--auth-text); box-shadow: var(--shadow-menu); font-size: .875rem; line-height: 1.45; text-align: left; }
+.tip-pop[hidden] { display: none; }
+.tip-pop strong { display: block; margin-bottom: 4px; font-weight: 700; }
+.tip-pop p { margin: 0; color: var(--auth-soft); }
+.tip-pop::after { content: ""; position: absolute; left: calc(var(--arrow-x, 50%) - 7px); width: 12px; height: 12px; background: var(--auth-input); border: 1px solid var(--auth-line); transform: rotate(45deg); }
+.tip-pop[data-side="top"]::after { bottom: -7px; border-top: 0; border-left: 0; }
+.tip-pop[data-side="bottom"]::after { top: -7px; border-bottom: 0; border-right: 0; }
+.auth-perks li > svg { width: 24px; height: 24px; margin-top: 1px; fill: none; stroke: var(--auth-accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Big screens: the full-size layout of the design (wider page, larger type). */
 @media (min-width: 1440px) {

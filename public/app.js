@@ -5049,6 +5049,77 @@ function flipTheme() {
 }
 brandBtn.addEventListener('click', flipTheme);
 authThemeBtn.addEventListener('click', flipTheme);
+
+// ---- "AES-256 (i)" on the sign-in page ----
+// A small box beside the term: hovering shows it on desktop; a tap or click
+// (or Enter/Space) opens it anywhere and keeps it open until a tap elsewhere,
+// another tap on the term, or Escape.
+const tipPop = document.querySelector('#aesTip');
+let tipFor = null;
+let tipPinned = false;
+let tipHideTimer = null;
+const canHover = () => matchMedia('(hover: hover)').matches;
+
+function placeTip() {
+  if (!tipFor) return;
+  const r = tipFor.getBoundingClientRect();
+  const w = tipPop.offsetWidth;
+  const h = tipPop.offsetHeight;
+  const margin = 16;
+  const gap = 12;
+  const left = Math.min(Math.max(margin, r.left + r.width / 2 - w / 2), innerWidth - margin - w);
+  const above = r.top - gap - h >= margin;
+  tipPop.dataset.side = above ? 'top' : 'bottom';
+  tipPop.style.left = `${left}px`;
+  tipPop.style.top = `${above ? r.top - gap - h : r.bottom + gap}px`;
+  tipPop.style.setProperty('--arrow-x', `${Math.min(w - 18, Math.max(18, r.left + r.width / 2 - left))}px`);
+}
+
+function showTip(btn, pin) {
+  clearTimeout(tipHideTimer);
+  if (tipFor && tipFor !== btn) tipFor.setAttribute('aria-expanded', 'false');
+  tipFor = btn;
+  tipPinned = pin || tipPinned;
+  btn.setAttribute('aria-expanded', 'true');
+  tipPop.hidden = false;
+  placeTip();
+}
+
+function hideTip() {
+  clearTimeout(tipHideTimer);
+  if (!tipFor) return;
+  tipFor.setAttribute('aria-expanded', 'false');
+  tipFor = null;
+  tipPinned = false;
+  tipPop.hidden = true;
+}
+
+// Hover: a short delay, so the pointer can move from the term onto the box.
+const hideTipSoon = () => {
+  clearTimeout(tipHideTimer);
+  if (!tipPinned) tipHideTimer = setTimeout(hideTip, 180);
+};
+
+for (const btn of document.querySelectorAll('.tip-term')) {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (tipFor === btn && tipPinned) hideTip();
+    else showTip(btn, true);
+  });
+  btn.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse' && canHover()) showTip(btn, false); });
+  btn.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideTipSoon(); });
+}
+tipPop.addEventListener('pointerenter', () => clearTimeout(tipHideTimer));
+tipPop.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideTipSoon(); });
+document.addEventListener('click', e => { if (tipFor && !tipPop.contains(e.target)) hideTip(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !tipFor) return;
+  const btn = tipFor;
+  hideTip();
+  btn.focus();
+});
+addEventListener('resize', placeTip);
+addEventListener('scroll', placeTip, { passive: true, capture: true });
 brandBtn.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();

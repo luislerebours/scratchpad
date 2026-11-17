@@ -1946,6 +1946,9 @@ function createTransfer(name, verb, total, items = null, { note = '' } = {}) {
     waiting(why) {
       meta.textContent = why === 'offline' ? 'Waiting for a connection… · continues by itself' : 'Paused while ScrapSheet was in the background · continuing…';
     },
+    setTotal(n) {
+      total = n;
+    },
     status(text) {
       meta.textContent = text;
     },
@@ -2634,20 +2637,26 @@ function openImageViewer(img) {
 }
 
 // Downloads an image's untouched original (in chunks, with progress) and saves it.
-async function saveOriginalImage(src) {
+// What it takes to download a pasted image's untouched original (its chunks, unlocked here).
+async function originalImage(src) {
   const params = new URL(src, location.origin).searchParams;
   const sheet = validSheet(params.get('sheet'));
   const id = encodeURIComponent(params.get('id') || '');
+  const r = await fetch(imageUrl(sheet, `id=${id}&info=1`), { cache:'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const info = await r.json();
+  const cryptoKey = info.enc ? await keyForSheet(sheet) : null;
+  if (info.enc) info.type = await vault.decryptText(cryptoKey, info.type);
+  const ext = (info.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+  return { name: `image.${ext}`, ext, type: info.type, size: info.size, chunks: info.chunks, sheet, enc: info.enc, cryptoKey, chunkUrl: i => imageUrl(sheet, `id=${id}&chunk=${i}`) };
+}
+
+async function saveOriginalImage(src) {
   try {
-    const r = await fetch(imageUrl(sheet, `id=${id}&info=1`), { cache:'no-store' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const info = await r.json();
-    if (info.enc) info.type = await vault.decryptText(await keyForSheet(sheet), info.type);
-    const ext = ((info.type.split('/')[1] || 'png').replace('jpeg', 'jpg'));
+    const file = await originalImage(src);
     const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
-    const name = `ScrapSheet image ${stamp}.${ext}`;
-    const file = { name, type: info.type, size: info.size, chunks: info.chunks, sheet, enc: info.enc, cryptoKey: info.enc ? await keyForSheet(sheet) : null, chunkUrl: i => imageUrl(sheet, `id=${id}&chunk=${i}`) };
-    const transfer = createTransfer(name, 'Downloading original', info.size);
+    const name = file.name = `ScrapSheet image ${stamp}.${file.ext}`;
+    const transfer = createTransfer(name, 'Downloading original', file.size);
     transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
     try {
       const prepared = await fetchSharedFile(file, { signal: transfer.signal, onWait: transfer.waiting, onProgress: transfer.update });
@@ -3143,10 +3152,18 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function crc32(bytesArr) {
-  let c = 0xFFFFFFFF;
+function crc32(bytesArr, crc = 0) {
+  let c = (crc ^ 0xFFFFFFFF) >>> 0;
   for (let i = 0; i < bytesArr.length; i++) c = CRC_TABLE[(c ^ bytesArr[i]) & 0xFF] ^ (c >>> 8);
   return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// A blob's checksum, read in pieces (a 100 MB file never sits in memory twice).
+async function blobCrc(blob) {
+  let crc = 0;
+  const step = 8 * 1024 * 1024;
+  for (let at = 0; at < blob.size; at += step) crc = crc32(new Uint8Array(await blob.slice(at, at + step).arrayBuffer()), crc);
+  return crc;
 }
 
 function uniqueZipName(name, used) {
@@ -3160,21 +3177,32 @@ function uniqueZipName(name, used) {
   return candidate;
 }
 
-async function makeZip(files, zipName) {
+// Files go in at the top, or in folders when they carry a `zipPath` ("Sheet/files/a.pdf").
+// Archives past 4 GB get the Zip64 records every unzip tool reads.
+async function makeZip(files, zipName, { onProgress, signal } = {}) {
   const encoder = new TextEncoder();
   const now = new Date();
   const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
   const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
-  const used = new Set();
+  const usedIn = new Map(); // folder -> names taken in it
   const body = [];
   const directory = [];
+  const MAX32 = 0xFFFFFFFF;
   let offset = 0;
   let directorySize = 0;
+  let done = 0;
 
   for (const file of files) {
-    const name = encoder.encode(uniqueZipName(file.name, used));
-    const crc = crc32(new Uint8Array(await file.arrayBuffer()));
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const parts = String(file.zipPath || '').split('/').filter(Boolean);
+    const folder = parts.slice(0, -1).map(safeFileName).join('/');
+    if (!usedIn.has(folder)) usedIn.set(folder, new Set());
+    const leaf = uniqueZipName(parts.pop() || file.name, usedIn.get(folder));
+    const path = folder ? `${folder}/${leaf}` : leaf;
+    const name = encoder.encode(path);
+    const crc = await blobCrc(file);
     const size = file.size;
+    const big = offset > MAX32;
 
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);
@@ -3188,10 +3216,16 @@ async function makeZip(files, zipName) {
     local.setUint16(26, name.length, true);
     body.push(local.buffer, name, file);
 
+    const extra = new DataView(new ArrayBuffer(big ? 12 : 0));
+    if (big) {
+      extra.setUint16(0, 0x0001, true);
+      extra.setUint16(2, 8, true);
+      extra.setBigUint64(4, BigInt(offset), true);
+    }
     const central = new DataView(new ArrayBuffer(46));
     central.setUint32(0, 0x02014b50, true);
-    central.setUint16(4, 20, true);
-    central.setUint16(6, 20, true);
+    central.setUint16(4, big ? 45 : 20, true);
+    central.setUint16(6, big ? 45 : 20, true);
     central.setUint16(8, 0x0800, true);
     central.setUint16(12, time, true);
     central.setUint16(14, date, true);
@@ -3199,20 +3233,180 @@ async function makeZip(files, zipName) {
     central.setUint32(20, size, true);
     central.setUint32(24, size, true);
     central.setUint16(28, name.length, true);
-    central.setUint32(42, offset, true);
-    directory.push(central.buffer, name);
+    central.setUint16(30, extra.byteLength, true);
+    central.setUint32(42, big ? MAX32 : offset, true);
+    directory.push(central.buffer, name, extra.buffer);
 
     offset += 30 + name.length + size;
-    directorySize += 46 + name.length;
+    directorySize += 46 + name.length + extra.byteLength;
+    onProgress?.(done += size);
   }
 
+  const tail = [];
+  const zip64 = offset > MAX32 || files.length > 0xFFFF;
+  if (zip64) {
+    const record = new DataView(new ArrayBuffer(56));
+    record.setUint32(0, 0x06064b50, true);
+    record.setBigUint64(4, 44n, true);
+    record.setUint16(12, 45, true);
+    record.setUint16(14, 45, true);
+    record.setBigUint64(24, BigInt(files.length), true);
+    record.setBigUint64(32, BigInt(files.length), true);
+    record.setBigUint64(40, BigInt(directorySize), true);
+    record.setBigUint64(48, BigInt(offset), true);
+    const locator = new DataView(new ArrayBuffer(20));
+    locator.setUint32(0, 0x07064b50, true);
+    locator.setBigUint64(8, BigInt(offset + directorySize), true);
+    locator.setUint32(16, 1, true);
+    tail.push(record.buffer, locator.buffer);
+  }
   const end = new DataView(new ArrayBuffer(22));
   end.setUint32(0, 0x06054b50, true);
-  end.setUint16(8, files.length, true);
-  end.setUint16(10, files.length, true);
+  end.setUint16(8, Math.min(files.length, 0xFFFF), true);
+  end.setUint16(10, Math.min(files.length, 0xFFFF), true);
   end.setUint32(12, directorySize, true);
-  end.setUint32(16, offset, true);
-  return new File([...body, ...directory, end.buffer], zipName, { type:'application/zip' });
+  end.setUint32(16, zip64 ? MAX32 : offset, true);
+  tail.push(end.buffer);
+  return new File([...body, ...directory, ...tail], zipName, { type:'application/zip' });
+}
+
+// ---- Download my data ----
+// Everything the account holds, in one .zip. Only this device can unlock it
+// (the server never could), so it's put together here: each sheet as a web page
+// and as plain text, beside its pasted images and its files, plus a summary.
+// Recently Deleted isn't included.
+
+// A sheet's text as plain text: line breaks kept, images as where they are in the folder.
+function exportText(root) {
+  let out = '';
+  const walk = node => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) out += child.textContent;
+      else if (child.tagName === 'BR') out += '\n';
+      else if (child.tagName === 'IMG') out += `${out && !out.endsWith('\n') ? '\n' : ''}[image: ${child.getAttribute('src')}]\n`;
+      else if (child.tagName === 'DIV') {
+        if (out && !out.endsWith('\n')) out += '\n';
+        walk(child);
+        if (!out.endsWith('\n')) out += '\n';
+      } else walk(child);
+    }
+  };
+  walk(root);
+  return out.replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+function exportPage(title, body) {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>body{margin:0 auto;max-width:760px;padding:32px 20px;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1c1c1c;background:#fffdf9;white-space:pre-wrap;overflow-wrap:anywhere}
+h1{margin:0 0 20px;font-size:22px;white-space:normal} img{display:block;max-width:100%;height:auto;margin:8px 0;border-radius:8px}</style>
+</head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>
+`;
+}
+
+const textFile = (zipPath, text, type = 'text/plain') => Object.assign(new File([text], zipPath.split('/').pop(), { type }), { zipPath });
+
+async function downloadMyData() {
+  if (viewOnly || !navigator.onLine) {
+    showToast('You’re offline. Reconnect to download your data.', { duration: 3000 });
+    return;
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  const zipName = `ScrapSheet data ${stamp}.zip`;
+  const transfer = createTransfer(zipName, 'Downloading', 0);
+  transfer.status('Gathering your sheets…');
+  transferList.scrollIntoView({ block:'nearest', behavior:'smooth' });
+  const { signal } = transfer;
+  try {
+    // 1. Every sheet's text and file list, unlocked here, and what each pasted image is.
+    const used = new Set();
+    const plan = [];
+    for (const [i, entry] of sheets.entries()) {
+      const id = validSheet(entry.id);
+      const [state, list] = await Promise.all([
+        fetch(stateUrl(id), { cache:'no-store', signal }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+        fetch(filesUrl(id), { cache:'no-store', signal }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      ]);
+      const name = String(entry.name || `Sheet ${i + 1}`);
+      const folder = uniqueZipName(`${String(i + 1).padStart(2, '0')} ${name}`, used);
+      const page = cleanHtml(await sheetHtml(id, state));
+      const images = [];
+      for (const img of page.querySelectorAll('img.pad-image')) {
+        const original = await originalImage(img.dataset.src).catch(() => null);
+        if (!original) { img.replaceWith('[image missing]'); continue; }
+        const path = `images/image-${images.length + 1}.${original.ext}`;
+        images.push({ ...original, zipPath: `${folder}/${path}` });
+        img.setAttribute('src', path);
+        img.removeAttribute('data-src');
+        img.removeAttribute('data-width');
+        img.removeAttribute('class');
+      }
+      const files = (await openFiles(Array.isArray(list.files) ? list.files : [], id))
+        .map(f => ({ ...f, zipPath: `${folder}/files/${f.name || 'file'}` }));
+      // Sheets with nothing in them get no folder (they're still listed in account.json).
+      const empty = !page.textContent.trim() && !images.length && !files.length;
+      plan.push({ name, folder, page, images, files, empty });
+    }
+
+    // 2. Download and unlock every image and file.
+    const downloads = plan.flatMap(p => [...p.images, ...p.files]);
+    const total = downloads.reduce((n, f) => n + (f.size || 0), 0);
+    transfer.setTotal(total);
+    let finished = 0;
+    for (const item of downloads) {
+      item.prepared = Object.assign(await fetchSharedFile(item, { signal, onWait: transfer.waiting, onProgress: loaded => transfer.update(finished + loaded) }), { zipPath: item.zipPath });
+      finished += item.size || 0;
+    }
+
+    // 3. The .zip: README and summary first, then each sheet's page, text, images and files.
+    const summary = {
+      app: 'ScrapSheet',
+      exportedAt: new Date().toISOString(),
+      account: { email: account?.email || null, plan: myPlan().plan === 'free' ? 'free' : 'pro' },
+      sheets: plan.map(p => ({ name: p.name, folder: p.empty ? null : p.folder, empty: p.empty, images: p.images.length, files: p.files.map(f => ({ name: f.name, type: f.type || null, size: f.size, uploadedAt: f.uploadedAt ? new Date(f.uploadedAt).toISOString() : null })) }))
+    };
+    const entries = [
+      textFile('README.txt', [
+        `Your ScrapSheet data, downloaded ${new Date().toLocaleString()}.`,
+        '',
+        'Each sheet has its own folder:',
+        '  <sheet>.html  the sheet as a web page, with its images (open it in any browser)',
+        '  <sheet>.txt   the same text, plain',
+        '  images/       images pasted into the sheet, as they were added',
+        '  files/        the files attached to the sheet',
+        '',
+        'account.json lists your account, sheets and files.',
+        'Items in Recently Deleted are not included: restore them first if you want them.',
+        ''
+      ].join('\n')),
+      textFile('account.json', JSON.stringify(summary, null, 2) + '\n', 'application/json')
+    ];
+    for (const p of plan.filter(x => !x.empty)) {
+      entries.push(
+        textFile(`${p.folder}/${safeFileName(p.name)}.html`, exportPage(p.name, p.page.innerHTML), 'text/html'),
+        textFile(`${p.folder}/${safeFileName(p.name)}.txt`, exportText(p.page)),
+        ...p.images.map(i => i.prepared),
+        ...p.files.map(f => f.prepared)
+      );
+    }
+    transfer.status('Packing the .zip…');
+    const zip = await makeZip(entries, zipName, { signal });
+    await deliverFiles([zip], transfer, zipName);
+  } catch (err) {
+    transfer.fail(err?.name === 'AbortError' ? 'Download cancelled' : 'Download failed. Check your connection and try again.');
+  }
+}
+
+function confirmDownloadData() {
+  openSheet({
+    title: 'Download your data',
+    text: 'Every sheet, with its images and files, in one .zip, unlocked so anything can open it. Keep it somewhere safe. Recently deleted items aren’t included. Keep ScrapSheet open until it’s done.',
+    actions: [
+      { label: 'Download .zip', kind: 'primary', full: true, run: downloadMyData },
+      { label: 'Cancel', kind: 'secondary', full: true }
+    ]
+  });
 }
 
 // ---- Uploads ----
@@ -4662,6 +4856,8 @@ function profileHtml(view) {
         <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
           <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
         ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        <h3 class="pf-group">Your data</h3>
+        ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
         <h3 class="pf-group">Sessions</h3>
         ${pfRow('signout', 'logout', 'Sign out')}
         ${pfRow('signout-all', 'devices', 'Sign out of all devices…')}
@@ -4756,6 +4952,7 @@ const PROFILE_ACTIONS = {
   upgrade: () => fromProfile(() => showUpgrade('')),
   billing: () => fromProfile(manageBilling),
   recovery: () => fromProfile(confirmNewRecoveryKey),
+  export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
   'signout-all': () => fromProfile(confirmSignOutEverywhere),
   delete: () => fromProfile(openDeleteAccount),

@@ -73,6 +73,12 @@ the current policies before building the Android app.
   keep Pro). REST via fetch, API version 2026-04-22.dahlia. Env:
   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`; `NEW_ACCOUNT_PLAN=pro` is for
   local tests only.
+- Download my data (Account & security, `downloadMyData()` in `app.js`): put
+  together on the device, since only it can unlock anything. One .zip
+  (`makeZip`, stored, Zip64 past 4 GB): README.txt, account.json, then a folder
+  per sheet that holds anything (`NN Name/`) with the sheet as `.html` (images
+  pointing at `images/`) and `.txt`, its pasted images (originals) and `files/`.
+  Recently Deleted isn't included. Needs a connection.
 - Delete account (account menu, `auth?action=delete-account`): needs the password
   as the sign-in secret; cancels an active Stripe subscription first (stops if
   that fails), then erases every sheet, file, image, share link and the account;
@@ -139,7 +145,7 @@ the current policies before building the Android app.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Generate new recovery key, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,

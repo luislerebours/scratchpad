@@ -411,6 +411,7 @@ function fillAccount(a) {
   link.hidden = !a.stripe?.customer;
   if (a.stripe?.customer) link.href = `https://dashboard.stripe.com/${stripeMode === 'test' ? 'test/' : ''}customers/${encodeURIComponent(a.stripe.customer)}`;
   $('deactivateBtn').hidden = Boolean(a.disabledAt);
+  $('deleteAccountBtn').hidden = a.originalData;
   $('reactivateBtn').hidden = !a.disabledAt;
   $('signoutBtn').disabled = Boolean(a.disabledAt);
   $('accountError').textContent = '';
@@ -459,9 +460,38 @@ $('deactivateBtn').addEventListener('click', async e => {
       h('li', { text: 'stops it signing in, getting codes or resetting its password;' }),
       h('li', { text: 'turns off its share links (they stay off after reactivating).' }))
   ];
-  if (a.paying) body.push(h('p', { class: 'ad-warn', text: 'This account has an active Stripe subscription. Deactivating doesn’t cancel it: cancel or refund it in Stripe if needed.' }));
+  if (a.paying) body.push(h('p', { class: 'ad-warn', text: `This account pays through ${a.payingVia}. Deactivating doesn’t cancel it: cancel or refund it in ${a.payingVia === 'Google Play' ? 'Play Console' : 'Stripe'} if needed.` }));
   const result = await confirmBox({ title: `Deactivate ${a.email}?`, body, ok: 'Deactivate', reason: true, typeToConfirm: a.email });
   if (result) accountOp(button, 'deactivate', { reason: result.reason }, 'Account deactivated');
+});
+
+// For someone who asked support (from the account's email) to delete an
+// account they can't sign in to. The same as Delete account in the app.
+$('deleteAccountBtn').addEventListener('click', async e => {
+  const button = e.currentTarget;
+  const a = current;
+  const body = [
+    'This permanently deletes the account and everything in it, right away, exactly as Delete account does in the app. It can’t be undone. It:',
+    h('ul', {},
+      h('li', { text: 'erases every sheet, file, image and share link (nobody can recover them);' }),
+      h('li', { text: 'cancels a paying subscription first (Stripe or Google Play), and stops if that fails;' }),
+      h('li', { text: 'signs out every device and emails the owner that it was done.' })),
+    h('p', { class: 'ad-warn', text: 'Only do this when the request came from the account’s own email address.' })
+  ];
+  const result = await confirmBox({ title: `Delete ${a.email}?`, body, ok: 'Delete account', reason: true, typeToConfirm: a.email });
+  if (!result) return;
+  $('accountError').textContent = '';
+  await busy(button, async () => {
+    try {
+      await post('account', { id: a.id, op: 'delete', confirm: a.email, reason: result.reason });
+      accounts = accounts.filter(x => x.id !== a.id);
+      $('accountDialog').close();
+      renderAccounts();
+      toast('Account deleted');
+    } catch (err) {
+      $('accountError').textContent = err.message;
+    }
+  });
 });
 
 // ---- Confirm box ----
@@ -547,6 +577,7 @@ const ACTIONS = {
   'account.quota': 'Changed storage limit',
   'account.resync': 'Refreshed billing',
   'account.deactivate': 'Deactivated account',
+  'account.delete': 'Deleted account',
   'account.reactivate': 'Reactivated account',
   'account.signout': 'Signed out account’s devices',
   'settings.change': 'Changed settings',

@@ -42,6 +42,12 @@
   to = "/terms.html"
   status = 200
 
+# How to delete an account (Google Play asks for a web page like this).
+[[redirects]]
+  from = "/delete-account"
+  to = "/delete-account.html"
+  status = 200
+
 # The admin dashboard: never indexed, cached or framed, and only this site's own scripts.
 [[redirects]]
   from = "/admin"

@@ -75,10 +75,10 @@ again right before submitting.
 - Store listing: name, short and full description, screenshots (phone and
   7"/10" tablet), feature graphic, icon from `branding/app-icon-full-bleed-1024.png`.
 - **Privacy policy URL:** `https://scrap.sector809labs.com/privacy`.
-- **Account deletion:** Play requires a web link where people can ask to
-  delete their account and data, besides the in-app option. Point it to a
-  short page explaining Account menu → Account & security → Delete account,
-  with support@sector809labs.com for people who can't sign in.
+- **Account deletion:** `https://scrap.sector809labs.com/delete-account`
+  (`public/delete-account.html`): the in-app steps, what's deleted and kept,
+  and email to support for people who can't sign in (support deletes it from
+  the admin dashboard: Accounts → Delete account…).
 - **Data safety form:** email address (account, security notices), purchase
   history (Stripe), app activity (sign-in times, for the admin view); content
   is end-to-end encrypted and not readable by us; data is encrypted in
@@ -157,5 +157,4 @@ Setup (once the app exists in Play Console):
 
 ## Before building
 
-- Add the account-deletion web page (Play requires one).
 - Choose the package name (it can never change).

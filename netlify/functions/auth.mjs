@@ -1,17 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import {
-  DEACTIVATED, MAX_SHEETS, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, json, notifySync,
-  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, userStore, validEmail, verify
+  DEACTIVATED, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, json, notifySync,
+  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify
 } from '../lib/auth.mjs';
-import { wipeSheet } from '../lib/files.mjs';
 import { readSettings } from '../lib/admin.mjs';
 import { withErrors } from '../lib/errors.mjs';
 import { sendEmail } from '../lib/email.mjs';
+import { deleteAccount, deleteAccountData } from '../lib/account.mjs';
+import { securityNotice } from '../lib/notices.mjs';
 import { planInfo } from '../lib/plans.mjs';
-import { customerKey, stripe, stripeReady } from '../lib/stripe.mjs';
-import { cancelSubscription as cancelPlay, forgetToken as forgetPlayToken, playReady } from '../lib/play.mjs';
-import { playKeepsPro } from '../lib/plans.mjs';
-import { readShares, sharesStore } from '../lib/shares.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
 // password, then sign in with email and password. The same code steps reset
@@ -71,79 +68,6 @@ async function signedIn(user, body = {}) {
   }, 200, { 'Set-Cookie': await sessionCookie(user) });
 }
 
-// ---- Security notices ----
-// A short email when something changes about how the account is reached or
-// kept, so the owner hears about it if it wasn't them. Says when, and the kind
-// of device (from its browser), nothing else; never stored. A notice that can't
-// be sent never stops the action itself.
-
-const SUPPORT = 'support@sector809labs.com';
-
-function deviceOf(req) {
-  const ua = req.headers.get('user-agent') || '';
-  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
-    : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
-  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows'
-    : /CrOS/.test(ua) ? 'ChromeOS' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
-  if (browser && os) return `${browser} on ${os}`;
-  return browser || os || 'An unknown device';
-}
-
-const whenText = () => `${new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date())} UTC`;
-
-const NOTICES = {
-  password: {
-    subject: 'Your ScrapSheet password was changed',
-    heading: 'Your password was changed',
-    intro: 'The password for your ScrapSheet account was just changed, and every other device was signed out.'
-  },
-  'start-over': {
-    subject: 'Your ScrapSheet account was started over',
-    heading: 'Your account was started over',
-    intro: 'Your ScrapSheet account was started over with a new password. Everything that was in it was erased, and every other device was signed out.'
-  },
-  recovery: {
-    subject: 'A new ScrapSheet recovery key was made',
-    heading: 'A new recovery key was made',
-    intro: 'A new recovery key was just made for your ScrapSheet account. The old one no longer works.'
-  },
-  'signout-all': {
-    subject: 'Signed out of ScrapSheet everywhere',
-    heading: 'Signed out of all devices',
-    intro: 'Every device signed in to your ScrapSheet account was just signed out.'
-  },
-  deleted: {
-    subject: 'Your ScrapSheet account was deleted',
-    heading: 'Your account was deleted',
-    intro: 'Your ScrapSheet account and everything in it were permanently deleted.'
-  }
-};
-
-async function securityNotice(req, email, kind, { cancelled = false } = {}) {
-  const n = NOTICES[kind];
-  const origin = new URL(req.url).origin;
-  const intro = n.intro + (cancelled ? ' Your Pro subscription was cancelled too, so you won’t be charged again.' : '');
-  try {
-    await sendEmail({
-      to: email,
-      origin,
-      subject: n.subject,
-      preheader: intro,
-      heading: n.heading,
-      intro,
-      box: { title: 'When and where', body: `${whenText()} · ${deviceOf(req)}` },
-      ...(kind === 'deleted' ? {} : { button: { label: 'Open ScrapSheet', url: origin } }),
-      note: kind === 'deleted'
-        ? `If you didn’t do this, email ${SUPPORT} right away. Thanks for using ScrapSheet.`
-        : `Wasn’t you? Reset your password right away (“Forgot password?” on the sign-in page) and email ${SUPPORT}.`,
-      // Local tests read this line.
-      devLog: `[dev mail] to ${email}: security ${kind} (${deviceOf(req)})${cancelled ? ' +cancelled' : ''}`
-    });
-  } catch (err) {
-    console.error('Security notice not sent', kind, err?.message);
-  }
-}
-
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Activity for the admin view: sign-ins, and the days the pad was opened.
@@ -154,21 +78,6 @@ function withSignIn(user) {
 function withVisit(user) {
   const days = (user.visitDays || []).filter(day => day !== today());
   return { lastSeenAt: Date.now(), visitDays: [...days, today()].slice(-60) };
-}
-
-// Every sheet slot (text, files, images), the account's lists and markers,
-// and its share links.
-async function deleteAccountData(ns) {
-  const shares = await readShares(ns);
-  const links = sharesStore();
-  await Promise.all(shares.map(async s => {
-    const { blobs } = await links.list({ prefix: `count/${s.token}/` });
-    await Promise.all([links.delete(`shares/${s.token}`), ...blobs.map(({ key }) => links.delete(key))]);
-  }));
-  await Promise.all(Array.from({ length: MAX_SHEETS }, (_, i) => wipeSheet(ns, i + 1)));
-  const state = userStore(ns, 'state');
-  const { blobs } = await state.list();
-  await Promise.all(blobs.map(({ key }) => state.delete(key)));
 }
 
 export default withErrors('auth', async (req, context) => {
@@ -264,45 +173,14 @@ export default withErrors('auth', async (req, context) => {
   if (action === 'delete-account') {
     const auth = await requireUser(req);
     if (auth.error) return auth.error;
-    const { user, ns } = auth;
+    const { user } = auth;
     const ek = emailKey(user.email);
     if (!(await allow(`delete-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
     // 400, not 401: a 401 would send the page back to sign-in.
     if (!(await checkSecret(user, body))) return json({ error: 'That password isn’t right.' }, 400);
-    const sub = user.stripe?.subscription;
-    const cancelling = Boolean(sub && !['canceled', 'incomplete_expired'].includes(user.stripe.status));
-    if (cancelling) {
-      if (!stripeReady()) return json({ error: 'Couldn’t cancel your Pro subscription. Try again later, or email support.' }, 503);
-      try {
-        await stripe('DELETE', `subscriptions/${sub}`);
-      } catch (err) {
-        // Already gone at Stripe is fine; anything else stops the deletion so nobody keeps paying for nothing.
-        if (err.status !== 404) {
-          console.error('Cancel on delete', err.status, err.message);
-          return json({ error: 'Couldn’t cancel your Pro subscription. Try again in a minute, or email support.' }, 502);
-        }
-      }
-    }
-    // Pro bought in the Android app renews through Google Play: stopped too.
-    const playRenews = Boolean(user.play?.token && user.play.autoRenew && playKeepsPro(user.play));
-    if (playRenews) {
-      if (!playReady()) return json({ error: 'Couldn’t cancel your Google Play subscription. Try again later, or email support.' }, 503);
-      try {
-        await cancelPlay(user.play.token);
-      } catch (err) {
-        if (![404, 410].includes(err.status)) {
-          console.error('Play cancel on delete', err.status, err.message);
-          return json({ error: 'Couldn’t cancel your Google Play subscription. Try again in a minute, or email support.' }, 502);
-        }
-      }
-    }
-    await deleteAccountData(ns);
-    await Promise.all([`users/${ek}`, `codes/${ek}`, `pending/${ek}`].map(key => store.delete(key)));
-    if (user.stripe?.customer) await store.delete(customerKey(user.stripe.customer));
-    if (user.play?.token) await forgetPlayToken(user.play.token);
-    // Other devices check in and find the account gone.
-    await notifySync(ns, 'session', String(Date.now()));
-    await securityNotice(req, user.email, 'deleted', { cancelled: cancelling || playRenews });
+    const result = await deleteAccount(user);
+    if (result.error) return json({ error: result.error }, result.status);
+    await securityNotice(req, user.email, 'deleted', { cancelled: result.cancelled });
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 

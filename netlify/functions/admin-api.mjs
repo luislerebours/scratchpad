@@ -14,6 +14,8 @@ import { readShares, sharesStore, ended } from '../lib/shares.mjs';
 import { applySubscription, stripe, stripeReady } from '../lib/stripe.mjs';
 import { applyPlay, getSubscription, playReady } from '../lib/play.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
+import { deleteAccount } from '../lib/account.mjs';
+import { securityNotice } from '../lib/notices.mjs';
 
 // The admin dashboard's API (/admin). Every action except signing in checks
 // the admin cookie on the server (requireAdmin). Admins see accounts, plans,
@@ -163,6 +165,18 @@ async function accountAction(req, admin, body) {
       await notifySync(user.ns, 'session', String(Date.now()));
       await audit(req, admin, 'account.deactivate', { target, sharesTurnedOff: links, paying: Boolean(user.stripe?.subscription && KEEPS_PRO.has(user.stripe.status)), reason: cleanName(body.reason) || null });
       return json({ ok: true, account: await accountView(updated) });
+    }
+    // Deleting an account someone asked support to delete (they can't sign in):
+    // exactly what Delete account does in the app. Typed confirmation; the
+    // owner is emailed; the audit log keeps who did it and why.
+    case 'delete': {
+      if (user.ns === '') return json({ error: 'This account holds the original data from before accounts and can’t be deleted here.' }, 409);
+      if (String(body.confirm || '').trim().toLowerCase() !== user.email.toLowerCase()) return json({ error: 'Type the account’s email to confirm.' }, 400);
+      const result = await deleteAccount(user);
+      if (result.error) return json({ error: result.error }, result.status);
+      await audit(req, admin, 'account.delete', { target, subscriptionCancelled: result.cancelled, reason: cleanName(body.reason) || null });
+      await securityNotice(req, user.email, 'deleted-by-support', { cancelled: result.cancelled });
+      return json({ ok: true, deleted: true });
     }
     case 'reactivate': {
       if (!user.disabledAt) return json({ error: 'Not deactivated' }, 409);

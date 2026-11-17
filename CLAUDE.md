@@ -1,8 +1,8 @@
 # ScrapSheet (formerly Scratch Pad)
 
-A shared scratch pad (five sheets of text, images and files) hosted on Netlify
-at https://scratch.sector809labs.com (Netlify site `scratchpadx`; DNS is a
-DNS-only CNAME in Cloudflare). https://scratchpadx.netlify.app must keep working
+A shared scratch pad (sheets of text, images and files) hosted on Netlify
+at https://scrap.sector809labs.com (Netlify site `scrapsheet`; DNS is a
+DNS-only CNAME in Cloudflare). https://scrapsheet.netlify.app must keep working
 too (some networks block new domains): never redirect it to the new one. The two
 are separate sites to the browser (own sign-in, own kept keys), and share links
 use whichever address they were made on.
@@ -10,6 +10,19 @@ The app is called ScrapSheet everywhere people see it. Internal names keep
 "scratchpad" (repo, stores, keys, the `scratchpad-e2ee-v1` salt): never rename
 those, the salt least of all (it would lock every account out).
 Pushes to `main` deploy straight to the live site.
+
+## Roadmap
+
+1. Web app: get it fully running (Stripe live mode next).
+2. Android app, built from this web app (a Trusted Web Activity via
+   Bubblewrap, or Capacitor if native features are needed).
+3. iOS app, after the Android launch (Capacitor can share the same shell).
+
+Keep the web app ready to be wrapped: everything works in a WebView, the
+manifest and icons stay complete, no browser-only shortcuts that an app shell
+can't offer. Store billing rules (Google Play Billing, Apple in-app purchase)
+may require their own billing beside Stripe for Pro bought in the app: check
+the current policies before building the Android app.
 
 ## Rules
 

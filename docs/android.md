@@ -90,8 +90,9 @@ again right before submitting.
 - Developer account under **Sector 809 Labs LLC** (organization accounts need
   a D-U-N-S number; check whether the 14-day closed-testing rule for new
   personal accounts applies).
-- Store listing: name, short and full description, screenshots (phone and
-  7"/10" tablet), feature graphic, icon from `branding/app-icon-full-bleed-1024.png`.
+- Store listing: ready in `branding/play-store/` (name, short and full
+  description, phone and 7"/10" tablet screenshots, feature graphic, 512 px
+  icon; see its README).
 - **Privacy policy URL:** `https://scrap.sector809labs.com/privacy`.
 - **Account deletion:** `https://scrap.sector809labs.com/delete-account`
   (`public/delete-account.html`): the in-app steps, what's deleted and kept,

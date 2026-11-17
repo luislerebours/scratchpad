@@ -96,6 +96,12 @@ Pushes to `main` deploy straight to the live site.
   no longer used). There are no account-specific exceptions in the code.
 - Email goes through Resend: `RESEND_API_KEY` and `MAIL_FROM` env vars on Netlify.
   Locally, `SCRATCHPAD_DEV_MAIL=1` logs codes instead of sending them.
+- Every email uses the one template in `netlify/lib/email.mjs` (`sendEmail`):
+  a card on warm paper with the teal logo and "ScrapSheet", a divider, a
+  heading, a short message, a tinted box for the key fact or code, a teal
+  button, and the footer "Drop it here. Pull it up anywhere." / "ScrapSheet by
+  Sector 809 Labs". New emails pass content only (heading, intro, box, button,
+  note), never their own HTML; a plain-text part is made from the same content.
 - Sync is real-time: every write sets a change marker (`bumpRev`) and posts a
   signed notice to the relay in `sync-worker/` (a Cloudflare Worker with one
   Durable Object room per account, at `SYNC_URL`). Devices hold a WebSocket to

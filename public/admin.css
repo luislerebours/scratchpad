@@ -18,17 +18,17 @@ body.admin-page { min-height: 100dvh; }
 
 /* Buttons and fields */
 .ad-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--raised); color: var(--text); font-size: .875rem; font-weight: 500; text-decoration: none; cursor: pointer; white-space: nowrap; }
-.ad-btn:hover:not(:disabled) { background: var(--raised-hover); }
+@media (hover: hover) { .ad-btn:hover:not(:disabled) { background: var(--raised-hover); } }
 .ad-btn:disabled { opacity: .5; cursor: default; }
 .ad-btn:focus-visible, .ad-link:focus-visible, .ad-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ad-btn-primary { border-color: transparent; background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.ad-btn-primary:hover:not(:disabled) { background: var(--accent-strong); }
+@media (hover: hover) { .ad-btn-primary:hover:not(:disabled) { background: var(--accent-strong); } }
 .ad-btn-danger { border-color: transparent; background: var(--danger-solid); color: var(--ad-on-danger); }
-.ad-btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+@media (hover: hover) { .ad-btn-danger:hover:not(:disabled) { background: var(--danger-hover); } }
 .ad-btn-quiet { border-color: transparent; background: transparent; color: var(--muted); }
-.ad-btn-quiet:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+@media (hover: hover) { .ad-btn-quiet:hover:not(:disabled) { background: var(--hover); color: var(--text); } }
 .ad-link { align-self: flex-start; padding: 2px 0; border: 0; background: none; color: var(--accent); font-size: .875rem; cursor: pointer; }
-.ad-link:hover { text-decoration: underline; }
+@media (hover: hover) { .ad-link:hover { text-decoration: underline; } }
 
 .admin-page label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: .875rem; font-weight: 500; }
 .admin-page input:not([type=checkbox]), .admin-page select { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--input-bg); color: var(--text); font-size: 1rem; }
@@ -57,7 +57,7 @@ body.admin-page { min-height: 100dvh; }
 .ad-shell { max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter-r) max(40px, env(safe-area-inset-bottom)) var(--gutter); }
 .ad-tabs { display: flex; gap: 4px; margin-bottom: 18px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
 .ad-tabs button { flex: 0 0 auto; padding: 10px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: .9375rem; font-weight: 500; cursor: pointer; }
-.ad-tabs button:hover { color: var(--text); }
+@media (hover: hover) { .ad-tabs button:hover { color: var(--text); } }
 .ad-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text); }
 
 .ad-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }

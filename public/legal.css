@@ -7,7 +7,8 @@ body.legal-page { min-height: 100dvh; }
 .legal-brand img { width: 28px; height: 28px; }
 .legal-nav { display: flex; gap: 18px; font-size: .9375rem; }
 .legal-nav a { color: var(--muted); text-decoration: none; }
-.legal-nav a:hover, .legal-nav a[aria-current="page"] { color: var(--text); }
+.legal-nav a[aria-current="page"] { color: var(--text); }
+@media (hover: hover) { .legal-nav a:hover { color: var(--text); } }
 
 .legal-doc { color: var(--text); font-size: 1rem; line-height: 1.65; }
 .legal-doc h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }

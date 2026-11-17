@@ -4383,7 +4383,7 @@ function profileHtml(view) {
         <h3 class="pf-group">Preferences</h3>
         <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
           <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
-        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('recovery', 'key', 'New recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
         <h3 class="pf-group">Sessions</h3>
         ${pfRow('signout', 'logout', 'Sign out')}
         ${pfRow('signout-all', 'devices', 'Sign out of all devices…')}

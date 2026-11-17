@@ -127,7 +127,8 @@ the current policies before building the Android app.
 - Stored html is sanitized on every load and save.
 - UI: colors and sizes are tokens at the top of `public/styles.css`: dark in
   `:root`, light (warm paper, teal) in `:root[data-theme="light"]`. Use tokens,
-  never raw colors. `public/theme.js` (loaded first in each page's head) sets
+  never raw colors. Hover styles go inside `@media (hover: hover)` (phones keep
+  :hover stuck on whatever ends up under the finger). `public/theme.js` (loaded first in each page's head) sets
   `data-theme` from the account menu's Appearance choices (System/Light/Dark,
   kept in localStorage). Light is the default for everyone who hasn't chosen;
   System follows the device; tapping the logo and name
@@ -138,7 +139,7 @@ the current policies before building the Android app.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, New recovery key, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Generate new recovery key, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,

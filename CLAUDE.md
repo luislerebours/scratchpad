@@ -131,9 +131,22 @@ the current policies before building the Android app.
   `data-theme` from the account menu's Appearance choices (System/Light/Dark,
   kept in localStorage). Light is the default for everyone who hasn't chosen;
   System follows the device; tapping the logo and name
-  (`#brandBtn`) flips light ⇄ dark. The logo has a teal `mark-light.png`. Sheet,
-  file and account actions live in menus built by `openMenu()` in `app.js`
-  (clear/delete always confirm in a bottom sheet). The header dot is the
+  (`#brandBtn`) flips light ⇄ dark. The logo has a teal `mark-light.png`. Sheet
+  and file actions live in menus built by `openMenu()` in `app.js`
+  (clear/delete always confirm in a bottom sheet).
+- Profile menu (`#profileModal`, `openProfile()` in `app.js`): a popover on
+  desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
+  have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
+  then Files & share links, Recently deleted, Account & security (Appearance
+  System/Light/Dark, New recovery key, Sign out, Sign out of all devices, Delete
+  account in red at the bottom) and Help & support (support, privacy, terms).
+  Sub-views open in place with Back; Escape goes back, then closes.
+- Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,
+  a large dialog on desktop. Files tab: storage used vs the limit
+  (`state?meta=usage`), a search, and every file across the sheets (fresh lists
+  per sheet, names unlocked on the device) with type, size, sheet, Open sheet and
+  the usual ••• file actions; table on desktop, compact list on phones. Shared
+  links tab: every link with its file/sheet, status, Copy/Share and Turn off. The header dot is the
   server connection; the toolbar text is the save state, which shows
   "Saved" only after the server confirms.
 - Sign-in page (`#authScreen` in `index.html`) doubles as the front page:

@@ -4148,7 +4148,7 @@ accountBtn.addEventListener('click', () => {
 
 // Light, dark, or whatever the device uses (theme.js applies and remembers it).
 function appearanceItems() {
-  const now = window.scratchTheme?.get() || 'system';
+  const now = window.scratchTheme?.get() || 'light';
   return [['system', 'System', 'theme'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']]
     .map(([value, label, mark]) => ({ label, icon: mark, checked: value === now, run: () => { window.scratchTheme?.set(value); updateBrandLabel(); } }));
 }

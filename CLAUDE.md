@@ -116,7 +116,8 @@ Pushes to `main` deploy straight to the live site.
   `:root`, light (warm paper, teal) in `:root[data-theme="light"]`. Use tokens,
   never raw colors. `public/theme.js` (loaded first in each page's head) sets
   `data-theme` from the account menu's Appearance choices (System/Light/Dark,
-  kept in localStorage; System follows the device); tapping the logo and name
+  kept in localStorage). Light is the default for everyone who hasn't chosen;
+  System follows the device; tapping the logo and name
   (`#brandBtn`) flips light ⇄ dark. The logo has a teal `mark-light.png`. Sheet,
   file and account actions live in menus built by `openMenu()` in `app.js`
   (clear/delete always confirm in a bottom sheet). The header dot is the

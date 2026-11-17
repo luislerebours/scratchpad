@@ -69,6 +69,79 @@ async function signedIn(user, body = {}) {
   }, 200, { 'Set-Cookie': await sessionCookie(user) });
 }
 
+// ---- Security notices ----
+// A short email when something changes about how the account is reached or
+// kept, so the owner hears about it if it wasn't them. Says when, and the kind
+// of device (from its browser), nothing else; never stored. A notice that can't
+// be sent never stops the action itself.
+
+const SUPPORT = 'support@sector809labs.com';
+
+function deviceOf(req) {
+  const ua = req.headers.get('user-agent') || '';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
+    : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows'
+    : /CrOS/.test(ua) ? 'ChromeOS' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  if (browser && os) return `${browser} on ${os}`;
+  return browser || os || 'An unknown device';
+}
+
+const whenText = () => `${new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date())} UTC`;
+
+const NOTICES = {
+  password: {
+    subject: 'Your ScrapSheet password was changed',
+    heading: 'Your password was changed',
+    intro: 'The password for your ScrapSheet account was just changed, and every other device was signed out.'
+  },
+  'start-over': {
+    subject: 'Your ScrapSheet account was started over',
+    heading: 'Your account was started over',
+    intro: 'Your ScrapSheet account was started over with a new password. Everything that was in it was erased, and every other device was signed out.'
+  },
+  recovery: {
+    subject: 'A new ScrapSheet recovery key was made',
+    heading: 'A new recovery key was made',
+    intro: 'A new recovery key was just made for your ScrapSheet account. The old one no longer works.'
+  },
+  'signout-all': {
+    subject: 'Signed out of ScrapSheet everywhere',
+    heading: 'Signed out of all devices',
+    intro: 'Every device signed in to your ScrapSheet account was just signed out.'
+  },
+  deleted: {
+    subject: 'Your ScrapSheet account was deleted',
+    heading: 'Your account was deleted',
+    intro: 'Your ScrapSheet account and everything in it were permanently deleted.'
+  }
+};
+
+async function securityNotice(req, email, kind, { cancelled = false } = {}) {
+  const n = NOTICES[kind];
+  const origin = new URL(req.url).origin;
+  const intro = n.intro + (cancelled ? ' Your Pro subscription was cancelled too, so you won’t be charged again.' : '');
+  try {
+    await sendEmail({
+      to: email,
+      origin,
+      subject: n.subject,
+      preheader: intro,
+      heading: n.heading,
+      intro,
+      box: { title: 'When and where', body: `${whenText()} · ${deviceOf(req)}` },
+      ...(kind === 'deleted' ? {} : { button: { label: 'Open ScrapSheet', url: origin } }),
+      note: kind === 'deleted'
+        ? `If you didn’t do this, email ${SUPPORT} right away. Thanks for using ScrapSheet.`
+        : `Wasn’t you? Reset your password right away (“Forgot password?” on the sign-in page) and email ${SUPPORT}.`,
+      // Local tests read this line.
+      devLog: `[dev mail] to ${email}: security ${kind} (${deviceOf(req)})${cancelled ? ' +cancelled' : ''}`
+    });
+  } catch (err) {
+    console.error('Security notice not sent', kind, err?.message);
+  }
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Activity for the admin view: sign-ins, and the days the pad was opened.
@@ -129,6 +202,7 @@ export default withErrors('auth', async (req, context) => {
     await store.setJSON(`users/${ek}`, { ...auth.user, version: auth.user.version + 1 });
     // Open devices re-check right away and find themselves signed out.
     await notifySync(auth.user.ns, 'session', String(Date.now()));
+    await securityNotice(req, auth.user.email, 'signout-all');
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 
@@ -169,6 +243,7 @@ export default withErrors('auth', async (req, context) => {
     if (!b64ish(body.byRecovery) || !b64ish(body.recoverySalt, 40)) return json({ error: 'Bad recovery key' }, 400);
     const keyring = { ...auth.user.keyring, byRecovery: body.byRecovery, recoverySalt: body.recoverySalt };
     await store.setJSON(`users/${ek}`, { ...auth.user, keyring });
+    await securityNotice(req, auth.user.email, 'recovery');
     return json({ ok: true, keyring });
   }
 
@@ -193,7 +268,8 @@ export default withErrors('auth', async (req, context) => {
     // 400, not 401: a 401 would send the page back to sign-in.
     if (!(await checkSecret(user, body))) return json({ error: 'That password isn’t right.' }, 400);
     const sub = user.stripe?.subscription;
-    if (sub && !['canceled', 'incomplete_expired'].includes(user.stripe.status)) {
+    const cancelling = Boolean(sub && !['canceled', 'incomplete_expired'].includes(user.stripe.status));
+    if (cancelling) {
       if (!stripeReady()) return json({ error: 'Couldn’t cancel your Pro subscription. Try again later, or email support.' }, 503);
       try {
         await stripe('DELETE', `subscriptions/${sub}`);
@@ -210,6 +286,7 @@ export default withErrors('auth', async (req, context) => {
     if (user.stripe?.customer) await store.delete(customerKey(user.stripe.customer));
     // Other devices check in and find the account gone.
     await notifySync(ns, 'session', String(Date.now()));
+    await securityNotice(req, user.email, 'deleted', { cancelled: cancelling });
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 
@@ -314,7 +391,10 @@ export default withErrors('auth', async (req, context) => {
     }
     user = withSignIn(user);
     await store.setJSON(`users/${pass.ek}`, user);
-    if (existing) await notifySync(user.ns, 'session', String(Date.now()));
+    if (existing) {
+      await notifySync(user.ns, 'session', String(Date.now()));
+      await securityNotice(req, user.email, body.startOver ? 'start-over' : 'password');
+    }
     return signedIn(user, { created: !existing });
   }
 

@@ -1,8 +1,9 @@
-import { json } from './auth.mjs';
+import { env, json } from './auth.mjs';
 
 // Free and Pro. Accounts made before plans existed have no `plan` and stay
-// Pro; new accounts start on Free. Paying through Stripe sets `plan: 'pro'`,
-// and a subscription ending sets it back to 'free'. Every account follows its
+// Pro; new accounts start on Free. Paying through Stripe (web) or Google Play
+// (Android app) sets `plan: 'pro'`, and a subscription ending sets it back to
+// 'free' unless the other one still pays. Every account follows its
 // plan: admin rights live in the admin dashboard and never change it. Limits apply to adding things: an account that drops to
 // Free keeps everything it has, but can't add past Free's limits.
 
@@ -16,6 +17,17 @@ export const PLANS = {
 // What Pro costs, for the page (Stripe holds the real prices).
 export const PRICES = { month: 0.99, year: 9.99 };
 
+// Stripe subscription states that keep Pro: paid up, in a trial, or a payment being retried.
+const STRIPE_KEEPS = new Set(['active', 'trialing', 'past_due']);
+export const stripeKeepsPro = stripe => STRIPE_KEEPS.has(stripe?.status);
+
+// Google Play: paid up, in a grace period, or cancelled but not yet run out.
+export function playKeepsPro(play) {
+  if (!play) return false;
+  if (play.state === 'SUBSCRIPTION_STATE_ACTIVE' || play.state === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD') return true;
+  return play.state === 'SUBSCRIPTION_STATE_CANCELED' && Number(play.expiresAt) > Date.now();
+}
+
 export function planOf(user) {
   return user?.plan === 'free' ? 'free' : 'pro';
 }
@@ -26,7 +38,20 @@ export const limitsFor = user => PLANS[planOf(user)];
 export function planInfo(user) {
   const plan = planOf(user);
   const { name, sheets, files, fileBytes, quotaBytes, share } = PLANS[plan];
-  const billing = user?.stripe?.customer ? {
+  // Where Pro is paid for: Google Play (bought in the Android app) when that's
+  // what pays, otherwise Stripe (the web).
+  const play = user?.play;
+  const usePlay = play && (playKeepsPro(play) || !user?.stripe?.customer);
+  const billing = usePlay ? {
+    source: 'play',
+    interval: play.interval || null,
+    status: play.state || null,
+    renewsAt: play.expiresAt || null,
+    cancelsAtEnd: !play.autoRenew,
+    productId: play.productId || null,
+    packageName: env('PLAY_PACKAGE_NAME') || null
+  } : user?.stripe?.customer ? {
+    source: 'stripe',
     interval: user.stripe.interval || null,
     status: user.stripe.status || null,
     renewsAt: user.stripe.periodEnd || null,

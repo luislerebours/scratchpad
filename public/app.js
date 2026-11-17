@@ -4744,8 +4744,140 @@ function applyPlan() {
   if (sub) sub.textContent = `Up to ${bytes(myPlan().fileBytes)} per file`;
 }
 
-// The Pro offer: monthly or yearly, paid on Stripe's own page.
+// ---- Google Play Billing (inside the Android app) ----
+// The Android app is this site in a Trusted Web Activity, opened at
+// /?source=twa. There, Pro is bought through Google Play (Chrome's Digital
+// Goods API + Payment Request), with Google's prices; the purchase token goes
+// to the server, which checks it with Google before anything changes. On the
+// web, Pro stays on Stripe. Kept per session: the app shares Chrome's storage
+// with the browser, so this must never stick to ordinary Chrome tabs.
+const PLAY_BILLING = 'https://play.google.com/billing';
+const PLAY_PRODUCTS = { month: 'scrapsheet_pro_month', year: 'scrapsheet_pro_year' };
+const API_PLAY = '/.netlify/functions/play';
+const IN_ANDROID_APP = (() => {
+  try {
+    if (new URLSearchParams(location.search).get('source') === 'twa' || document.referrer.startsWith('android-app://')) sessionStorage.setItem('scrapsheet-android-app', '1');
+    return sessionStorage.getItem('scrapsheet-android-app') === '1';
+  } catch {
+    return new URLSearchParams(location.search).get('source') === 'twa';
+  }
+})();
+if (new URLSearchParams(location.search).get('source') === 'twa') history.replaceState(null, '', location.pathname + location.search.replace(/[?&]source=twa/, '').replace(/^&/, '?'));
+
+let playServicePromise = null;
+function playService() {
+  if (!IN_ANDROID_APP || !('getDigitalGoodsService' in window)) return Promise.resolve(null);
+  playServicePromise ||= window.getDigitalGoodsService(PLAY_BILLING).catch(() => null);
+  return playServicePromise;
+}
+
+// Google's prices for this person's country, e.g. { month: { label: '$0.99', value: 0.99 }, … }.
+async function playPrices(service) {
+  const items = await service.getDetails(Object.values(PLAY_PRODUCTS));
+  const out = {};
+  for (const [interval, id] of Object.entries(PLAY_PRODUCTS)) {
+    const item = items.find(i => i.itemId === id);
+    if (!item?.price) continue;
+    const value = Number(item.price.value);
+    out[interval] = { value, label: new Intl.NumberFormat(undefined, { style: 'currency', currency: item.price.currency }).format(value) };
+  }
+  return out;
+}
+
+async function playVerify(token) {
+  const r = await fetch(`${API_PLAY}?action=verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Couldn’t confirm the purchase. Try again in a minute.');
+  return data;
+}
+
+function proArrived(plan) {
+  account.plan = plan;
+  applyPlan();
+  if (!profileModal.hidden) renderProfile(profileView);
+}
+
+async function buyOnPlay(interval) {
+  if (blockedOffline()) return;
+  let response;
+  try {
+    const request = new PaymentRequest(
+      [{ supportedMethods: PLAY_BILLING, data: { sku: PLAY_PRODUCTS[interval] } }],
+      // Required by Payment Request, not used: Google Play shows the real price.
+      { total: { label: 'Total', amount: { currency: 'USD', value: '0' } } }
+    );
+    response = await request.show();
+  } catch (err) {
+    showToast(err?.name === 'AbortError' ? 'No changes made' : 'Google Play couldn’t start the purchase. Try again.');
+    return;
+  }
+  showToast('Finishing your upgrade…');
+  try {
+    const data = await playVerify(response.details.purchaseToken);
+    await response.complete('success');
+    if (data.pending) {
+      showToast('Your payment is pending. Pro switches on as soon as Google Play confirms it.', { duration: 4000 });
+      return;
+    }
+    proArrived(data.plan);
+    showToast('Welcome to Pro');
+  } catch (err) {
+    await response.complete('fail').catch(() => {});
+    showToast(err.message, { duration: 4000 });
+  }
+}
+
+// Purchases this Google account already has (a new install, or one that wasn't
+// confirmed in time): checked with the server, which links them if they're new.
+async function checkPlayPurchases() {
+  const service = await playService();
+  if (!service) return;
+  try {
+    const owned = (await service.listPurchases()).filter(p => Object.values(PLAY_PRODUCTS).includes(p.itemId));
+    if (!owned.length || myPlan().billing?.source === 'play') return;
+    for (const p of owned) {
+      const data = await playVerify(p.purchaseToken).catch(() => null);
+      if (data?.plan?.plan === 'pro') {
+        proArrived(data.plan);
+        showToast('Your Google Play subscription is active: you’re on Pro');
+        return;
+      }
+    }
+  } catch {
+    // Checked again next time the app opens.
+  }
+}
+
+async function showPlayUpgrade(reason) {
+  const service = await playService();
+  const prices = service ? await playPrices(service).catch(() => ({})) : {};
+  if (!prices.month && !prices.year) {
+    openSheet({
+      title: 'Upgrade to Pro',
+      text: `${reason ? `${reason} ` : ''}Upgrading isn’t available in this version of the app right now. Update ScrapSheet from Google Play and try again.`,
+      actions: [{ label: 'OK', kind: 'primary', full: true }]
+    });
+    return;
+  }
+  const save = prices.month && prices.year ? Math.round((1 - prices.year.value / (prices.month.value * 12)) * 100) : 0;
+  openSheet({
+    title: 'Upgrade to Pro',
+    text: `${reason ? `${reason} ` : ''}Pro gives you 10 sheets, 5 GB of storage, files up to 100 MB each, and share links. Billed through Google Play; cancel anytime in the Play Store.`,
+    actions: [
+      ...(prices.month ? [{ label: `${prices.month.label} / month`, kind: 'primary', run: () => buyOnPlay('month') }] : []),
+      ...(prices.year ? [{ label: `${prices.year.label} / year${save > 0 ? ` · save ${save}%` : ''}`, kind: 'primary', run: () => buyOnPlay('year') }] : []),
+      { label: 'Not now', kind: 'secondary', full: true }
+    ]
+  });
+}
+
+// The Pro offer: monthly or yearly, paid on Stripe's own page (or through
+// Google Play inside the Android app).
 function showUpgrade(reason) {
+  if (IN_ANDROID_APP) {
+    showPlayUpgrade(reason);
+    return;
+  }
   const { month, year } = myPlan().prices || { month: 0.99, year: 9.99 };
   const save = Math.round((1 - year / (month * 12)) * 100);
   openSheet({
@@ -4777,6 +4909,22 @@ async function startCheckout(interval) {
 }
 
 async function manageBilling() {
+  const billing = myPlan().billing;
+  // Bought in the Android app: Google Play manages it.
+  if (billing?.source === 'play') {
+    const params = billing.productId && billing.packageName ? `?sku=${encodeURIComponent(billing.productId)}&package=${encodeURIComponent(billing.packageName)}` : '';
+    location.assign(`https://play.google.com/store/account/subscriptions${params}`);
+    return;
+  }
+  // Paid on the web: managed there (the app doesn't send people to outside billing).
+  if (IN_ANDROID_APP) {
+    openSheet({
+      title: 'Manage billing',
+      text: `You pay for Pro on the web. To change or cancel it, open ${location.host} in your browser, sign in, and choose Manage billing in the account menu.`,
+      actions: [{ label: 'OK', kind: 'primary', full: true }]
+    });
+    return;
+  }
   showToast('Opening billing…');
   try {
     const { url } = await billingPost('portal');
@@ -5748,6 +5896,7 @@ async function startApp() {
   afterCheckout();
   offerProIfChosen();
   receiveShared();
+  checkPlayPurchases();
   if (locking) lockTheRest().then(() => { if (account.locked === 'on') sealOldTypes(); });
   else if (masterKey && account.locked === 'on' && !account.typesSealed) sealOldTypes();
   connectSync();

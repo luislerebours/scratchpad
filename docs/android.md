@@ -9,16 +9,11 @@ again right before submitting.
 1. Package the web app as a **Trusted Web Activity (TWA)** with Bubblewrap.
    It's the same site in a full-screen Chrome view, so every change we ship to
    the web reaches the Android app at once, with no app update needed.
-2. Launch with **no purchase button inside the Android app** ("reader" style):
-   people sign in to the account they already have, and Pro bought on the web
-   works in the app. This is the safe path everywhere.
-3. Then decide on in-app Pro:
-   - **Google Play Billing** in the TWA (Digital Goods API) works worldwide.
-     It's real work: a second billing system next to Stripe, kept in step by
-     our server.
-   - **US only:** Google currently allows other billing and links to the web
-     (see below), so a US-only "Upgrade on the web" link is possible, but its
-     fees and rules are still being settled in court.
+2. **Pro is bought through Google Play Billing inside the app** (built: see
+   "Google Play Billing" below). It's the smoothest upgrade on Android: the
+   payment method is already on the Google account, one tap and a fingerprint,
+   managed in the Play Store with everything else. The web keeps Stripe. One
+   account can be Pro through either; one ending never cancels the other.
 
 ## Billing rules (the part that decides the design)
 
@@ -43,15 +38,12 @@ again right before submitting.
 
 ### What that means for ScrapSheet
 
-- Free is small (1 sheet, 1 file, 10 MB). Android users who can't upgrade in
-  the app will notice, so Play Billing is probably worth adding soon after
-  launch.
-- If we add Play Billing, the account keeps one `plan`; the server verifies
-  Play purchases (Google Play Developer API) the way the webhook verifies
-  Stripe today, and records `user.play` beside `user.stripe`. Someone who pays
-  in one place must not be offered the other; cancelling is done where they
-  paid.
-- Purchases must be acknowledged within 3 days or Google refunds them.
+- Inside the Android app, Upgrade buys through Google Play (with Google's
+  local prices), and Stripe checkout never shows. Manage billing opens the
+  Play Store subscription. Someone who pays on the web is told to manage it
+  on the web (no link out of the app).
+- Google takes 15% of subscriptions, with no fixed fee per charge, which at
+  $0.99 may well cost less than card fees.
 
 ## Technical requirements
 
@@ -72,8 +64,7 @@ again right before submitting.
   maskable from `branding/`), `share_target` (ScrapSheet in the Share menu),
   a service worker, real-time sync, instant open, offline view-only.
 - **Tell the app it's the app:** set Bubblewrap's launch URL to
-  `/?source=twa` so the page can hide purchase buttons (and later switch to
-  Play Billing) without guessing.
+  `/?source=twa`, so the page buys through Google Play instead of Stripe.
 - TWAs can't be used for apps aimed at children under 13.
 
 ## Play Console checklist
@@ -110,8 +101,61 @@ again right before submitting.
    share a photo from Gallery into ScrapSheet, upload, offline, dark mode.
 5. Production release once the listing, data safety and deletion page are done.
 
+## Google Play Billing (built)
+
+How it works:
+
+- The app opens `/?source=twa`; the page remembers it for that session only
+  (the app shares Chrome's storage with the browser, so it must not stick).
+- **Buying:** the page gets Google Play's prices with the Digital Goods API
+  (`getDigitalGoodsService('https://play.google.com/billing')`), buys with
+  Payment Request (`sku` = the product id), then sends the purchase token to
+  `/.netlify/functions/play?action=verify`.
+- **The server** (`netlify/functions/play.mjs`, `netlify/lib/play.mjs`) reads
+  the subscription from the Google Play Developer API (`subscriptionsv2`),
+  checks it's ScrapSheet Pro, refuses a purchase already linked to another
+  account, **acknowledges** it (Google refunds anything not acknowledged within
+  3 days), links the token (hashed) to the account and sets the plan. The page
+  never decides Pro.
+- **Google's notices** (Real-time developer notifications through Cloud
+  Pub/Sub, pushed to `?action=rtdn&key=…`) trigger a fresh read: renewals,
+  cancellations (Pro stays until the paid time ends), grace period, account
+  hold (back to Free, nothing deleted), recovery, restore, expiry, refunds.
+- **New install:** the page checks the purchases this Google account owns and
+  links any not yet on the account.
+- **Pending payments** say so and stay Free until Google confirms.
+- **Delete account** cancels a renewing Play subscription first.
+- The admin dashboard shows Play billing (never the purchase token) and can
+  refresh it from Google.
+
+Setup (once the app exists in Play Console):
+
+1. **Products:** Play Console → Monetize → Products → Subscriptions. Create
+   `scrapsheet_pro_month` (one auto-renewing monthly base plan, US $0.99) and
+   `scrapsheet_pro_year` (one yearly base plan, US $9.99); set the other
+   countries' prices; activate both. The ids must match exactly.
+2. **Server access:** in Google Cloud, a project with the *Google Play Android
+   Developer API* enabled, a service account, and a JSON key for it. In Play
+   Console → Users and permissions, invite the service account's email with
+   *View financial data* and *Manage orders and subscriptions*.
+3. **Netlify environment variables** (site `scrapsheet`; the JSON key is a
+   secret, entered only in Netlify's settings):
+   - `PLAY_PACKAGE_NAME` = the app's package (e.g. `com.sector809labs.scrapsheet`)
+   - `PLAY_SERVICE_ACCOUNT` = the whole JSON key
+   - `PLAY_RTDN_SECRET` = a long random string
+4. **Notices:** Cloud Pub/Sub topic (e.g. `scrapsheet-play`); give
+   `google-play-developer-notifications@system.gserviceaccount.com` the
+   *Pub/Sub Publisher* role on it; add a **push** subscription to
+   `https://scrap.sector809labs.com/.netlify/functions/play?action=rtdn&key=<PLAY_RTDN_SECRET>`.
+   In Play Console → Monetize → Monetization setup, enter the topic and send a
+   test notification. The admin dashboard's Settings shows both as set.
+5. **Bubblewrap:** in `twa-manifest.json`, `"features": { "playBilling": { "enabled": true } }`,
+   and the launch URL `/?source=twa`; then `bubblewrap update` and `build`.
+6. **Test:** add license testers in Play Console (test purchases are free and
+   renew quickly), install from the internal testing track, buy, cancel in the
+   Play Store, check the account follows.
+
 ## Before building
 
-- Hide Upgrade / Manage billing / prices when launched with `?source=twa`.
-- Add the account-deletion web page.
-- Decide: reader-only at launch, or Play Billing from day one.
+- Add the account-deletion web page (Play requires one).
+- Choose the package name (it can never change).

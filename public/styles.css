@@ -677,8 +677,8 @@ body.signed-out { background: var(--auth-bg); }
 .auth-legal { display: flex; justify-content: center; gap: 22px; margin: 21px 0 0; font-size: 1.0625rem; }
 .auth-legal a { color: var(--auth-text); text-decoration: underline; text-underline-offset: 3px; }
 @media (hover: hover) { .auth-legal a:hover { color: var(--auth-accent); } }
-.auth-secure { display: flex; align-items: center; justify-content: center; gap: 30px; margin: 30px 0 0; color: var(--auth-text); font-size: 1.125rem; }
-.auth-secure svg { width: 26px; height: 26px; fill: none; stroke: var(--auth-accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.auth-secure { display: flex; align-items: center; gap: 12px; margin: 22px 0 0; color: var(--auth-text); font-size: .875rem; line-height: 1.45; text-align: left; }
+.auth-secure svg { flex: 0 0 auto; width: 22px; height: 22px; fill: none; stroke: var(--auth-accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 /* Bottom of the sign-in card on desktop: why ScrapSheet, pinned to the bottom
    so the card never looks empty whatever its height. */
 .auth-perks { display: grid; gap: 10px; margin: auto 0 0; padding: 18px 0 0; border-top: 1px solid var(--auth-line); list-style: none; }
@@ -717,7 +717,6 @@ body.signed-out { background: var(--auth-bg); }
   .auth-screen .auth-divider { margin: 28px 0 24px; font-size: 1.25rem; }
   .auth-note { font-size: 1.25rem; margin-top: 14px; }
   .auth-legal { font-size: 1.1875rem; margin-top: 24px; }
-  .auth-secure { font-size: 1.25rem; margin-top: 34px; }
 }
 
 
@@ -742,6 +741,7 @@ body.signed-out { background: var(--auth-bg); }
   .auth-lede { margin-left: 0 !important; }
   .only-narrow { display: revert !important; }
   .plan-list .only-narrow, .plan-price .only-narrow { display: inline !important; }
+  .auth-secure.only-narrow { display: flex !important; }
   .auth-page { padding: max(14px, env(safe-area-inset-top)) max(21px, env(safe-area-inset-right)) max(26px, env(safe-area-inset-bottom)) max(21px, env(safe-area-inset-left)); }
   .auth-help { display: none; }
   .auth-top { min-height: 36px; }
@@ -764,8 +764,7 @@ body.signed-out { background: var(--auth-bg); }
   .auth-screen .auth-submit, .auth-screen .auth-create { min-height: 39px; border-radius: 8px; font-size: 1rem; }
   .auth-screen .auth-divider { margin: 14px 0 12px; font-size: .875rem; }
   .auth-note { margin-top: 10px; font-size: .875rem; }
-  .auth-secure { gap: 12px; margin-top: 10px; font-size: .875rem; }
-  .auth-secure svg { width: 20px; height: 20px; }
+  .auth-secure { margin-top: 18px; }
   .auth-plans { grid-area: plans; gap: 14px; margin-top: 18px; }
   .plan-card { padding: 14px 10px 16px 18px; border-radius: 10px; }
   .plan-name { font-size: 1.25rem; }

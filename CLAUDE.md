@@ -228,5 +228,12 @@ the current policies before building the Android app.
   offline, then only when someone tries to type (a tap on the text or a key) or
   to change something.
   Guard new actions that change data with `if (blockedOffline()) return;`.
+- Transfers already running (uploads, pasted images, downloads) don't fail when
+  the page goes to the background or offline: `withRetry` waits (`whenActive`)
+  without using up tries and carries on from the piece it was on (pieces already
+  sent stay sent). A piece stuck after coming back restarts after 8 s
+  (`restartIfStuck`). Only a refusal from the server (4xx) or Cancel ends one.
+  Upload rows say "Keep ScrapSheet open until uploads finish."; a page that is
+  closed (or that the phone discards) still loses its upload.
 - Search runs on the device over the kept copies of every sheet and its file
   list (`state?meta=all` returns both), so typing makes no requests.

@@ -430,6 +430,7 @@ body.dragging-files .files.drag-active
 .transfer-row.done .transfer-fill { background: var(--success); }
 .transfer-row.failed .transfer-fill { background: var(--danger); }
 .transfer-meta { margin-top: 6px; color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; }
+.transfer-note { margin-top: 4px; color: var(--muted); font-size: .75rem; }
 .transfer-row.failed .transfer-meta { color: var(--danger); }
 .transfer-items { display: grid; gap: 4px; margin-top: 8px; font-size: .8125rem; }
 .transfer-item { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); }

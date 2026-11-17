@@ -27,7 +27,6 @@
         <button id="searchBtn" class="icon-btn search-btn" type="button" aria-label="Search sheets and files" title="Search (Ctrl K)">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
         </button>
-        <span id="status" class="conn" data-state="connecting" role="status" title="Connecting…"><span class="conn-dot" aria-hidden="true"></span><span class="conn-label">Connecting…</span></span>
         <button id="accountBtn" class="account-btn" type="button" aria-label="Account" aria-haspopup="menu" aria-expanded="false"><span class="avatar" id="avatar" aria-hidden="true">?</span></button>
       </div>
     </header>
@@ -44,6 +43,7 @@
     <section class="pad-card" aria-label="Sheet text">
       <div class="pad-toolbar">
         <div id="saveStatus" class="save-status" data-state="loading" role="status" aria-live="polite">
+          <span id="status" class="conn" data-state="connecting" role="status" title="Connecting…"><span class="conn-dot" aria-hidden="true"></span><span class="conn-label">Connecting…</span></span>
           <span id="saveStatusText">Loading…</span>
           <button id="retrySaveBtn" class="link-btn" type="button" hidden>Retry</button>
         </div>

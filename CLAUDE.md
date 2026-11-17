@@ -22,7 +22,8 @@ Keep the web app ready to be wrapped: everything works in a WebView, the
 manifest and icons stay complete, no browser-only shortcuts that an app shell
 can't offer. Store billing rules (Google Play Billing, Apple in-app purchase)
 may require their own billing beside Stripe for Pro bought in the app: check
-the current policies before building the Android app.
+the current policies before building the Android app. `docs/android.md` has the
+researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps.
 
 ## Rules
 

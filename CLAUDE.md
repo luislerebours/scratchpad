@@ -14,9 +14,13 @@ Pushes to `main` deploy straight to the live site.
 ## Roadmap
 
 1. Web app: get it fully running (Stripe live mode next).
-2. Android app, built from this web app (a Trusted Web Activity via
-   Bubblewrap, or Capacitor if native features are needed).
-3. iOS app, after the Android launch (Capacitor can share the same shell).
+2. Android app, built from this web app as a Trusted Web Activity with
+   Bubblewrap (package `com.sector809labs.scrapsheet`, decided: it can never
+   change). TWA, not Capacitor, because Play Billing uses Chrome's Digital
+   Goods API and Share to ScrapSheet uses the manifest's share_target, both
+   TWA-only (see `docs/android.md`).
+3. iOS app, after the Android launch, with Capacitor (WKWebView, StoreKit for
+   in-app purchase).
 
 Keep the web app ready to be wrapped: everything works in a WebView, the
 manifest and icons stay complete, no browser-only shortcuts that an app shell

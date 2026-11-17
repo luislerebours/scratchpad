@@ -14,6 +14,24 @@ again right before submitting.
    payment method is already on the Google account, one tap and a fingerprint,
    managed in the Play Store with everything else. The web keeps Stripe. One
    account can be Pro through either; one ending never cancels the other.
+3. **Package name: `com.sector809labs.scrapsheet`** (decided; it can never
+   change once the app is published).
+
+### Why Bubblewrap (TWA) for Android, and Capacitor only for iOS
+
+- Play Billing here uses Chrome's Digital Goods API, which only works inside
+  a TWA. Capacitor runs in Android's WebView, which doesn't have it: it would
+  need a native billing plugin and a rewrite of the page's purchase step (the
+  server's verify and notices would stay).
+- "Share to ScrapSheet" comes from the manifest's `share_target`, which a TWA
+  turns into an Android share intent by itself; Capacitor needs a plugin.
+- A TWA is the live site in full Chrome: fixes reach the app at once, the
+  download is tiny, and the person's Chrome sign-in carries over.
+- iOS has no TWA, and Apple wants StoreKit for in-app purchases and more than
+  a wrapped website, so the iOS app is where Capacitor (WKWebView plus native
+  plugins) earns its keep. Both shells stay thin around the same site and
+  server; Android can move to Capacitor later if one shell for both is ever
+  worth the billing rework.
 
 ## Billing rules (the part that decides the design)
 
@@ -91,7 +109,7 @@ again right before submitting.
 
 1. `npm i -g @bubblewrap/cli`, then
    `bubblewrap init --manifest https://scrap.sector809labs.com/manifest.webmanifest`
-   (package name e.g. `com.sector809labs.scrapsheet`; launch URL
+   (package name `com.sector809labs.scrapsheet`; launch URL
    `/?source=twa`; keep the signing key safe: losing it means a new app).
 2. `bubblewrap build`, upload the `.aab` to an internal testing track.
 3. Copy the Play app signing SHA-256 from Play Console (App integrity) into
@@ -140,7 +158,7 @@ Setup (once the app exists in Play Console):
    *View financial data* and *Manage orders and subscriptions*.
 3. **Netlify environment variables** (site `scrapsheet`; the JSON key is a
    secret, entered only in Netlify's settings):
-   - `PLAY_PACKAGE_NAME` = the app's package (e.g. `com.sector809labs.scrapsheet`)
+   - `PLAY_PACKAGE_NAME` = `com.sector809labs.scrapsheet`
    - `PLAY_SERVICE_ACCOUNT` = the whole JSON key
    - `PLAY_RTDN_SECRET` = a long random string
 4. **Notices:** Cloud Pub/Sub topic (e.g. `scrapsheet-play`); give
@@ -157,4 +175,5 @@ Setup (once the app exists in Play Console):
 
 ## Before building
 
-- Choose the package name (it can never change).
+Nothing left in the code. The rest is the Play Console checklist above and
+the Google Play Billing setup.

@@ -628,7 +628,8 @@ body.signed-out { background: var(--auth-bg); }
 .auth-punch { margin: 34px 0 0; font-size: 1.5rem; line-height: 1.45; }
 .auth-punch strong { display: block; font-size: 1.6875rem; font-weight: 700; }
 
-.auth-plans { grid-area: plans; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 19px; margin-top: 40px; }
+/* The plan cards and the sign-in card end on the same line. */
+.auth-plans { align-self: end; grid-area: plans; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 19px; margin-top: 40px; }
 /* Both plans look the same; the one under the pointer (or keyboard focus) lights up. */
 .plan-card { padding: 24px 12px 30px 27px; border: 2px solid var(--auth-line); border-radius: 12px; background: var(--auth-plan); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .plan-card:focus-visible { border-color: var(--auth-accent); box-shadow: 0 0 0 1px var(--auth-accent); outline: none; }
@@ -647,7 +648,7 @@ body.signed-out { background: var(--auth-bg); }
 .auth-screen p, .auth-screen li, .auth-screen label, .auth-screen input { }
 .plan-list svg { flex: 0 0 auto; width: 22px; height: 22px; fill: none; stroke: var(--auth-accent); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
-.auth-card { grid-area: card; box-sizing: border-box; width: 100%; padding: 36px 32px 44px 37px; border: 1px solid var(--auth-line); border-radius: 18px; background: var(--auth-card); }
+.auth-card { align-self: stretch; grid-area: card; box-sizing: border-box; width: 100%; padding: 36px 32px 44px 37px; border: 1px solid var(--auth-line); border-radius: 18px; background: var(--auth-card); }
 .auth-kicker { margin: 0 0 12px; color: var(--auth-accent); font-size: 1rem; font-weight: 600; text-transform: uppercase; }
 .auth-step .auth-title { margin: 0 0 14px; font-size: 2.25rem; font-weight: 700; line-height: 1.05; }
 .auth-sub { margin: 0 0 30px; color: var(--auth-text); font-size: 1.1875rem; }

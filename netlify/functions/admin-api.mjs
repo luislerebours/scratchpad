@@ -9,9 +9,10 @@ import {
   otpauthUri, readAudit, readSettings, requireAdmin, setupConfigured, setupTokenOk, writeSettings
 } from '../lib/admin.mjs';
 import { clearErrors, readErrors, withErrors } from '../lib/errors.mjs';
-import { planOf } from '../lib/plans.mjs';
+import { planOf, playKeepsPro } from '../lib/plans.mjs';
 import { readShares, sharesStore, ended } from '../lib/shares.mjs';
 import { applySubscription, stripe, stripeReady } from '../lib/stripe.mjs';
+import { applyPlay, getSubscription, playReady } from '../lib/play.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 
 // The admin dashboard's API (/admin). Every action except signing in checks
@@ -68,7 +69,8 @@ async function accountView(user) {
     quota: quotaFor(user),
     quotaCustom: user.quotaBytes ?? null,
     encrypted: Boolean(user.keyring),
-    paying: Boolean(s.subscription && KEEPS_PRO.has(s.status)),
+    paying: Boolean(s.subscription && KEEPS_PRO.has(s.status)) || playKeepsPro(user.play),
+    payingVia: Boolean(s.subscription && KEEPS_PRO.has(s.status)) ? 'Stripe' : playKeepsPro(user.play) ? 'Google Play' : null,
     stripe: s.customer ? {
       customer: s.customer,
       subscription: s.subscription || null,
@@ -76,6 +78,15 @@ async function accountView(user) {
       interval: s.interval || null,
       periodEnd: s.periodEnd || null,
       cancelAtEnd: Boolean(s.cancelAtEnd)
+    } : null,
+    // Google Play (Pro bought in the Android app). The purchase token is private: never shown.
+    play: user.play ? {
+      productId: user.play.productId || null,
+      interval: user.play.interval || null,
+      status: user.play.state || null,
+      periodEnd: user.play.expiresAt || null,
+      cancelAtEnd: !user.play.autoRenew,
+      test: Boolean(user.play.test)
     } : null,
     disabledAt: user.disabledAt || null,
     disabledBy: user.disabledBy || null,
@@ -119,6 +130,16 @@ async function accountAction(req, admin, body) {
       break;
     }
     case 'resync': {
+      // Pro bought in the Android app: read fresh from Google Play.
+      if (user.play?.token && !user.stripe?.customer) {
+        if (!playReady()) return json({ error: 'Google Play isn’t set up' }, 503);
+        const sub = await getSubscription(user.play.token).catch(() => null);
+        if (!sub) return json({ error: 'Google Play didn’t find this account’s subscription' }, 404);
+        updated = (await applyPlay(emailKey(user.email), user.play.token, sub)) || user;
+        details = { source: 'play', status: sub.subscriptionState, plan: planOf(updated) };
+        await audit(req, admin, 'account.resync', { target, ...details });
+        return json({ ok: true, account: await accountView(updated) });
+      }
       if (!stripeReady()) return json({ error: 'Stripe isn’t set up' }, 503);
       const s = user.stripe || {};
       let sub = null;
@@ -429,6 +450,8 @@ async function adminRead(req, admin, view) {
       services: {
         stripe: stripeReady() ? stripeMode() : null,
         stripeWebhook: Boolean(env('STRIPE_WEBHOOK_SECRET')),
+        play: playReady() ? env('PLAY_PACKAGE_NAME') : null,
+        playNotices: Boolean(env('PLAY_RTDN_SECRET')),
         email: Boolean(env('RESEND_API_KEY') && env('MAIL_FROM')),
         sync: Boolean(env('SYNC_URL')),
         legacyOwnerEmail: Boolean(env('OWNER_EMAIL')),

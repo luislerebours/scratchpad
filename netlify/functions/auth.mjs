@@ -9,6 +9,8 @@ import { withErrors } from '../lib/errors.mjs';
 import { sendEmail } from '../lib/email.mjs';
 import { planInfo } from '../lib/plans.mjs';
 import { customerKey, stripe, stripeReady } from '../lib/stripe.mjs';
+import { cancelSubscription as cancelPlay, forgetToken as forgetPlayToken, playReady } from '../lib/play.mjs';
+import { playKeepsPro } from '../lib/plans.mjs';
 import { readShares, sharesStore } from '../lib/shares.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
@@ -281,12 +283,26 @@ export default withErrors('auth', async (req, context) => {
         }
       }
     }
+    // Pro bought in the Android app renews through Google Play: stopped too.
+    const playRenews = Boolean(user.play?.token && user.play.autoRenew && playKeepsPro(user.play));
+    if (playRenews) {
+      if (!playReady()) return json({ error: 'Couldn’t cancel your Google Play subscription. Try again later, or email support.' }, 503);
+      try {
+        await cancelPlay(user.play.token);
+      } catch (err) {
+        if (![404, 410].includes(err.status)) {
+          console.error('Play cancel on delete', err.status, err.message);
+          return json({ error: 'Couldn’t cancel your Google Play subscription. Try again in a minute, or email support.' }, 502);
+        }
+      }
+    }
     await deleteAccountData(ns);
     await Promise.all([`users/${ek}`, `codes/${ek}`, `pending/${ek}`].map(key => store.delete(key)));
     if (user.stripe?.customer) await store.delete(customerKey(user.stripe.customer));
+    if (user.play?.token) await forgetPlayToken(user.play.token);
     // Other devices check in and find the account gone.
     await notifySync(ns, 'session', String(Date.now()));
-    await securityNotice(req, user.email, 'deleted', { cancelled: cancelling });
+    await securityNotice(req, user.email, 'deleted', { cancelled: cancelling || playRenews });
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
   }
 

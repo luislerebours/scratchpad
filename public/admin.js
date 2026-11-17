@@ -321,7 +321,17 @@ async function loadOverview() {
 
 // ---- Accounts ----
 
+const PLAY_STATES = { SUBSCRIPTION_STATE_ACTIVE: 'active', SUBSCRIPTION_STATE_IN_GRACE_PERIOD: 'grace period', SUBSCRIPTION_STATE_ON_HOLD: 'on hold', SUBSCRIPTION_STATE_PAUSED: 'paused', SUBSCRIPTION_STATE_CANCELED: 'canceled', SUBSCRIPTION_STATE_EXPIRED: 'expired', SUBSCRIPTION_STATE_PENDING: 'pending' };
+
 function billingText(a) {
+  if (a.play && (!a.stripe || a.payingVia === 'Google Play')) {
+    const p = a.play;
+    const parts = ['Google Play', PLAY_STATES[p.status] || 'unknown'];
+    if (p.interval) parts.push(p.interval === 'year' ? 'yearly' : 'monthly');
+    if (p.periodEnd) parts.push(`${p.cancelAtEnd ? 'ends' : 'renews'} ${fmtDate(p.periodEnd)}`);
+    if (p.test) parts.push('test purchase');
+    return parts.join(' · ');
+  }
   if (!a.stripe) return a.plan === 'pro' && !a.planSet ? 'Pro from before plans' : '—';
   const s = a.stripe;
   if (!s.status) return 'Customer, no subscription';
@@ -393,9 +403,10 @@ function fillAccount(a) {
     ...(a.originalData ? fact('Data', 'Holds the original data from before accounts') : [])
   );
   $('planSelect').value = a.plan;
-  $('planHint').textContent = a.paying ? 'This account pays through Stripe: the next Stripe update sets the plan again.' : '';
+  $('planHint').textContent = a.paying ? `This account pays through ${a.payingVia}: its next update sets the plan again.` : '';
   $('quotaInput').value = a.quotaCustom === null ? '' : a.quotaCustom === -1 ? '0' : String(+(a.quotaCustom / 1024 ** 3).toFixed(3));
-  $('resyncBtn').disabled = !a.stripe;
+  $('resyncBtn').disabled = !a.stripe && !a.play;
+  $('resyncBtn').textContent = a.play && !a.stripe ? 'Refresh from Google Play' : 'Refresh from Stripe';
   const link = $('stripeLink');
   link.hidden = !a.stripe?.customer;
   if (a.stripe?.customer) link.href = `https://dashboard.stripe.com/${stripeMode === 'test' ? 'test/' : ''}customers/${encodeURIComponent(a.stripe.customer)}`;
@@ -429,7 +440,7 @@ async function accountOp(button, op, extra = {}, done) {
 
 $('planSave').addEventListener('click', e => accountOp(e.currentTarget, 'plan', { plan: $('planSelect').value }, 'Plan changed'));
 $('quotaSave').addEventListener('click', e => accountOp(e.currentTarget, 'quota', { limitGb: $('quotaInput').value.trim() }, 'Storage limit saved'));
-$('resyncBtn').addEventListener('click', e => accountOp(e.currentTarget, 'resync', {}, 'Updated from Stripe'));
+$('resyncBtn').addEventListener('click', e => accountOp(e.currentTarget, 'resync', {}, 'Billing updated'));
 $('reactivateBtn').addEventListener('click', e => accountOp(e.currentTarget, 'reactivate', {}, 'Account reactivated'));
 
 $('signoutBtn').addEventListener('click', async e => {
@@ -534,7 +545,7 @@ const ACTIONS = {
   'admin.mfa-reset': 'Set up a new authenticator',
   'account.plan': 'Changed plan',
   'account.quota': 'Changed storage limit',
-  'account.resync': 'Refreshed billing from Stripe',
+  'account.resync': 'Refreshed billing',
   'account.deactivate': 'Deactivated account',
   'account.reactivate': 'Reactivated account',
   'account.signout': 'Signed out account’s devices',
@@ -698,6 +709,8 @@ $('myMfaForm').addEventListener('submit', async e => {
 const SERVICE_LABELS = {
   stripe: ['Stripe', v => (v ? `connected (${v} mode)` : 'not set up')],
   stripeWebhook: ['Stripe webhook secret', v => (v ? 'set' : 'not set')],
+  play: ['Google Play Billing', v => (v ? `set up (${v})` : 'not set up')],
+  playNotices: ['Google Play notices (PLAY_RTDN_SECRET)', v => (v ? 'set' : 'not set')],
   email: ['Sign-in email (Resend)', v => (v ? 'set up' : 'not set up')],
   sync: ['Real-time sync relay', v => (v ? 'set up' : 'off (devices check every 2 s)')],
   legacyOwnerEmail: ['OWNER_EMAIL', v => (v ? 'still set but no longer used: you can remove it' : 'not set (not needed)')],

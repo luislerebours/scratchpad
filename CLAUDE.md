@@ -74,6 +74,20 @@ researched rules (Nov 2026), the Play Console checklist and Bubblewrap steps.
   keep Pro). REST via fetch, API version 2026-04-22.dahlia. Env:
   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`; `NEW_ACCOUNT_PLAN=pro` is for
   local tests only.
+- Google Play Billing (Pro bought in the Android app; `netlify/lib/play.mjs`,
+  `netlify/functions/play.mjs`, `docs/android.md`): the app opens
+  `/?source=twa` (remembered per session in `sessionStorage`, never
+  `localStorage`: the app shares Chrome's storage). There Upgrade uses the
+  Digital Goods API + Payment Request with products `scrapsheet_pro_month` /
+  `scrapsheet_pro_year`; the token goes to `play?action=verify`, which reads
+  `subscriptionsv2` from Google, acknowledges, links the token (hashed,
+  `play-tokens/…` in the auth store) and sets `plan` + `user.play`. Google's
+  notices (Pub/Sub push to `play?action=rtdn&key=PLAY_RTDN_SECRET`) only
+  trigger a fresh read. Pro holds while either Stripe or Play pays
+  (`stripeKeepsPro` / `playKeepsPro` in plans.mjs); `planInfo().billing.source`
+  says which. Manage billing for Play opens the Play Store. Delete account
+  cancels a renewing Play subscription. Env: `PLAY_PACKAGE_NAME`,
+  `PLAY_SERVICE_ACCOUNT` (JSON key, secret), `PLAY_RTDN_SECRET`.
 - Download my data (Account & security, `downloadMyData()` in `app.js`): put
   together on the device, since only it can unlock anything. One .zip
   (`makeZip`, stored, Zip64 past 4 GB): README.txt, account.json, then a folder

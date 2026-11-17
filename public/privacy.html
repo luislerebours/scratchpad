@@ -51,7 +51,7 @@
         <li><strong>A one-way hash of your sign-in secret</strong> (never your password) and your encrypted keys, so you can sign in and unlock your data on new devices.</li>
         <li><strong>Usage numbers</strong> we need to run the service and plans: how much storage you use, how many sheets and files you have and their sizes, when they were added, whether a sheet has anything in it, and which images a sheet uses.</li>
         <li><strong>Account activity</strong>: when the account was created, how many times you’ve signed in, and which days you used ScrapSheet in the last 60 days.</li>
-        <li><strong>Your plan and billing status</strong>: whether you’re on Free or Pro, and your Stripe customer and subscription identifiers, renewal date and status. We never see or store card numbers.</li>
+        <li><strong>Your plan and billing status</strong>: whether you’re on Free or Pro, and your Stripe customer and subscription identifiers (or, for Pro bought in the Android app, the Google Play purchase, product and status), renewal date and status. We never see or store card numbers.</li>
         <li><strong>Share links you create</strong>: what each link points to, when it expires and how many times it was opened. The key that opens a shared item is in the part of the link after “#”, which browsers never send to us.</li>
         <li><strong>IP addresses</strong>, briefly, to limit how many sign-in codes can be requested (to stop abuse). Our hosting provider also keeps standard technical logs for a short time.</li>
         <li><strong>Error reports</strong>: when something on our servers fails, which part failed and when, kept for 30 days. Never the content of what you sent.</li>
@@ -74,6 +74,7 @@
         <li><strong>Cloudflare</strong> runs the live sync that tells your other devices something changed, and our domain’s DNS. It doesn’t receive your content.</li>
         <li><strong>Resend</strong> sends our emails: sign-in codes, and security notices when your password changes, a new recovery key is made, every device is signed out, or the account is deleted. It receives your email address and what the email says, including the time and the kind of device (for example, “Safari on iPhone”, read from your browser and not kept).</li>
         <li><strong>Stripe</strong> handles Pro payments as the merchant of record (through its Managed Payments service and Link). Stripe collects your payment details, billing address and tax information directly, under <a href="https://stripe.com/privacy" rel="noopener">Stripe’s privacy policy</a>. We receive your subscription status, not your card.</li>
+        <li><strong>Google Play</strong> handles Pro bought inside the ScrapSheet Android app. Google collects your payment details through your Google account, under <a href="https://policies.google.com/privacy" rel="noopener">Google’s privacy policy</a>. We receive the purchase and its status (not your card), and check it with Google.</li>
       </ul>
       <p>Inside Sector 809 Labs, only staff who run the service can see account information, through admin tools that need their own password and two-step sign-in and that record every change. Those tools show account details (email, plan, billing status, storage used and activity), never your content.</p>
       <p>We don’t sell or rent personal data, and we don’t share it for advertising. We may disclose information if the law requires it, but your content is encrypted and we can’t decrypt it.</p>
@@ -85,7 +86,7 @@
         <li>Deleted sheets and files stay in Recently Deleted for 30 days, then are deleted for good.</li>
         <li>Ended share links are cleared from your list after 30 days.</li>
         <li>Sign-in codes expire after 15 minutes.</li>
-        <li>Stripe keeps billing records as the law requires.</li>
+        <li>Stripe and Google keep billing records as the law requires.</li>
       </ul>
 
       <h2>Your choices and rights</h2>

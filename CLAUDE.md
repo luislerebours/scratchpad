@@ -190,5 +190,13 @@ the current policies before building the Android app.
   keyring, and the page locks everything (text, images, files, Recently Deleted)
   and turns old share links off, then marks the account `migratedAt`.
   Server-side search, previews or recovery of content are impossible by design.
+- Instant open (`paintFromSnapshot()` / `saveSnapshot()` in `app.js`): an
+  encrypted copy of the tabs, kept sheet html (open sheet first, up to ~4 MB),
+  file lists, tab status and plan is sealed with the device's master key and
+  kept in the `scratchpad-keys` IndexedDB store (key `snapshot`), saved 1.5 s
+  after changes and when the page is hidden. On open it's drawn before any
+  request, read-only until the server is checked; `/auth` failing to connect
+  retries (only a 401 signs out). A different account, a 401 or sign-out clears
+  it with the keys. Without a copy, faint placeholder lines and tabs show.
 - Search runs on the device over the kept copies of every sheet and its file
   list (`state?meta=all` returns both), so typing makes no requests.

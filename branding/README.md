@@ -37,6 +37,10 @@ From the kit, the site uses:
   `public/assets/favicon.svg`, `public/assets/favicon.png`.
 - Link previews: `kit/03_Social/sharing-card-1200x630.png` →
   `public/assets/sharing-card.png` (Open Graph / Twitter tags in `index.html`).
+- In-app and email logo: `kit/02_Icons/mark-primary.svg`, cropped tight to the
+  drawing and rendered at 256 px on a transparent background →
+  `public/assets/mark-light.png` (teal, mint fill) and `public/assets/mark.png`
+  (same shape in cyan #68DEFA with a faint fill, for dark mode).
 
 Palette: teal `#247F82`, cream `#F5F2EB`, mint `#DDF5EE`, ink `#1C1C1C`
 (`kit/07_Web/brand-tokens.css`). The app's own UI colors stay as the tokens in

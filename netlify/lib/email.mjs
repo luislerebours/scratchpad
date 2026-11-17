@@ -31,7 +31,7 @@ const paras = value => (Array.isArray(value) ? value : value ? [value] : []);
 // origin: the site address the email is about (its logo and links come from there).
 export function renderEmail(content, origin) {
   const { preheader = '', heading, intro, box, button, note } = content;
-  const logo = `${origin}/assets/mark-light.png?v=2`;
+  const logo = `${origin}/assets/mark-light.png?v=3`;
 
   const introHtml = paras(intro).map(p =>
     `<p style="margin:0 0 12px;font-family:${FONT};font-size:17px;line-height:1.5;color:${C.soft};">${esc(p)}</p>`).join('');

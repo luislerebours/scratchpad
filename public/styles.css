@@ -208,7 +208,10 @@ body.signed-out .app-shell { display: none; }
 .brand-toggle { margin: -4px -8px; padding: 4px 8px; border-radius: var(--r-control); cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; transition: background-color .15s ease; }
 @media (hover: hover) { .brand-toggle:hover { background: var(--hover); } }
 .brand-toggle:active { opacity: .7; }
+/* The logo's middle sits on the middle of the "ScrapSheet" capitals. */
+img[data-mark] { transform: translateY(-1px); }
 .brand-icon { width: 30px; height: 30px; flex: 0 0 auto; }
+.brand img.brand-icon { transform: translateY(-1.4px); }
 .brand h1 { font-size: 1.375rem; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; }
 .topbar-right { display: flex; align-items: center; gap: 6px; }
 
@@ -603,7 +606,7 @@ body.signed-out { background: var(--auth-bg); }
 
 .auth-top { display: flex; align-items: center; justify-content: space-between; min-height: 42px; }
 .auth-logo { display: flex; align-items: center; gap: 17px; font-size: 1.75rem; font-weight: 700; letter-spacing: 0; }
-.auth-logo img { width: 42px; height: 42px; }
+.auth-logo img { width: 42px; height: 42px; transform: none; }
 .auth-nav { display: flex; align-items: center; gap: 22px; }
 .auth-help { color: var(--auth-text); font-size: 1.375rem; font-weight: 500; text-decoration: none; }
 @media (hover: hover) { .auth-help:hover { color: var(--auth-accent); } }

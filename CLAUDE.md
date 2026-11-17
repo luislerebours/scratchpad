@@ -168,8 +168,11 @@ the current policies before building the Android app.
   iOS) is made from it (`app-icon-full-bleed-1024.png`, maskable version for
   Android). `branding/kit/` is the full brand kit (logos, marks, social, email,
   print, guidelines). Tab favicons and the link-preview card come from the kit.
-  Bump the `?v=` on icon links when icons change. The header's see-through
-  `mark.png` / teal `mark-light.png` are separate.
+  Bump the `?v=` on icon links when icons change. The in-app logo
+  (`mark-light.png` teal with mint fill, `mark.png` cyan for dark) is the kit's
+  `mark-primary.svg` cropped tight to the drawing (256 px, transparent); also the
+  email logo. `img[data-mark]` / `.brand-icon` nudge it up so its middle sits on
+  the middle of the "ScrapSheet" capitals.
   The 3D app icon (`app-icon*.png`, `public/assets/apple-touch-icon.png`,
   `icon-192/512`, `icon-maskable-512`, `icon-source`) is ONLY the installed
   app's icon (home screen, taskbar, app stores): never use it inside the site,

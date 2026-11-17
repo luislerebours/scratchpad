@@ -18,7 +18,9 @@ Pushes to `main` deploy straight to the live site.
    Bubblewrap (package `com.sector809labs.scrapsheet`, decided: it can never
    change). TWA, not Capacitor, because Play Billing uses Chrome's Digital
    Goods API and Share to ScrapSheet uses the manifest's share_target, both
-   TWA-only (see `docs/android.md`).
+   TWA-only (see `docs/android.md`). The app itself is
+   `android/twa-manifest.json` (Bubblewrap 1.27+, target API 36, min API 24);
+   the generated project and the signing key are never committed.
 3. iOS app, after the Android launch, with Capacitor (WKWebView, StoreKit for
    in-app purchase).
 

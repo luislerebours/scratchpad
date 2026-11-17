@@ -1,0 +1,69 @@
+{
+  "packageId": "com.sector809labs.scrapsheet",
+  "host": "scrap.sector809labs.com",
+  "name": "ScrapSheet",
+  "launcherName": "ScrapSheet",
+  "display": "standalone",
+  "themeColor": "#F5F1EB",
+  "themeColorDark": "#091524",
+  "navigationColor": "#F5F1EB",
+  "navigationColorDark": "#091524",
+  "navigationDividerColor": "#DDD5CC",
+  "navigationDividerColorDark": "#2A3747",
+  "backgroundColor": "#F5F1EB",
+  "enableNotifications": false,
+  "startUrl": "/?source=twa",
+  "iconUrl": "https://scrap.sector809labs.com/assets/icon-512.png?v=3",
+  "maskableIconUrl": "https://scrap.sector809labs.com/assets/icon-maskable-512.png?v=3",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./scrapsheet-upload.keystore",
+    "alias": "scrapsheet-upload"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://scrap.sector809labs.com/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "playBilling": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://scrap.sector809labs.com/",
+  "minSdkVersion": 24,
+  "shareTarget": {
+    "action": "https://scrap.sector809labs.com/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "*/*"
+          ]
+        }
+      ]
+    }
+  },
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "1.0.0"
+}

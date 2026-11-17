@@ -1,0 +1,17 @@
+# The Android project Bubblewrap generates, and the signing key: never committed.
+*.keystore
+*.jks
+*.aab
+*.apk
+*.idsig
+app/
+gradle/
+build/
+.gradle/
+build.gradle
+settings.gradle
+gradle.properties
+gradlew
+gradlew.bat
+store_icon.png
+manifest-checksum.txt

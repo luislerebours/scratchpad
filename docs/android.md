@@ -108,17 +108,21 @@ again right before submitting.
 
 ## Steps
 
-1. `npm i -g @bubblewrap/cli`, then
-   `bubblewrap init --manifest https://scrap.sector809labs.com/manifest.webmanifest`
-   (package name `com.sector809labs.scrapsheet`; launch URL
-   `/?source=twa`; keep the signing key safe: losing it means a new app).
-2. `bubblewrap build`, upload the `.aab` to an internal testing track.
-3. Copy the Play app signing SHA-256 from Play Console (App integrity) into
-   `assetlinks.json`, deploy, check with
+The Bubblewrap settings are in `android/twa-manifest.json` (tested with a full
+build here: target API 36, minimum Android 7.0, Play Billing on, Share menu, no
+notifications). `android/README.md` has the commands.
+
+1. In `android/`: `bubblewrap update`, then `bubblewrap build` (it creates the
+   upload key the first time: back it up, never commit it).
+2. Upload `app-release-bundle.aab` to an internal testing track.
+3. Copy the Play app signing and upload key SHA-256s from Play Console (App
+   integrity) into `public/.well-known/assetlinks.json`, deploy, and check with
    `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://scrap.sector809labs.com&relation=delegate_permission/common.handle_all_urls`.
 4. On a phone from the testing track: full screen (no browser bar), sign in,
-   share a photo from Gallery into ScrapSheet, upload, offline, dark mode.
-5. Production release once the listing, data safety and deletion page are done.
+   share a photo from Gallery into ScrapSheet, upload, offline, dark mode,
+   a test purchase with a license tester.
+5. Production release once the listing, data safety and Play Billing setup
+   are done.
 
 ## Google Play Billing (built)
 

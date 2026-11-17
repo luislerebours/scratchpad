@@ -198,5 +198,14 @@ the current policies before building the Android app.
   request, read-only until the server is checked; `/auth` failing to connect
   retries (only a 401 signs out). A different account, a 401 or sign-out clears
   it with the keys. Without a copy, faint placeholder lines and tabs show.
+- Offline = view only (`enterViewOnly()` / `blockedOffline()` in `app.js`): sync
+  has no merge, so nothing is edited without the server. After 3 s without a
+  connection (confirmed by one more `/api/check`; at once on the browser's
+  `offline` event) the editor locks, the status reads "Offline · view only",
+  uploads/new sheet/rename/delete/keep/share/restore and paste/drop say why and
+  do nothing; viewing, search, copy stay. A save that can't reach the server
+  counts as offline. While view only the 2-second check runs; when the server
+  answers, words typed just before the drop are saved and editing unlocks.
+  Guard new actions that change data with `if (blockedOffline()) return;`.
 - Search runs on the device over the kept copies of every sheet and its file
   list (`state?meta=all` returns both), so typing makes no requests.

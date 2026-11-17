@@ -146,7 +146,9 @@ the current policies before building the Android app.
   (`state?meta=usage`), a search, and every file across the sheets (fresh lists
   per sheet, names unlocked on the device) with type, size, sheet, Open sheet and
   the usual ••• file actions; table on desktop, compact list on phones. Shared
-  links tab: every link with its file/sheet, status, Copy/Share and Turn off. The green dot (server
+  links tab: active links with their file/sheet, status, Copy/Share and Turn off;
+  ended ones only after "See inactive links", each with why it ended (share
+  records keep `revokedReason`: you, replaced, admin, encryption; or expired). The green dot (server
   connection) sits in the editor toolbar beside the save state, which shows
   "Synced" only after the server confirms.
 - Sign-in page (`#authScreen` in `index.html`) doubles as the front page:

@@ -45,8 +45,15 @@ const ownerView = share => ({
   expiresAt: share.expiresAt,
   revoked: Boolean(share.revoked),
   views: share.views || 0,
-  state: ended(share) || 'on'
+  state: ended(share) || 'on',
+  // Why a link ended: you, replaced (a newer link for the same item), admin
+  // (account deactivated), encryption (turned on for an older account),
+  // expired, or null for links turned off before reasons were kept.
+  reason: ended(share) === 'expired' ? 'expired' : share.revoked ? (share.revokedReason || (share.revokedBy === 'admin' ? 'admin' : null)) : null,
+  endedAt: share.revoked ? share.revokedAt || null : ended(share) === 'expired' ? share.expiresAt : null
 });
+
+const REVOKE_REASONS = new Set(['you', 'encryption']);
 
 // The live thing a link points at, or null once it's deleted.
 async function target(share) {
@@ -120,7 +127,7 @@ async function owner(req, url) {
     const existing = await readShares(ns);
     await Promise.all(existing
       .filter(s => !ended(s) && s.kind === kind && s.sheet === sheet && (s.file || null) === file)
-      .map(s => store.setJSON(`shares/${s.token}`, { ...s, revoked: true, revokedAt: Date.now() })));
+      .map(s => store.setJSON(`shares/${s.token}`, { ...s, revoked: true, revokedAt: Date.now(), revokedReason: 'replaced' })));
 
     const now = Date.now();
     const share = {
@@ -153,7 +160,7 @@ async function owner(req, url) {
   }
 
   if (body.action === 'revoke') {
-    const next = { ...share, revoked: true, revokedAt: Date.now() };
+    const next = { ...share, revoked: true, revokedAt: Date.now(), revokedReason: REVOKE_REASONS.has(body.reason) ? body.reason : 'you' };
     await store.setJSON(`shares/${token}`, next);
     return json({ share: ownerView(next), origin: url.origin });
   }

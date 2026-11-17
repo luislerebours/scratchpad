@@ -6,6 +6,7 @@ import {
 import { wipeSheet } from '../lib/files.mjs';
 import { readSettings } from '../lib/admin.mjs';
 import { withErrors } from '../lib/errors.mjs';
+import { sendEmail } from '../lib/email.mjs';
 import { planInfo } from '../lib/plans.mjs';
 import { customerKey, stripe, stripeReady } from '../lib/stripe.mjs';
 import { readShares, sharesStore } from '../lib/shares.mjs';
@@ -18,29 +19,21 @@ const SET_PASSWORD_MS = 30 * 60 * 1000;
 const MAX_CODE_TRIES = 5;
 const HOUR = 60 * 60 * 1000;
 
+// The sign-in / reset code, in the shared email template (lib/email.mjs).
 async function sendCodeEmail(to, code, link) {
-  const key = env('RESEND_API_KEY');
-  const from = env('MAIL_FROM');
-  if (!key || !from) {
-    if (env('SCRATCHPAD_DEV_MAIL') === '1') {
-      console.log(`[dev mail] to ${to}: code ${code} link ${link}`);
-      return;
-    }
-    throw new Error('Email is not set up (RESEND_API_KEY and MAIL_FROM)');
-  }
-  const text = `Your ScrapSheet code is ${code}\n\nOpen ${link} and enter the code. It works once and expires in 15 minutes.\n\nIf you didn't ask for this, you can ignore this email.`;
-  const html = `<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:16px;line-height:1.5;color:#111">
-<p>Your ScrapSheet code is</p>
-<p style="font-size:28px;font-weight:700;letter-spacing:.04em;margin:8px 0 16px">${code}</p>
-<p><a href="${link}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#2cc7ff;color:#06101e;font-weight:700;text-decoration:none">Open ScrapSheet</a></p>
-<p style="color:#555;font-size:14px">Enter the code there. It works once and expires in 15 minutes. If you didn't ask for this, you can ignore this email.</p>
-</div>`;
-  const r = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [to], subject: `Your ScrapSheet code: ${code}`, text, html })
+  await sendEmail({
+    to,
+    origin: new URL(link).origin,
+    subject: `Your ScrapSheet code: ${code}`,
+    preheader: `Your code is ${code}. It works once and expires in 15 minutes.`,
+    heading: 'Your sign-in code',
+    intro: 'Enter this code in ScrapSheet to keep going. It works once and expires in 15 minutes.',
+    box: { title: 'Your code', code },
+    button: { label: 'Open ScrapSheet', url: link },
+    note: 'If you didn’t ask for this, you can ignore this email.',
+    // Local tests read codes from this line.
+    devLog: `[dev mail] to ${to}: code ${code} link ${link}`
   });
-  if (!r.ok) throw new Error(`Resend ${r.status}: ${await r.text()}`);
 }
 
 // End-to-end encryption: the page turns the password into an auth secret (what

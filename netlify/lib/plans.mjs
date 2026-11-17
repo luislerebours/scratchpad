@@ -1,9 +1,9 @@
-import { isAdmin, json } from './auth.mjs';
+import { json } from './auth.mjs';
 
 // Free and Pro. Accounts made before plans existed have no `plan` and stay
 // Pro; new accounts start on Free. Paying through Stripe sets `plan: 'pro'`,
-// and a subscription ending sets it back to 'free'. The owner (OWNER_EMAIL)
-// is never limited. Limits apply to adding things: an account that drops to
+// and a subscription ending sets it back to 'free'. Every account follows its
+// plan: admin rights live in the admin dashboard and never change it. Limits apply to adding things: an account that drops to
 // Free keeps everything it has, but can't add past Free's limits.
 
 const MB = 1024 ** 2;
@@ -17,7 +17,6 @@ export const PLANS = {
 export const PRICES = { month: 0.99, year: 9.99 };
 
 export function planOf(user) {
-  if (isAdmin(user)) return 'pro';
   return user?.plan === 'free' ? 'free' : 'pro';
 }
 

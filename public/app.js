@@ -67,8 +67,6 @@ const sheetTabsEl = document.querySelector('#sheetTabs');
 const addSheetBtn = document.querySelector('#addSheetBtn');
 const accountBtn = document.querySelector('#accountBtn');
 const authScreen = document.querySelector('#authScreen');
-const adminModal = document.querySelector('#adminModal');
-const adminBody = document.querySelector('#adminBody');
 const renameModal = document.querySelector('#renameModal');
 const renameForm = document.querySelector('#renameForm');
 const renameInput = document.querySelector('#renameInput');
@@ -2464,7 +2462,6 @@ document.addEventListener('keydown', e => {
   else if (!shareModal.hidden) closeShare();
   else if (!linksModal.hidden) closeLinks();
   else if (!trashModal.hidden) closeTrash();
-  else if (!adminModal.hidden) closeAdmin();
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
   else if (selecting) setSelecting(false);
@@ -4131,7 +4128,6 @@ accountBtn.addEventListener('click', () => {
     { heading: planLine() },
     myPlan().plan === 'free' ? { label: 'Upgrade to Pro…', icon: 'star', run: () => showUpgrade('') } : null,
     myPlan().billing ? { label: 'Manage billing…', icon: 'card', run: manageBilling } : null,
-    account?.admin ? { label: 'Admin: accounts', icon: 'shield', run: openAdmin } : null,
     { label: 'Shared links', icon: 'link', run: openLinks },
     { label: 'Recently Deleted', icon: 'trash', run: openTrash },
     account?.keyring ? { label: 'New recovery key…', icon: 'key', run: confirmNewRecoveryKey } : null,
@@ -4146,7 +4142,7 @@ accountBtn.addEventListener('click', () => {
     { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
     'separator',
     { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere },
-    account?.admin ? null : { label: 'Delete account…', icon: 'trash', danger: true, run: openDeleteAccount }
+    { label: 'Delete account…', icon: 'trash', danger: true, run: openDeleteAccount }
   ], 'Account');
 });
 
@@ -4254,144 +4250,6 @@ function confirmSignOutEverywhere() {
     ]
   });
 }
-
-// ---- Admin: accounts, data used, activity ----
-
-function timeAgo(ts) {
-  if (!ts) return '—';
-  const minutes = Math.round((Date.now() - ts) / 60000);
-  if (minutes < 2) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 45) return `${days} day${days === 1 ? '' : 's'} ago`;
-  return new Date(ts).toLocaleDateString();
-}
-
-function adminFact(label, value) {
-  const el = document.createElement('div');
-  el.append(`${label}: `);
-  const b = document.createElement('b');
-  b.textContent = value;
-  el.append(b);
-  return el;
-}
-
-function renderAdmin(data) {
-  const stat = (value, label) => {
-    const el = document.createElement('div');
-    el.className = 'admin-stat';
-    const strong = document.createElement('strong');
-    strong.textContent = value;
-    const span = document.createElement('span');
-    span.textContent = label;
-    el.append(strong, span);
-    return el;
-  };
-  const summary = document.createElement('div');
-  summary.className = 'admin-summary';
-  summary.append(stat(String(data.count), data.count === 1 ? 'account' : 'accounts'), stat(bytes(data.totalBytes), 'data stored in total'));
-
-  const list = document.createElement('div');
-  list.className = 'admin-list';
-  for (const a of data.accounts) {
-    const row = document.createElement('div');
-    row.className = 'admin-row';
-    const email = document.createElement('div');
-    email.className = 'admin-email';
-    email.textContent = a.email;
-    if (a.owner) {
-      const badge = document.createElement('span');
-      badge.className = 'admin-badge';
-      badge.textContent = 'You';
-      email.append(badge);
-    }
-    const facts = document.createElement('div');
-    facts.className = 'admin-facts';
-    facts.append(
-      adminFact('Plan', a.owner ? 'Owner (no limits)' : a.plan === 'free' ? 'Free' : a.paying ? 'Pro (paying)' : 'Pro'),
-      adminFact('Storage', `${bytes(a.bytes)} of ${a.quota ? bytes(a.quota) : 'no limit'} · ${a.files} file${a.files === 1 ? '' : 's'} · ${a.images} image${a.images === 1 ? '' : 's'}`),
-      adminFact('Active', a.activeDays30 === null ? '—' : `${a.activeDays30} of last 30 days`),
-      adminFact('Last seen', timeAgo(a.lastSeenAt)),
-      adminFact('Sign-ins', a.loginCount === null ? '—' : `${a.loginCount}, last ${timeAgo(a.lastLoginAt)}`),
-      adminFact('Joined', a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '—')
-    );
-    const change = document.createElement('button');
-    change.type = 'button';
-    change.className = 'link-btn admin-limit';
-    change.textContent = 'Change storage limit';
-    change.addEventListener('click', () => changeLimit(a));
-    const actions = document.createElement('div');
-    actions.className = 'admin-actions';
-    actions.append(change);
-    if (!a.owner) {
-      const plan = document.createElement('button');
-      plan.type = 'button';
-      plan.className = 'link-btn admin-limit';
-      plan.textContent = a.plan === 'free' ? 'Switch to Pro' : 'Switch to Free';
-      plan.addEventListener('click', () => switchPlan(a, a.plan === 'free' ? 'pro' : 'free'));
-      actions.append(plan);
-    }
-    row.append(email, facts, actions);
-    list.append(row);
-  }
-  const note = document.createElement('p');
-  note.className = 'admin-note';
-  note.textContent = '“Active” counts the days an account opened ScrapSheet. Sign-ins count password and email-code sign-ins.';
-  adminBody.replaceChildren(summary, list, note);
-}
-
-async function switchPlan(a, plan) {
-  try {
-    const r = await fetch('/.netlify/functions/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.email, plan }) });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || 'Couldn’t change the plan');
-    showToast(`${a.email} is now on ${plan === 'pro' ? 'Pro' : 'Free'}`);
-    await openAdmin();
-  } catch (err) {
-    showToast(err.message);
-  }
-}
-
-async function changeLimit(a) {
-  const current = a.quota ? (a.quota / 1024 ** 3).toFixed(1).replace(/\.0$/, '') : '0';
-  const answer = prompt(`Storage limit for ${a.email}, in GB.\n0 = no limit. Leave empty for the default (5 GB).`, current);
-  if (answer === null) return;
-  try {
-    await postJson('/.netlify/functions/admin', { email: a.email, limitGb: answer.trim() === '' ? null : Number(answer) });
-    showToast('Storage limit updated');
-    openAdmin();
-    loadUsage();
-  } catch (err) {
-    showToast(err.message || 'Couldn’t change the limit');
-  }
-}
-
-async function openAdmin() {
-  rememberFocus('admin');
-  adminBody.textContent = 'Loading…';
-  adminModal.hidden = false;
-  adminModal.querySelector('[data-close-admin]').focus({ preventScroll:true });
-  document.body.classList.add('modal-open');
-  try {
-    const r = await fetch('/.netlify/functions/admin', { cache:'no-store' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    renderAdmin(await r.json());
-  } catch {
-    adminBody.textContent = 'Couldn’t load accounts. Try again.';
-  }
-}
-
-function closeAdmin() {
-  if (adminModal.hidden) return;
-  adminModal.hidden = true;
-  updateModalOpen();
-  restoreFocus('admin');
-}
-
-adminModal.querySelector('[data-close-admin]').addEventListener('click', closeAdmin);
-adminModal.addEventListener('click', e => { if (e.target === adminModal) closeAdmin(); });
 
 async function signOut(action) {
   if (saveTimer) {

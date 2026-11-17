@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
 import {
-  allow, authStore, emailKey, env, hashPassword, checkPassword, isAdmin, json, normalizeEmail, notifySync,
+  allow, authStore, emailKey, env, hashPassword, checkPassword, json, normalizeEmail, notifySync,
   sameOrigin, validEmail
 } from '../lib/auth.mjs';
 import {
@@ -57,7 +57,6 @@ async function accountView(user) {
   return {
     id: emailKey(user.email),
     email: user.email,
-    legacyAdmin: isAdmin(user),
     originalData: user.ns === '',
     createdAt: user.createdAt || null,
     loginCount: user.loginCount ?? null,

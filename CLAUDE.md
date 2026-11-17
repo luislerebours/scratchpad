@@ -28,8 +28,6 @@ Pushes to `main` deploy straight to the live site.
   - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin-api.mjs`: the admin dashboard's API (see "Admin dashboard" below)
-  - `admin.mjs`: LEGACY in-app admin (the `OWNER_EMAIL` account). Being retired:
-    don't add to it
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
     plus a small thumbnail for images (made in the browser, `thumb=1`)
   - `images.mjs`: images in the text (chunked original plus a display copy)
@@ -40,16 +38,16 @@ Pushes to `main` deploy straight to the live site.
     `scratchpad-shares` store; each account lists its tokens in `meta/shares`.
     Downloads are capped per link per hour. Viewer pages are noindex/no-referrer.
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
-  Default limit 5 GB per account (`quotaBytes` on the account: -1 = none; the
-  admin has none by default), enforced when an upload starts; the admin can
-  change it from Admin. Files show their age; ones over 30 days (not "Kept")
+  Default limit 5 GB per account (`quotaBytes` on the account: -1 = none),
+  enforced when an upload starts; an admin can change it from the admin
+  dashboard. Files show their age; ones over 30 days (not "Kept")
   prompt a gentle "still need them?" card. Nothing is deleted automatically.
 - Plans (`netlify/lib/plans.mjs`): Free (1 sheet, 1 file, files up to 10 MB,
   10 MB storage, no share links) and Pro (10 sheets, 5 GB, 100 MB files, share
   links). New accounts get `plan: 'free'`; accounts from before plans have no
-  `plan` and stay Pro; the owner is never limited. Limits apply to adding
+  `plan` and stay Pro. Every account follows its plan. Limits apply to adding
   things (`needsPro` → 403 `{ upgrade: true }`, the page shows its upgrade
-  card). Admin can switch an account's plan.
+  card). Admins can switch an account's plan from the admin dashboard.
 - Billing is Stripe with Managed Payments (Stripe is merchant of record: tax,
   fraud, disputes). Sandbox account "Sector 809 Labs LLC sandbox"
   (acct_1UcXIzE4JMAT8oxx); never touch the FinestIQ account. Product
@@ -65,7 +63,7 @@ Pushes to `main` deploy straight to the live site.
 - Delete account (account menu, `auth?action=delete-account`): needs the password
   as the sign-in secret; cancels an active Stripe subscription first (stops if
   that fails), then erases every sheet, file, image, share link and the account;
-  other devices are signed out. The owner account can't be deleted this way.
+  other devices are signed out.
 - Admin dashboard at `/admin` (`public/admin.html`/`admin.js`/`admin.css`,
   `netlify/functions/admin-api.mjs`, `netlify/lib/admin.mjs`). Admins are their
   own records in the `scratchpad-admin` store, never ScrapSheet accounts: email,
@@ -93,8 +91,9 @@ Pushes to `main` deploy straight to the live site.
   in chunks.
 - `netlify/lib/auth.mjs` is shared: sessions, `requireUser`, and `userStore`,
   which keeps each account's data in its own stores (`u-<id>-…`). The account
-  whose email matches the `OWNER_EMAIL` env var owns the original `scratchpad…`
-  stores from before accounts existed.
+  with `ns: ''` holds the original `scratchpad…` stores from before accounts
+  existed (the retired legacy admin account, now deactivated; `OWNER_EMAIL` is
+  no longer used). There are no account-specific exceptions in the code.
 - Email goes through Resend: `RESEND_API_KEY` and `MAIL_FROM` env vars on Netlify.
   Locally, `SCRATCHPAD_DEV_MAIL=1` logs codes instead of sending them.
 - Sync is real-time: every write sets a change marker (`bumpRev`) and posts a

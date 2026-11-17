@@ -1,14 +1,14 @@
-import { MAX_SHEETS, isAdmin, userStore } from './auth.mjs';
+import { MAX_SHEETS, userStore } from './auth.mjs';
 import { limitsFor } from './plans.mjs';
 
 // Storage per account: what it holds, and its limit (the plan's, unless the admin set one).
 
 // null means no limit. quotaBytes on the account: -1 = no limit, a number =
-// that limit, unset = the plan's (the admin account has no limit by default).
+// that limit, unset = the plan's.
 export function quotaFor(user) {
   if (user.quotaBytes === -1) return null;
   if (Number.isFinite(user.quotaBytes) && user.quotaBytes > 0) return user.quotaBytes;
-  return isAdmin(user) ? null : limitsFor(user).quotaBytes;
+  return limitsFor(user).quotaBytes;
 }
 
 async function recordsSize(store, sizeOf) {

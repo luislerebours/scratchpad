@@ -27,9 +27,9 @@ export const parseSheet = value => {
   return Number.isInteger(n) && n >= 1 && n <= MAX_SHEETS ? n : null;
 };
 
-// Each account's data lives in its own stores. The original single-user data
-// (stores named "scratchpad…") belongs to the account whose email matches
-// OWNER_EMAIL, so it never has to be copied.
+// Each account's data lives in its own stores (u-<ns>-…). The account with
+// ns '' holds the original single-user stores ("scratchpad…") from before
+// accounts existed; its data was never copied.
 export function userStore(ns, kind, sheet = null) {
   const prefix = ns ? `u-${ns}` : 'scratchpad';
   const name = kind === 'state' ? prefix : `${prefix}-${kind}-${sheet}`;
@@ -114,11 +114,6 @@ export const DEACTIVATED = 'This account is deactivated. Contact support@sector8
 
 export const normalizeEmail = email => String(email || '').trim().toLowerCase();
 
-// The OWNER_EMAIL account is the admin.
-export function isAdmin(user) {
-  const owner = normalizeEmail(env('OWNER_EMAIL'));
-  return Boolean(owner) && user?.email === owner;
-}
 export const validEmail = email => email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 export const emailKey = email => createHash('sha256').update(email).digest('hex').slice(0, 32);
 

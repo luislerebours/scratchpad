@@ -163,6 +163,9 @@ the current policies before building the Android app.
   (served at `/privacy` and `/terms`, styled by `legal.css`; also in the account
   menu). Keep them true to what the app does: update them when data handling,
   providers, plans or prices change. Terms are governed by New York law.
+- Branding lives in `branding/` (see its README). `branding/app-icon.png` is
+  the app icon to use for every installed or store icon (web app home screen
+  and taskbar, Android, iOS); not yet wired into `public/`.
 - Icons: `public/assets/icon-source.png` is the 1024px master; the other
   sizes and the header's see-through `mark.png` are made from it.
 - Files can be swiped left to delete (touch only). The server delete waits

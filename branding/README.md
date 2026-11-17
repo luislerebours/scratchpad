@@ -7,7 +7,8 @@ teal spiral notepad with two text lines on a mint page, on a cream tile. Every
 installed or store icon comes from it:
 
 - `app-icon-full-bleed-1024.png`: the same art on a full-bleed cream square at
-  the original proportions (platforms round the corners themselves). Source of
+  a tighter margin than the original, notepad ~79% of the icon (platforms
+  round the corners themselves). Source of
   the web app's home-screen/taskbar icons (`public/assets/apple-touch-icon.png`,
   `icon-192.png`, `icon-512.png`, `icon-source.png`), and of the iOS App Store
   icon and Android launcher icon later.

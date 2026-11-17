@@ -1777,8 +1777,8 @@ renameForm.addEventListener('submit', async e => {
 
 function bytes(n) {
   if (n < 1024) return `${n} B`;
-  if (n < 1024*1024) return `${(n/1024).toFixed(1)} KB`;
-  if (n < 1024*1024*1024) return `${(n/1024/1024).toFixed(1)} MB`;
+  if (n < 1024*1024) return `${(n/1024).toFixed(1).replace(/\.0$/, '')} KB`;
+  if (n < 1024*1024*1024) return `${(n/1024/1024).toFixed(1).replace(/\.0$/, '')} MB`;
   return `${(n/1024/1024/1024).toFixed(1).replace(/\.0$/, '')} GB`;
 }
 
@@ -3527,11 +3527,26 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
   }
 }
 
+function tooBigNotice(files, others) {
+  const one = files.length === 1;
+  openSheet({
+    title: one ? 'This file is too big' : `${files.length} files are too big`,
+    text: `Files can be up to ${myPlan().plan === 'free' ? `${bytes(myPlan().fileBytes)} on Free and ${bytes(MAX_FILE_BYTES)} on Pro` : `${bytes(MAX_FILE_BYTES)} each`}${one ? `, and this one is ${bytes(files[0].size)}` : ''}.${others ? ` Your other ${others === 1 ? 'file is' : 'files are'} uploading.` : ''}`,
+    files,
+    actions: [{ label: 'OK', kind: 'primary', full: true }]
+  });
+}
+
 async function uploadFiles(files, targetSheet = activeSheet) {
   if (blockedOffline()) return;
   fileInput.value = '';
   if (!hasSheet(targetSheet)) return;
   const queue = [];
+  // Over the most any plan allows: said in a box that stays until it's read
+  // (a quick toast is easy to miss coming back from the phone's file picker).
+  const overMax = files.filter(f => f.size > MAX_FILE_BYTES);
+  files = files.filter(f => f.size <= MAX_FILE_BYTES);
+  if (overMax.length) tooBigNotice(overMax, files.length);
   // Free's limits, checked here first so nothing is uploaded for nothing (the server checks too).
   const plan = myPlan();
   const tooBig = files.filter(f => f.size > plan.fileBytes && f.size <= MAX_FILE_BYTES);
@@ -3548,10 +3563,6 @@ async function uploadFiles(files, targetSheet = activeSheet) {
     }
   }
   for (const file of files) {
-    if (file.size > MAX_FILE_BYTES) {
-      showToast(`${file.name} is over ${bytes(MAX_FILE_BYTES)}`);
-      continue;
-    }
     queue.push({ file, transfer: createTransfer(file.name, 'Uploading', file.size, null, { note: 'Keep ScrapSheet open until uploads finish.' }) });
   }
 

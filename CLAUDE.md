@@ -170,6 +170,10 @@ the current policies before building the Android app.
   print, guidelines). Tab favicons and the link-preview card come from the kit.
   Bump the `?v=` on icon links when icons change. The header's see-through
   `mark.png` / teal `mark-light.png` are separate.
+  The 3D app icon (`app-icon*.png`, `public/assets/apple-touch-icon.png`,
+  `icon-192/512`, `icon-maskable-512`, `icon-source`) is ONLY the installed
+  app's icon (home screen, taskbar, app stores): never use it inside the site,
+  app, emails or link cards; those use the kit's flat marks and logos.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

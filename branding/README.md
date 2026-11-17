@@ -18,6 +18,11 @@ installed or store icon comes from it:
 Don't add rounded corners or shadows to store artwork: iOS, Android and Windows
 apply their own shape.
 
+**Only for the installed app's icon.** The 3D icon and its versions are used
+only where the app itself appears as an icon: home screens, taskbars, app
+launchers and the App Store / Play Store. Never inside the website or app, in
+emails, or on link-preview cards; those use the kit's flat marks and logos.
+
 ## Brand kit (`kit/`)
 
 The full kit as supplied (start with `kit/START_HERE.md` and

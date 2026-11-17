@@ -188,16 +188,28 @@
     </section>
   </div>
 
-  <div id="linksModal" class="modal-backdrop" hidden>
-    <section class="modal-card trash-modal" role="dialog" aria-modal="true" aria-labelledby="linksTitle">
-      <div class="modal-header">
-        <div>
-          <h2 id="linksTitle">Shared links</h2>
-          <p class="trash-sub">Anyone with one of these links can open what it shares until it expires or you turn it off.</p>
-        </div>
-        <button class="modal-close" type="button" data-close-links aria-label="Close">×</button>
+  <div id="libraryModal" class="modal-backdrop library-backdrop" hidden>
+    <section class="modal-card library-modal" role="dialog" aria-modal="true" aria-labelledby="libraryTitle">
+      <div class="modal-header library-header">
+        <button class="icon-btn library-back" type="button" data-library-back aria-label="Back to account menu"></button>
+        <h2 id="libraryTitle">Files &amp; share links</h2>
+        <button class="modal-close library-close" type="button" data-close-library aria-label="Close">×</button>
       </div>
-      <div id="linksBody" class="trash-body"></div>
+      <div class="library-tabs" role="tablist" aria-label="Files and share links">
+        <button class="library-tab" type="button" role="tab" id="libTabFiles" aria-controls="libFiles" aria-selected="true" data-lib-tab="files">Files</button>
+        <button class="library-tab" type="button" role="tab" id="libTabLinks" aria-controls="libLinks" aria-selected="false" tabindex="-1" data-lib-tab="links">Shared links</button>
+      </div>
+      <div id="libFiles" class="library-panel" role="tabpanel" aria-labelledby="libTabFiles">
+        <div id="libStorage" class="lib-storage"></div>
+        <div class="lib-search-wrap">
+          <input id="libSearch" class="lib-search" type="search" placeholder="Search files" aria-label="Search files" autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="libFilesBody" class="lib-body"></div>
+      </div>
+      <div id="libLinks" class="library-panel" role="tabpanel" aria-labelledby="libTabLinks" hidden>
+        <p class="lib-note">Anyone with one of these links can open what it shares until it expires or you turn it off.</p>
+        <div id="linksBody" class="lib-body"></div>
+      </div>
     </section>
   </div>
 
@@ -382,6 +394,10 @@
 
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="profileModal" class="modal-backdrop profile-backdrop" hidden>
+    <section id="profilePanel" class="profile-panel" role="dialog" aria-modal="true" aria-label="Account"></section>
+  </div>
 
   <div id="sheetModal" class="modal-backdrop sheet-backdrop" hidden>
     <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">

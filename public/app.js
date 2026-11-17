@@ -477,6 +477,13 @@ const ICON_PATHS = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5L5 20"/>',
   shield: '<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/>',
   logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/>',
+  folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2.2h8.6A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5Z"/>',
+  user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7M12 17.2h.01"/>',
+  mail: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>',
+  chevron: '<path d="m9.5 6 6 6-6 6"/>',
+  back: '<path d="m14.5 6-6 6 6 6"/>',
+  open: '<path d="M14 4h6v6M20 4l-8.5 8.5M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   devices: '<rect x="3" y="4" width="13" height="10" rx="1.5"/><path d="M7 18h5M17 9h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z"/>'
 };
 
@@ -2460,10 +2467,10 @@ document.addEventListener('keydown', e => {
   if (!searchModal.hidden) closeSearch();
   else if (!sheetModal.hidden) closeSheet();
   else if (!shareModal.hidden) closeShare();
-  else if (!linksModal.hidden) closeLinks();
   else if (!trashModal.hidden) closeTrash();
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
+  else if (!libraryModal.hidden) closeLibrary();
   else if (selecting) setSelecting(false);
 });
 
@@ -2615,7 +2622,8 @@ async function toggleKeep(file) {
   try {
     await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=keep`), { kept: !file.kept });
     showToast(file.kept ? 'Reminders back on for this file' : 'Kept: no more reminders about this file');
-    await loadFiles(true, file.sheet);
+    if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
+    libraryChanged();
   } catch {
     showToast('Couldn’t update the file');
   }
@@ -2636,6 +2644,8 @@ function confirmDeleteFile(file) {
           if (r?.ok) {
             showToast(`Deleted ${file.name}`, { action: 'Undo', run: () => restoreFiles([file]), duration: 6000 });
             if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
+            else filesCache.delete(file.sheet);
+            libraryChanged();
           } else {
             showToast('Couldn’t delete the file');
           }
@@ -3679,7 +3689,6 @@ trashModal.addEventListener('click', e => { if (e.target === trashModal) closeTr
 const API_SHARE = '/.netlify/functions/share';
 const shareModal = document.querySelector('#shareModal');
 const shareBody = document.querySelector('#shareBody');
-const linksModal = document.querySelector('#linksModal');
 const linksBody = document.querySelector('#linksBody');
 const SHARE_DAYS = [[1, '1 day'], [7, '7 days'], [30, '30 days']];
 let shareTarget = null;
@@ -3925,60 +3934,239 @@ shareBody.addEventListener('keydown', e => {
 shareModal.querySelector('[data-close-share]').addEventListener('click', closeShare);
 shareModal.addEventListener('click', e => { if (e.target === shareModal) closeShare(); });
 
-// ---- Shared links: every link this account has made ----
+// ---- Files & share links: every file across the sheets, storage, and every share link ----
+// All of it comes from this account's own endpoints (the server checks the
+// session on each), and file names are unlocked here on the device.
 
+const libraryModal = document.querySelector('#libraryModal');
+const libStorage = document.querySelector('#libStorage');
+const libSearch = document.querySelector('#libSearch');
+const libFilesBody = document.querySelector('#libFilesBody');
+const libTabs = [...libraryModal.querySelectorAll('[data-lib-tab]')];
 let linksList = [];
+let libraryItems = [];
+let libraryFromProfile = false;
+let libraryLoad = 0;
 
-async function openLinks() {
-  rememberFocus('links');
-  linksModal.hidden = false;
-  updateModalOpen();
-  linksModal.querySelector('[data-close-links]').focus({ preventScroll: true });
-  linksBody.innerHTML = '<p class="trash-empty">Loading…</p>';
-  await loadLinks();
+const FILE_TYPES = { img: 'Image', pdf: 'PDF', sheet: 'Spreadsheet', doc: 'Document', slides: 'Slides', zip: 'Archive', video: 'Video', audio: 'Audio', text: 'Text' };
+function fileTypeLabel(f) {
+  const [kind, label] = fileKind(f);
+  return FILE_TYPES[kind] || (label && label !== 'FILE' ? `${label} file` : 'File');
 }
 
-function closeLinks() {
-  if (linksModal.hidden) return;
-  linksModal.hidden = true;
+async function openLibrary(tab = 'files', { fromProfile = false } = {}) {
+  libraryFromProfile = fromProfile;
+  if (libraryModal.hidden) rememberFocus('library');
+  libraryModal.hidden = false;
   updateModalOpen();
-  restoreFocus('links');
+  libSearch.value = '';
+  selectLibraryTab(tab, { focus: true });
+  loadLibraryFiles();
+  loadLinks();
 }
+
+function openLinks() {
+  return openLibrary('links');
+}
+
+function closeLibrary({ back = false } = {}) {
+  if (libraryModal.hidden) return;
+  libraryModal.hidden = true;
+  updateModalOpen();
+  if (back && libraryFromProfile) {
+    returnFocusTo.delete('library');
+    openProfile('main', { focusRow: 'library' });
+    return;
+  }
+  restoreFocus('library');
+}
+
+function selectLibraryTab(tab, { focus = false } = {}) {
+  for (const btn of libTabs) {
+    const on = btn.dataset.libTab === tab;
+    btn.setAttribute('aria-selected', String(on));
+    btn.tabIndex = on ? 0 : -1;
+    document.querySelector(`#${btn.getAttribute('aria-controls')}`).hidden = !on;
+    if (on && focus) btn.focus({ preventScroll: true });
+  }
+}
+
+libTabs.forEach(btn => btn.addEventListener('click', () => selectLibraryTab(btn.dataset.libTab)));
+libraryModal.querySelector('[role="tablist"]').addEventListener('keydown', e => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  e.preventDefault();
+  const i = libTabs.findIndex(b => b.getAttribute('aria-selected') === 'true');
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? libTabs.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + libTabs.length) % libTabs.length;
+  selectLibraryTab(libTabs[next].dataset.libTab, { focus: true });
+});
+
+// Fresh lists for every sheet (the open one is already current).
+async function loadAllSheetFiles() {
+  await Promise.all(sheets.filter(s => s.id !== activeSheet).map(async s => {
+    try {
+      const r = await fetch(filesUrl(s.id), { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      filesCache.set(s.id, await openFiles(Array.isArray(data.files) ? data.files : [], s.id));
+    } catch {
+      // Shows what this device already has for that sheet.
+    }
+  }));
+  return sheets.flatMap(s => sheetFilesFor(s.id).map(file => ({ file, sheet: s })));
+}
+
+async function loadUsageNumbers() {
+  const r = await fetch(`${API_STATE}?meta=usage`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function loadLibraryFiles() {
+  const load = ++libraryLoad;
+  if (!libraryItems.length) libFilesBody.innerHTML = '<p class="lib-empty">Loading…</p>';
+  const [items, usage] = await Promise.all([loadAllSheetFiles(), loadUsageNumbers().catch(() => null)]);
+  if (load !== libraryLoad || libraryModal.hidden) return;
+  libraryItems = items;
+  renderStorage(usage);
+  renderLibraryFiles();
+}
+
+function renderStorage(usage) {
+  if (!usage) {
+    libStorage.innerHTML = '<p class="lib-storage-text">Storage use isn’t available right now.</p>';
+    return;
+  }
+  const { bytes: used, quota } = usage;
+  const share = quota ? Math.min(1, used / quota) : 0;
+  const state = share >= 1 ? ' full' : share >= 0.8 ? ' near' : '';
+  const plan = myPlan();
+  libStorage.innerHTML = `
+    <div class="lib-storage-top">
+      <span class="lib-storage-label">Storage</span>
+      <span class="lib-storage-text${state}"><strong>${escapeHtml(bytes(used))}</strong> of ${quota ? escapeHtml(bytes(quota)) : 'no limit'} used</span>
+    </div>
+    ${quota ? `<div class="lib-bar${state}" role="progressbar" aria-label="Storage used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}"><span></span></div>` : ''}
+    <p class="lib-storage-hint">${escapeHtml(plan.name || 'Pro')} plan · includes files in Recently Deleted${plan.plan === 'free' ? ' · <button class="link-btn lib-upgrade" type="button" data-lib-upgrade>Upgrade to Pro</button>' : ''}</p>`;
+  const fill = libStorage.querySelector('.lib-bar span');
+  if (fill) fill.style.width = `${Math.max(share * 100, used > 0 ? 1.5 : 0)}%`;
+}
+
+function renderLibraryFiles() {
+  const q = foldCase(libSearch.value.trim());
+  const list = libraryItems
+    .filter(({ file }) => !q || foldCase(file.name).includes(q))
+    .sort((a, b) => (b.file.uploadedAt || 0) - (a.file.uploadedAt || 0));
+  if (!libraryItems.length) {
+    libFilesBody.innerHTML = '<div class="lib-empty"><strong>No files yet</strong>Drop files into any sheet, or use Add files. They all show up here.</div>';
+    return;
+  }
+  if (!list.length) {
+    libFilesBody.innerHTML = `<div class="lib-empty"><strong>No matches</strong>No files match “${escapeHtml(libSearch.value.trim())}”.</div>`;
+    return;
+  }
+  const rows = list.map(({ file, sheet }) => {
+    const i = libraryItems.findIndex(x => x.file === file);
+    const name = escapeHtml(file.name);
+    const type = escapeHtml(fileTypeLabel(file));
+    const size = escapeHtml(bytes(file.size || 0));
+    const where = escapeHtml(sheet.name);
+    return `<tr>
+      <td class="lib-name-cell"><div class="lib-name-wrap">${fileIconHtml({ ...file, thumb: null })}<div class="lib-name-text"><span class="lib-name">${name}</span><span class="lib-sub">${type} · ${size} · ${where}</span></div></div></td>
+      <td class="lib-col">${type}</td>
+      <td class="lib-col lib-num">${size}</td>
+      <td class="lib-col"><span class="lib-sheet">${where}</span></td>
+      <td class="lib-actions"><button class="link-btn" type="button" data-lib-open="${sheet.id}" data-lib-file="${escapeHtml(file.id)}">Open sheet</button><button class="icon-btn" type="button" data-lib-menu="${i}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button></td>
+    </tr>`;
+  }).join('');
+  libFilesBody.innerHTML = `<table class="lib-table">
+    <caption class="sr-only">Your files</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col" class="lib-col">Type</th><th scope="col" class="lib-col lib-num">Size</th><th scope="col" class="lib-col">Sheet</th><th scope="col" class="lib-actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <p class="lib-count">${list.length} file${list.length === 1 ? '' : 's'}${q ? ` matching “${escapeHtml(libSearch.value.trim())}”` : ` in ${new Set(libraryItems.map(x => x.sheet.id)).size} sheet${new Set(libraryItems.map(x => x.sheet.id)).size === 1 ? '' : 's'}`}</p>`;
+}
+
+libSearch.addEventListener('input', renderLibraryFiles);
+
+// The file's sheet, with the file brought into view.
+async function openFileInSheet(sheetId, fileId) {
+  closeLibrary();
+  if (sheetId !== activeSheet) await switchSheet(sheetId);
+  for (let i = 0; i < 20; i++) {
+    const row = fileList.querySelector(`.file-row[data-id="${CSS.escape(fileId)}"]`);
+    if (row) {
+      row.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+      row.classList.add('flash');
+      setTimeout(() => row.classList.remove('flash'), 1600);
+      row.querySelector('.file-name')?.focus({ preventScroll: true });
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+}
+
+// Something changed a file from here (deleted, kept): show it.
+function libraryChanged() {
+  if (!libraryModal.hidden) setTimeout(loadLibraryFiles, 300);
+}
+
+libFilesBody.addEventListener('click', e => {
+  const open = e.target.closest('[data-lib-open]');
+  if (open) return openFileInSheet(Number(open.dataset.libOpen), open.dataset.libFile);
+  const more = e.target.closest('[data-lib-menu]');
+  if (more) {
+    const item = libraryItems[Number(more.dataset.libMenu)];
+    if (item) openFileMenu(more, item.file);
+  }
+});
+
+libStorage.addEventListener('click', e => {
+  if (e.target.closest('[data-lib-upgrade]')) showUpgrade('');
+});
 
 async function loadLinks() {
+  if (!linksList.length) linksBody.innerHTML = '<p class="lib-empty">Loading…</p>';
   try {
     linksList = await fetchMyShares();
     renderLinks();
   } catch {
-    linksBody.innerHTML = '<p class="trash-empty">Couldn’t load your links. Check your connection and try again.</p>';
+    linksBody.innerHTML = '<p class="lib-empty">Couldn’t load your links. Check your connection and try again.</p>';
   }
 }
 
 function renderLinks() {
   if (!linksList.length) {
-    linksBody.innerHTML = '<div class="trash-empty"><strong>No shared links</strong>Share a file or a sheet from its ••• menu. Its link shows up here.</div>';
+    linksBody.innerHTML = myPlan().share
+      ? '<div class="lib-empty"><strong>No shared links</strong>Share a file or a sheet from its ••• menu. Its link shows up here.</div>'
+      : '<div class="lib-empty"><strong>Share links come with Pro</strong>Send a file or a whole sheet to anyone with a link. <button class="link-btn" type="button" data-lib-upgrade>Upgrade to Pro</button></div>';
     return;
   }
-  const on = linksList.filter(s => s.state === 'on');
-  const ended = linksList.filter(s => s.state !== 'on');
-  const row = (s, i) => {
+  const order = { on: 0, off: 1, expired: 2 };
+  const list = linksList.map((s, i) => ({ s, i })).sort((a, b) => (order[a.s.state] ?? 3) - (order[b.s.state] ?? 3) || (b.s.createdAt || 0) - (a.s.createdAt || 0));
+  const rows = list.map(({ s, i }) => {
     const name = escapeHtml(s.name);
-    const mark = s.kind === 'sheet' ? `<span class="search-mark" aria-hidden="true">${icon('lines')}</span>` : `<span class="search-mark" aria-hidden="true">${icon('link')}</span>`;
-    const state = s.state === 'on' ? `${escapeHtml(untilText(s.expiresAt))} · ${escapeHtml(viewsText(s.views))}` : s.state === 'off' ? 'Turned off' : 'Expired';
-    const where = s.kind === 'sheet' ? 'Sheet' : `File in ${escapeHtml(currentSheetName(s.sheet))}`;
-    return `<div class="trash-row">
-      ${mark}
-      <div class="search-main"><div class="trash-name" title="${name}">${name}</div><div class="trash-meta">${where}</div><div class="trash-meta link-row-state${s.state === 'on' ? '' : ' off'}">${state}</div></div>
-      ${s.state === 'on' ? `<button class="link-btn" type="button" data-link-copy="${i}">${phoneShare() ? 'Share' : 'Copy'}</button>
-      <button class="icon-btn" type="button" data-link-off="${i}" aria-label="Turn off the link to ${name}" title="Turn off link">${icon('trash')}</button>` : '<span></span><span></span>'}
-    </div>`;
-  };
-  linksBody.innerHTML = (on.length ? `<div class="trash-group">On</div>${on.map(s => row(s, linksList.indexOf(s))).join('')}` : '')
-    + (ended.length ? `<div class="trash-group">Ended</div>${ended.map(s => row(s, linksList.indexOf(s))).join('')}` : '');
-  if (!linksModal.hidden && !linksModal.contains(document.activeElement)) linksModal.querySelector('[data-close-links]').focus({ preventScroll: true });
+    const kind = s.kind === 'sheet' ? 'Sheet' : 'File';
+    const where = escapeHtml(hasSheet(s.sheet) ? currentSheetName(s.sheet) : 'Deleted sheet');
+    const status = s.state === 'on' ? `${escapeHtml(untilText(s.expiresAt))} · ${escapeHtml(viewsText(s.views))}` : s.state === 'off' ? 'Turned off' : 'Expired';
+    const mark = `<span class="search-mark" aria-hidden="true">${icon(s.kind === 'sheet' ? 'lines' : 'link')}</span>`;
+    const actions = s.state === 'on'
+      ? `<button class="link-btn" type="button" data-link-copy="${i}">${phoneShare() ? 'Share' : 'Copy'}</button><button class="icon-btn lib-danger" type="button" data-link-off="${i}" aria-label="Turn off the link to ${name}" title="Turn off link">${icon('trash')}</button>`
+      : '';
+    return `<tr class="${s.state === 'on' ? '' : 'lib-ended'}">
+      <td class="lib-name-cell"><div class="lib-name-wrap">${mark}<div class="lib-name-text"><span class="lib-name">${name}</span><span class="lib-sub">${kind}${s.kind === 'file' ? ` in ${where}` : ''} · <span class="lib-state${s.state === 'on' ? '' : ' off'}">${status}</span></span></div></div></td>
+      <td class="lib-col">${kind}</td>
+      <td class="lib-col"><span class="lib-sheet">${s.kind === 'sheet' ? '—' : where}</span></td>
+      <td class="lib-col"><span class="lib-state${s.state === 'on' ? '' : ' off'}">${status}</span></td>
+      <td class="lib-actions">${actions}</td>
+    </tr>`;
+  }).join('');
+  linksBody.innerHTML = `<table class="lib-table lib-links">
+    <caption class="sr-only">Your share links</caption>
+    <thead><tr><th scope="col">Shared item</th><th scope="col" class="lib-col">Kind</th><th scope="col" class="lib-col">In sheet</th><th scope="col" class="lib-col">Status</th><th scope="col" class="lib-actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
 }
 
 linksBody.addEventListener('click', async e => {
+  if (e.target.closest('[data-lib-upgrade]')) return showUpgrade('');
   const btn = e.target.closest('button');
   if (!btn) return;
   if (btn.dataset.linkCopy) {
@@ -3999,8 +4187,10 @@ linksBody.addEventListener('click', async e => {
   }
 });
 
-linksModal.querySelector('[data-close-links]').addEventListener('click', closeLinks);
-linksModal.addEventListener('click', e => { if (e.target === linksModal) closeLinks(); });
+libraryModal.querySelector('[data-close-library]').addEventListener('click', () => closeLibrary());
+libraryModal.querySelector('[data-library-back]').innerHTML = icon('back');
+libraryModal.querySelector('[data-library-back]').addEventListener('click', () => closeLibrary({ back: true }));
+libraryModal.addEventListener('click', e => { if (e.target === libraryModal) closeLibrary(); });
 
 // ---- Plans and billing: Free and Pro, paid through Stripe ----
 // The server enforces every limit; the page checks first to save a wasted upload.
@@ -4122,36 +4312,198 @@ window.fetch = async (...args) => {
   return r;
 };
 
-accountBtn.addEventListener('click', () => {
-  openMenu(accountBtn, [
-    { heading: account?.email || 'Account' },
-    { heading: planLine() },
-    myPlan().plan === 'free' ? { label: 'Upgrade to Pro…', icon: 'star', run: () => showUpgrade('') } : null,
-    myPlan().billing ? { label: 'Manage billing…', icon: 'card', run: manageBilling } : null,
-    { label: 'Shared links', icon: 'link', run: openLinks },
-    { label: 'Recently Deleted', icon: 'trash', run: openTrash },
-    account?.keyring ? { label: 'New recovery key…', icon: 'key', run: confirmNewRecoveryKey } : null,
-    'separator',
-    { heading: 'Appearance' },
-    ...appearanceItems(),
-    'separator',
-    { label: 'Privacy policy', icon: 'shield', run: () => window.open('/privacy', '_blank', 'noopener') },
-    { label: 'Terms of service', icon: 'lines', run: () => window.open('/terms', '_blank', 'noopener') },
-    { label: 'Help & support', icon: 'link', run: () => { location.href = 'mailto:support@sector809labs.com'; } },
-    'separator',
-    { label: 'Sign out', icon: 'logout', run: () => signOut('logout') },
-    'separator',
-    { label: 'Sign out everywhere…', icon: 'devices', danger: true, run: confirmSignOutEverywhere },
-    { label: 'Delete account…', icon: 'trash', danger: true, run: openDeleteAccount }
-  ], 'Account');
+// ---- Profile menu: a popover on desktop, a bottom sheet on phones ----
+// Main: who you are and your plan, then Files & share links, Recently deleted,
+// Account & security and Help & support (the last two open in place, with Back).
+
+const profileModal = document.querySelector('#profileModal');
+const profilePanel = document.querySelector('#profilePanel');
+let profileView = 'main';
+
+// Accounts have no separate name: the part of the email before "@", tidied.
+function displayName(email = '') {
+  const local = String(email).split('@')[0].replace(/\+.*$/, '');
+  const words = local.split(/[._-]+/).map(w => w.replace(/\d+/g, '')).filter(Boolean);
+  if (!words.length) return local || 'Your account';
+  return words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+const chevron = () => `<span class="pf-chevron" aria-hidden="true">${icon('chevron')}</span>`;
+const pfRow = (action, iconName, label, { sub = '', more = false, danger = false, external = false } = {}) =>
+  `<button class="pf-row${danger ? ' danger' : ''}" type="button" data-pf="${action}">${icon(iconName)}<span class="pf-label"><span>${escapeHtml(label)}</span>${sub ? `<span class="pf-row-sub">${escapeHtml(sub)}</span>` : ''}</span>${more ? chevron() : external ? `<span class="pf-chevron" aria-hidden="true">${icon('open')}</span>` : ''}</button>`;
+
+function profileHtml(view) {
+  if (view === 'security') {
+    const now = window.scratchTheme?.get() || 'light';
+    const seg = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]
+      .map(([value, label]) => `<button class="pf-seg-btn" type="button" role="radio" aria-checked="${value === now}" tabindex="${value === now ? 0 : -1}" data-theme-pick="${value}">${label}</button>`).join('');
+    return `<div class="pf-subhead"><button class="pf-back" type="button" data-pf="back" aria-label="Back">${icon('back')}</button><h2 id="pfTitle">Account &amp; security</h2></div>
+      <div class="pf-scroll">
+        <h3 class="pf-group">Preferences</h3>
+        <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
+          <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
+        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('recovery', 'key', 'New recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        <h3 class="pf-group">Sessions</h3>
+        ${pfRow('signout', 'logout', 'Sign out')}
+        ${pfRow('signout-all', 'devices', 'Sign out of all devices…')}
+        <div class="pf-sep"></div>
+        ${pfRow('delete', 'trash', 'Delete account…', { danger: true })}
+      </div>`;
+  }
+  if (view === 'help') {
+    return `<div class="pf-subhead"><button class="pf-back" type="button" data-pf="back" aria-label="Back">${icon('back')}</button><h2 id="pfTitle">Help &amp; support</h2></div>
+      <div class="pf-scroll">
+        ${pfRow('support', 'mail', 'Contact support', { sub: 'support@sector809labs.com', external: true })}
+        ${pfRow('privacy', 'shield', 'Privacy policy', { external: true })}
+        ${pfRow('terms', 'lines', 'Terms of service', { external: true })}
+      </div>`;
+  }
+  const plan = myPlan();
+  const pro = plan.plan !== 'free';
+  const detail = pro && plan.billing ? planLine().replace(/^Pro · /, '') : pro ? '' : '1 sheet · 1 file · 10 MB';
+  const planAction = !pro ? `<button class="pf-plan-btn" type="button" data-pf="upgrade">Upgrade to Pro</button>`
+    : plan.billing ? `<button class="pf-plan-link" type="button" data-pf="billing">Manage billing</button>` : '';
+  const email = account?.email || '';
+  return `<div class="pf-head">
+      <span class="pf-avatar" aria-hidden="true">${escapeHtml((displayName(email)[0] || '?').toUpperCase())}</span>
+      <div class="pf-id"><h2 class="pf-name" id="pfTitle">${escapeHtml(displayName(email))}</h2><span class="pf-email">${escapeHtml(email).replace('@', '@<wbr>')}</span></div>
+      <span class="pf-badge${pro ? ' pro' : ''}">${pro ? 'Pro' : 'Free'}</span>
+    </div>
+    ${detail || planAction ? `<div class="pf-plan"><span class="pf-plan-detail">${escapeHtml(detail)}</span>${planAction}</div>` : ''}
+    <div class="pf-scroll pf-main">
+      ${pfRow('library', 'folder', 'Files & share links', { more: true })}
+      ${pfRow('trash', 'trash', 'Recently deleted')}
+      ${pfRow('security', 'user', 'Account & security', { more: true })}
+      ${pfRow('help', 'help', 'Help & support', { more: true })}
+    </div>`;
+}
+
+const phoneLayout = () => matchMedia('(max-width: 699px)').matches;
+
+function placeProfile() {
+  if (profileModal.hidden) return;
+  profileModal.classList.toggle('as-sheet', phoneLayout());
+  if (phoneLayout()) {
+    profilePanel.style.top = profilePanel.style.right = '';
+    return;
+  }
+  const r = accountBtn.getBoundingClientRect();
+  profilePanel.style.top = `${Math.round(r.bottom + 8)}px`;
+  profilePanel.style.right = `${Math.max(8, Math.round(document.documentElement.clientWidth - r.right))}px`;
+}
+
+function renderProfile(view, { focusRow = null } = {}) {
+  profileView = view;
+  profilePanel.innerHTML = profileHtml(view);
+  profilePanel.setAttribute('aria-labelledby', 'pfTitle');
+  profilePanel.removeAttribute('aria-label');
+  const target = (focusRow && profilePanel.querySelector(`[data-pf="${focusRow}"]`))
+    || profilePanel.querySelector(view === 'main' ? '.pf-row, .pf-plan-btn' : '.pf-back');
+  target?.focus({ preventScroll: true });
+}
+
+function openProfile(view = 'main', { focusRow = null } = {}) {
+  closeMenu({ focusTrigger: false });
+  if (profileModal.hidden) rememberFocus('profile');
+  profileModal.hidden = false;
+  accountBtn.setAttribute('aria-expanded', 'true');
+  updateModalOpen();
+  placeProfile();
+  renderProfile(view, { focusRow });
+}
+
+function closeProfile({ restore = true } = {}) {
+  if (profileModal.hidden) return;
+  profileModal.hidden = true;
+  accountBtn.setAttribute('aria-expanded', 'false');
+  updateModalOpen();
+  if (restore) restoreFocus('profile');
+  else returnFocusTo.delete('profile');
+}
+
+// Leaves the menu, with focus back on the account button, then does the thing
+// (so the next dialog returns focus there too).
+function fromProfile(run) {
+  closeProfile();
+  run();
+}
+
+const PROFILE_ACTIONS = {
+  library: () => { closeProfile(); openLibrary('files', { fromProfile: true }); },
+  trash: () => fromProfile(openTrash),
+  security: () => renderProfile('security'),
+  help: () => renderProfile('help'),
+  back: () => renderProfile('main', { focusRow: profileView }),
+  upgrade: () => fromProfile(() => showUpgrade('')),
+  billing: () => fromProfile(manageBilling),
+  recovery: () => fromProfile(confirmNewRecoveryKey),
+  signout: () => fromProfile(() => signOut('logout')),
+  'signout-all': () => fromProfile(confirmSignOutEverywhere),
+  delete: () => fromProfile(openDeleteAccount),
+  support: () => fromProfile(() => { location.href = 'mailto:support@sector809labs.com'; }),
+  privacy: () => fromProfile(() => window.open('/privacy', '_blank', 'noopener')),
+  terms: () => fromProfile(() => window.open('/terms', '_blank', 'noopener'))
+};
+
+profilePanel.addEventListener('click', e => {
+  const pick = e.target.closest('[data-theme-pick]');
+  if (pick) {
+    window.scratchTheme?.set(pick.dataset.themePick);
+    updateBrandLabel();
+    for (const btn of profilePanel.querySelectorAll('[data-theme-pick]')) {
+      const on = btn === pick;
+      btn.setAttribute('aria-checked', String(on));
+      btn.tabIndex = on ? 0 : -1;
+    }
+    pick.focus({ preventScroll: true });
+    return;
+  }
+  const btn = e.target.closest('[data-pf]');
+  if (btn) PROFILE_ACTIONS[btn.dataset.pf]?.();
 });
 
-// Light, dark, or whatever the device uses (theme.js applies and remembers it).
-function appearanceItems() {
-  const now = window.scratchTheme?.get() || 'light';
-  return [['system', 'System', 'theme'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']]
-    .map(([value, label, mark]) => ({ label, icon: mark, checked: value === now, run: () => { window.scratchTheme?.set(value); updateBrandLabel(); } }));
-}
+profilePanel.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (profileView !== 'main') PROFILE_ACTIONS.back();
+    else closeProfile();
+    return;
+  }
+  // Appearance: arrow keys move between System, Light and Dark.
+  const radio = e.target.closest('[data-theme-pick]');
+  if (radio && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+    const all = [...profilePanel.querySelectorAll('[data-theme-pick]')];
+    all[(all.indexOf(radio) + (e.key === 'ArrowRight' ? 1 : -1) + all.length) % all.length].click();
+    return;
+  }
+  const focusables = [...profilePanel.querySelectorAll('button:not([tabindex="-1"])')];
+  const i = focusables.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    focusables[(i + (e.key === 'ArrowDown' ? 1 : -1) + focusables.length) % focusables.length]?.focus();
+  } else if (e.key === 'Tab') {
+    // Focus stays in the menu while it's open.
+    e.preventDefault();
+    focusables[(i + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length]?.focus();
+  } else if (e.key === 'ArrowLeft' && profileView !== 'main' && !radio) {
+    e.preventDefault();
+    PROFILE_ACTIONS.back();
+  }
+});
+
+profileModal.addEventListener('pointerdown', e => {
+  if (e.target === profileModal) closeProfile();
+});
+window.addEventListener('resize', placeProfile);
+
+accountBtn.setAttribute('aria-haspopup', 'dialog');
+accountBtn.setAttribute('aria-expanded', 'false');
+accountBtn.addEventListener('click', () => {
+  if (!profileModal.hidden) closeProfile();
+  else openProfile();
+});
 
 // Tapping the logo or name flips between light and dark (and keeps that choice).
 const brandBtn = document.querySelector('#brandBtn');

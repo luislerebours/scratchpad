@@ -931,6 +931,8 @@ body.signed-out { background: var(--auth-bg); }
 .lib-danger:hover { color: var(--danger); background: var(--danger-soft); }
 .lib-empty { padding: 32px 0 16px; color: var(--muted); }
 .lib-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-weight: 600; }
+.lib-inactive-toggle { margin-top: 10px; font-weight: 600; }
+.lib-inactive { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
 .lib-count { margin-top: 12px; color: var(--faint); font-size: .8125rem; }
 @media (max-width: 699px) {
   .modal-backdrop.library-backdrop { padding: 0; }

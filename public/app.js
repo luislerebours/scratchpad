@@ -3961,6 +3961,7 @@ async function openLibrary(tab = 'files', { fromProfile = false } = {}) {
   libraryModal.hidden = false;
   updateModalOpen();
   libSearch.value = '';
+  showInactiveLinks = false;
   selectLibraryTab(tab, { focus: true });
   loadLibraryFiles();
   loadLinks();
@@ -4134,6 +4135,49 @@ async function loadLinks() {
   }
 }
 
+let showInactiveLinks = false;
+
+const shortDate = t => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+// Why a link stopped working, in words.
+function endedText(s) {
+  const when = s.endedAt ? ` · ${shortDate(s.endedAt)}` : '';
+  if (s.state === 'expired' || s.reason === 'expired') return `Expired${when}`;
+  return ({
+    you: 'Turned off by you',
+    replaced: 'Replaced by a newer link',
+    admin: 'Turned off when the account was deactivated',
+    encryption: 'Turned off when encryption was set up'
+  }[s.reason] || 'Turned off') + when;
+}
+
+function linkRows(list) {
+  return list.map(({ s, i }) => {
+    const on = s.state === 'on';
+    const name = escapeHtml(s.name);
+    const kind = s.kind === 'sheet' ? 'Sheet' : 'File';
+    const where = escapeHtml(hasSheet(s.sheet) ? currentSheetName(s.sheet) : 'Deleted sheet');
+    const status = escapeHtml(on ? `${untilText(s.expiresAt)} · ${viewsText(s.views)}` : endedText(s));
+    const mark = `<span class="search-mark" aria-hidden="true">${icon(s.kind === 'sheet' ? 'lines' : 'link')}</span>`;
+    const actions = on
+      ? `<button class="link-btn" type="button" data-link-copy="${i}">${phoneShare() ? 'Share' : 'Copy'}</button><button class="icon-btn lib-danger" type="button" data-link-off="${i}" aria-label="Turn off the link to ${name}" title="Turn off link">${icon('trash')}</button>`
+      : '';
+    return `<tr class="${on ? '' : 'lib-ended'}">
+      <td class="lib-name-cell"><div class="lib-name-wrap">${mark}<div class="lib-name-text"><span class="lib-name">${name}</span><span class="lib-sub">${kind}${s.kind === 'file' ? ` in ${where}` : ''} · <span class="lib-state${on ? '' : ' off'}">${status}</span></span></div></div></td>
+      <td class="lib-col">${kind}</td>
+      <td class="lib-col"><span class="lib-sheet">${s.kind === 'sheet' ? '—' : where}</span></td>
+      <td class="lib-col"><span class="lib-state${on ? '' : ' off'}">${status}</span></td>
+      <td class="lib-actions">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+const linkTable = (rows, caption, statusHead) => `<table class="lib-table lib-links">
+    <caption class="sr-only">${caption}</caption>
+    <thead><tr><th scope="col">Shared item</th><th scope="col" class="lib-col">Kind</th><th scope="col" class="lib-col">In sheet</th><th scope="col" class="lib-col">${statusHead}</th><th scope="col" class="lib-actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+
+// Active links first; ended ones (with why they ended) only when asked for.
 function renderLinks() {
   if (!linksList.length) {
     linksBody.innerHTML = myPlan().share
@@ -4141,33 +4185,29 @@ function renderLinks() {
       : '<div class="lib-empty"><strong>Share links come with Pro</strong>Send a file or a whole sheet to anyone with a link. <button class="link-btn" type="button" data-lib-upgrade>Upgrade to Pro</button></div>';
     return;
   }
-  const order = { on: 0, off: 1, expired: 2 };
-  const list = linksList.map((s, i) => ({ s, i })).sort((a, b) => (order[a.s.state] ?? 3) - (order[b.s.state] ?? 3) || (b.s.createdAt || 0) - (a.s.createdAt || 0));
-  const rows = list.map(({ s, i }) => {
-    const name = escapeHtml(s.name);
-    const kind = s.kind === 'sheet' ? 'Sheet' : 'File';
-    const where = escapeHtml(hasSheet(s.sheet) ? currentSheetName(s.sheet) : 'Deleted sheet');
-    const status = s.state === 'on' ? `${escapeHtml(untilText(s.expiresAt))} · ${escapeHtml(viewsText(s.views))}` : s.state === 'off' ? 'Turned off' : 'Expired';
-    const mark = `<span class="search-mark" aria-hidden="true">${icon(s.kind === 'sheet' ? 'lines' : 'link')}</span>`;
-    const actions = s.state === 'on'
-      ? `<button class="link-btn" type="button" data-link-copy="${i}">${phoneShare() ? 'Share' : 'Copy'}</button><button class="icon-btn lib-danger" type="button" data-link-off="${i}" aria-label="Turn off the link to ${name}" title="Turn off link">${icon('trash')}</button>`
-      : '';
-    return `<tr class="${s.state === 'on' ? '' : 'lib-ended'}">
-      <td class="lib-name-cell"><div class="lib-name-wrap">${mark}<div class="lib-name-text"><span class="lib-name">${name}</span><span class="lib-sub">${kind}${s.kind === 'file' ? ` in ${where}` : ''} · <span class="lib-state${s.state === 'on' ? '' : ' off'}">${status}</span></span></div></div></td>
-      <td class="lib-col">${kind}</td>
-      <td class="lib-col"><span class="lib-sheet">${s.kind === 'sheet' ? '—' : where}</span></td>
-      <td class="lib-col"><span class="lib-state${s.state === 'on' ? '' : ' off'}">${status}</span></td>
-      <td class="lib-actions">${actions}</td>
-    </tr>`;
-  }).join('');
-  linksBody.innerHTML = `<table class="lib-table lib-links">
-    <caption class="sr-only">Your share links</caption>
-    <thead><tr><th scope="col">Shared item</th><th scope="col" class="lib-col">Kind</th><th scope="col" class="lib-col">In sheet</th><th scope="col" class="lib-col">Status</th><th scope="col" class="lib-actions"><span class="sr-only">Actions</span></th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+  const all = linksList.map((s, i) => ({ s, i }));
+  const active = all.filter(x => x.s.state === 'on').sort((a, b) => (b.s.createdAt || 0) - (a.s.createdAt || 0));
+  const inactive = all.filter(x => x.s.state !== 'on').sort((a, b) => (b.s.endedAt || b.s.createdAt || 0) - (a.s.endedAt || a.s.createdAt || 0));
+  const top = active.length
+    ? linkTable(linkRows(active), 'Your active share links', 'Status')
+    : `<div class="lib-empty"><strong>No active links</strong>${myPlan().share ? 'Share a file or a sheet from its ••• menu to make one.' : 'Share links come with Pro. <button class="link-btn" type="button" data-lib-upgrade>Upgrade to Pro</button>'}</div>`;
+  const toggle = inactive.length
+    ? `<button class="link-btn lib-inactive-toggle" type="button" data-links-inactive aria-expanded="${showInactiveLinks}" aria-controls="inactiveLinks">${showInactiveLinks ? 'Hide' : 'See'} inactive links (${inactive.length})</button>`
+    : '';
+  const ended = inactive.length && showInactiveLinks
+    ? `<div id="inactiveLinks" class="lib-inactive"><p class="lib-note">These links no longer open anything. They’re cleared 30 days after they ended. To share again, make a new link from the item’s ••• menu.</p>${linkTable(linkRows(inactive), 'Inactive share links', 'Why it ended')}</div>`
+    : '';
+  linksBody.innerHTML = top + toggle + ended;
 }
 
 linksBody.addEventListener('click', async e => {
   if (e.target.closest('[data-lib-upgrade]')) return showUpgrade('');
+  if (e.target.closest('[data-links-inactive]')) {
+    showInactiveLinks = !showInactiveLinks;
+    renderLinks();
+    linksBody.querySelector('[data-links-inactive]')?.focus({ preventScroll: true });
+    return;
+  }
   const btn = e.target.closest('button');
   if (!btn) return;
   if (btn.dataset.linkCopy) {
@@ -5078,7 +5118,7 @@ async function lockTheRest() {
     }
     // Links from before point at what has now been replaced; they're turned off.
     const { shares = [] } = await getJson(`${API_SHARE}?mine=1`);
-    for (const share of shares.filter(x => x.state === 'on')) await sharePost({ action: 'revoke', token: share.token }).catch(() => {});
+    for (const share of shares.filter(x => x.state === 'on')) await sharePost({ action: 'revoke', token: share.token, reason: 'encryption' }).catch(() => {});
     await authPost('migrated', {});
     account.locked = 'on';
     showToast('Your sheets and files are now end-to-end encrypted');

@@ -87,7 +87,7 @@ async function accountView(user) {
 async function revokeShares(ns) {
   const store = sharesStore();
   const live = (await readShares(ns)).filter(s => !ended(s));
-  await Promise.all(live.map(s => store.setJSON(`shares/${s.token}`, { ...s, revoked: true, revokedAt: Date.now(), revokedBy: 'admin' })));
+  await Promise.all(live.map(s => store.setJSON(`shares/${s.token}`, { ...s, revoked: true, revokedAt: Date.now(), revokedBy: 'admin', revokedReason: 'admin' })));
   return live.length;
 }
 

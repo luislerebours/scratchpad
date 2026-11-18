@@ -23,6 +23,7 @@
         <span>ScrapSheet</span>
       </a>
       <nav class="legal-nav" aria-label="Legal">
+        <a href="/help">Help</a>
         <a href="/privacy" aria-current="page">Privacy</a>
         <a href="/terms">Terms</a>
         <a href="mailto:support@sector809labs.com">Support</a>
@@ -51,8 +52,9 @@
         <li><strong>A one-way hash of your sign-in secret</strong> (never your password) and your encrypted keys, so you can sign in and unlock your data on new devices.</li>
         <li><strong>Usage numbers</strong> we need to run the service and plans: how much storage you use, how many sheets and files you have and their sizes, when they were added, whether a sheet has anything in it, and which images a sheet uses.</li>
         <li><strong>Account activity</strong>: when the account was created, how many times you’ve signed in, and which days you used ScrapSheet in the last 60 days.</li>
+        <li><strong>Signed-in devices</strong>: for each device signed in to your account, the kind of device read from its browser (for example, “Chrome on Windows”), when it signed in and when it was last used, so you can see them and sign one out under Account &amp; security. A device’s entry is removed when it signs out.</li>
         <li><strong>Your plan and billing status</strong>: whether you’re on Free or Pro, and your Stripe customer and subscription identifiers (or, for Pro bought in the Android app, the Google Play purchase, product and status), renewal date and status. We never see or store card numbers.</li>
-        <li><strong>Share links you create</strong>: what each link points to, when it expires and how many times it was opened. The key that opens a shared item is in the part of the link after “#”, which browsers never send to us.</li>
+        <li><strong>Share links you create</strong>: what each link points to, when it expires and how many times it was opened. The key that opens a shared item is in the part of the link after “#”, which browsers never send to us. If you give a link a password, that key is locked with it, and we keep only a one-way hash of a proof made from the password on the device (never the password itself), to check before showing anything.</li>
         <li><strong>IP addresses</strong>, briefly, to limit how many sign-in codes can be requested (to stop abuse). Our hosting provider also keeps standard technical logs for a short time.</li>
         <li><strong>Error reports</strong>: when something on our servers fails, which part failed and when, kept for 30 days. Never the content of what you sent.</li>
       </ul>
@@ -84,6 +86,7 @@
       <ul>
         <li>Your account and data are kept until you delete them or your account. Deleting your account erases it and everything in it right away.</li>
         <li>Deleted sheets and files stay in Recently Deleted for 30 days, then are deleted for good.</li>
+        <li>Earlier versions of each sheet’s text (Version history, up to 20 per sheet, locked like the sheet) are kept for 30 days, then deleted. Deleting the sheet for good deletes them too.</li>
         <li>Ended share links are cleared from your list after 30 days.</li>
         <li>Sign-in codes expire after 15 minutes.</li>
         <li>Stripe and Google keep billing records as the law requires.</li>

@@ -42,6 +42,11 @@
   to = "/terms.html"
   status = 200
 
+[[redirects]]
+  from = "/help"
+  to = "/help.html"
+  status = 200
+
 # How to delete an account (Google Play asks for a web page like this).
 [[redirects]]
   from = "/delete-account"

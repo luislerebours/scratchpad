@@ -11,6 +11,10 @@ const toastEl = document.querySelector('#toast');
 const PARALLEL = 3;
 const fragment = location.hash.slice(1);
 let itemKey = null; // the shared file's or sheet's key, from the link
+// A link with a password: the pass from unlocking it goes with every request,
+// and the key inside the link ("p.<salt>.<locked key>") opens with the password.
+let pass = '';
+const shareApi = () => `${API}?t=${encodeURIComponent(token)}${pass ? `&p=${encodeURIComponent(pass)}` : ''}`;
 const fileKeys = new Map();
 
 // A file's key: the link's own key for a shared file, or unwrapped with the sheet's key.
@@ -62,6 +66,7 @@ const ICON = {
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   broken: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2M4 4l16 16"/>'
 };
 const icon = name => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
@@ -88,7 +93,7 @@ function fileIconHtml(f, big = false) {
     return `<span class="file-icon kind-img has-thumb${size}" aria-hidden="true"><img data-thumb="${escapeHtml(f.id)}" alt="" /></span>`;
   }
   if (kind === 'img' && f.thumb) {
-    return `<span class="file-icon kind-img has-thumb${size}" aria-hidden="true"><img src="${API}?t=${encodeURIComponent(token)}&thumb=${encodeURIComponent(f.id)}" alt="" /></span>`;
+    return `<span class="file-icon kind-img has-thumb${size}" aria-hidden="true"><img src="${shareApi()}&thumb=${encodeURIComponent(f.id)}" alt="" /></span>`;
   }
   return `<span class="file-icon kind-${kind}${size}" aria-hidden="true">${kind === 'img' ? icon('landscape') : escapeHtml(label)}</span>`;
 }
@@ -98,7 +103,7 @@ function fillThumbs(files) {
     const f = files.find(x => x.id === img.dataset.thumb);
     if (!f) continue;
     keyOf(f)
-      .then(key => lockedBlob(`${API}?t=${encodeURIComponent(token)}&thumb=${encodeURIComponent(f.id)}`, key, f.thumb.type))
+      .then(key => lockedBlob(`${shareApi()}&thumb=${encodeURIComponent(f.id)}`, key, f.thumb.type))
       .then(blob => { img.src = URL.createObjectURL(blob); })
       .catch(() => img.remove());
   }
@@ -129,7 +134,7 @@ async function fetchFile(file, onProgress) {
   const worker = async () => {
     while (next < file.chunks) {
       const i = next++;
-      const r = await fetchPiece(`${API}?t=${encodeURIComponent(token)}&file=${encodeURIComponent(file.id)}&chunk=${i}`);
+      const r = await fetchPiece(`${shareApi()}&file=${encodeURIComponent(file.id)}&chunk=${i}`);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The download stopped. Try again.');
       const piece = await r.arrayBuffer();
       parts[i] = key ? await vault.decryptBytes(key, piece) : piece;
@@ -198,7 +203,7 @@ function appendClean(source, target) {
       const match = IMAGE_SRC.exec(node.getAttribute('data-src') || node.getAttribute('src') || '');
       if (!match) continue;
       const img = document.createElement('img');
-      const url = `${API}?t=${encodeURIComponent(token)}&image=${encodeURIComponent(match[1])}`;
+      const url = `${shareApi()}&image=${encodeURIComponent(match[1])}`;
       if (itemKey) {
         lockedBlob(url, itemKey).then(blob => { img.src = URL.createObjectURL(blob); }).catch(() => img.remove());
       } else {
@@ -329,7 +334,7 @@ async function unlock(data) {
   const locked = sealedName || vault.isSealed(data.html) || data.file?.enc || data.files?.some(f => f.enc);
   if (!locked) return true;
   try {
-    itemKey = await vault.importKey(fragment, false);
+    itemKey = itemKey || await vault.importKey(fragment, false);
     data.name = await vault.decryptText(itemKey, data.name);
     if (data.kind === 'file') {
       data.file = { ...data.file, shared: true, name: await vault.decryptText(itemKey, data.file.name), type: await vault.decryptText(itemKey, data.file.type) };
@@ -347,14 +352,68 @@ async function unlock(data) {
   }
 }
 
+function renderPassword(salt) {
+  document.title = 'ScrapSheet';
+  const foot = document.querySelector('#shareFootText');
+  if (foot) foot.textContent = 'Anyone with this link and its password can view and download what’s here until it expires.';
+  card.innerHTML = `
+    <form class="share-problem share-password" id="sharePwForm" novalidate>
+      <span class="share-problem-mark" aria-hidden="true">${icon('lock')}</span>
+      <h1 class="share-title">This link needs a password</h1>
+      <p class="share-meta">Enter the password you were given with the link.</p>
+      <input id="sharePw" class="rename-input" type="password" autocomplete="off" aria-label="Password" />
+      <p class="auth-error" id="sharePwError" role="alert"></p>
+      <button class="btn full" type="submit">Open</button>
+    </form>`;
+  const form = card.querySelector('#sharePwForm');
+  const input = form.querySelector('#sharePw');
+  const error = form.querySelector('#sharePwError');
+  const button = form.querySelector('button');
+  input.focus();
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    error.textContent = '';
+    if (!input.value) return void (error.textContent = 'Enter the password.');
+    button.disabled = true;
+    button.textContent = 'Checking…';
+    try {
+      const { proof, kek } = await vault.linkPasswordKeys(input.value, salt);
+      const r = await fetch(`${API}?t=${encodeURIComponent(token)}&action=unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proof }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'That password isn’t right.');
+      pass = data.pass;
+      // The key in the link is locked with the password.
+      const [kind, , locked] = fragment.split('.');
+      if (kind === 'p') {
+        try {
+          itemKey = await vault.unwrap(locked, kek, false);
+        } catch {
+          pass = '';
+          throw new Error('This link is out of date: its password was changed. Ask for the new link.');
+        }
+      }
+      start();
+    } catch (err) {
+      error.textContent = err.message;
+      button.disabled = false;
+      button.textContent = 'Open';
+      input.select();
+    }
+  });
+}
+
 async function start() {
   if (!token) {
     renderProblem('missing', 'This link doesn’t work.');
     return;
   }
   try {
-    const r = await fetch(`${API}?t=${encodeURIComponent(token)}`, { cache: 'no-store' });
+    const r = await fetch(`${shareApi()}`, { cache: 'no-store' });
     const data = await r.json().catch(() => ({}));
+    if (r.status === 401 && data.reason === 'password') {
+      renderPassword(data.salt);
+      return;
+    }
     if (!r.ok) {
       renderProblem(data.reason, data.error || 'This link doesn’t work.');
       return;
@@ -369,5 +428,8 @@ async function start() {
     renderProblem('network', 'Couldn’t open this link.');
   }
 }
+
+// A different link opened in this tab (only the part after "#" changed): start over with it.
+window.addEventListener('hashchange', () => location.reload());
 
 start();

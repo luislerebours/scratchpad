@@ -75,6 +75,14 @@ to what the app collects); `branding/play-store/` the listing kit.
     sheet; a link stops working if what it shares is deleted. Links live in the
     `scratchpad-shares` store; each account lists its tokens in `meta/shares`.
     Downloads are capped per link per hour (about 2.4 GB, counted by piece size). Viewer pages are noindex/no-referrer.
+    Optional password (`linkPassword()` in `app.js`, `vault.linkPasswordKeys`):
+    PBKDF2 of the password and a salt gives a proof and a key; the link's part
+    after `#` becomes `p.<salt>.<item key locked with that key>`; the share keeps
+    `pw` { kdfSalt, scrypt hash of the proof } and `linkFragment` (that part,
+    locked with the sheet key, for the owner's devices). The viewer posts the
+    proof (`action=unlock`, limited per link and IP) for a 12-hour pass (`p`)
+    sent with every request; without it the link serves nothing (401 with the
+    salt). Changing or removing the password changes the link and ends old passes.
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none),
   enforced when an upload starts; an admin can change it from the admin

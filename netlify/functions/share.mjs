@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { json, parseSheet, requireUser, sameOrigin, userStore } from '../lib/auth.mjs';
+import { allow, checkPassword, hashPassword, json, parseSheet, requireUser, sameOrigin, sign, userStore, verify } from '../lib/auth.mjs';
+import { isSealed } from '../lib/sheets.mjs';
 import { fileStores, publicRecord } from '../lib/files.mjs';
 import { ended, readShareIndex as readIndex, readShares, sharesStore, writeShareIndex as writeIndex } from '../lib/shares.mjs';
 import { readSheets } from '../lib/sheets.mjs';
@@ -18,6 +19,16 @@ import { onR2, pieceBytes, pieceUrl } from '../lib/r2.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
 const DAY_CHOICES = new Set([1, 7, 30]);
+// A link's optional password (see linkPasswordKeys in crypto.js): we keep the
+// salt the viewer needs, and a one-way hash of the proof it sends. A pass from
+// an unlock lasts 12 hours, and only for the password it was given for.
+const PASS_MS = 12 * 60 * 60 * 1000;
+const b64ish = (v, max = 200) => typeof v === 'string' && v.length <= max && /^[A-Za-z0-9_-]+$/.test(v);
+async function passwordFor(given) {
+  if (!given) return null;
+  if (!b64ish(given.salt, 40) || !b64ish(given.proof, 60)) return undefined;
+  return { kdfSalt: given.salt, ...(await hashPassword(given.proof)) };
+}
 const KEEP_ENDED_MS = 30 * DAY; // ended links stay in the owner's list this long
 // Per link: about 2.4 GB of downloads an hour, counted by piece size (pieces
 // are 4 MB on Netlify, 1 MB in R2).
@@ -48,6 +59,10 @@ const ownerView = share => ({
   expiresAt: share.expiresAt,
   revoked: Boolean(share.revoked),
   views: share.views || 0,
+  protected: Boolean(share.pw),
+  // The link's key part, locked with the sheet's key (only the owner's devices
+  // can read it): for a link with a password, the owner can't rebuild it.
+  linkFragment: share.linkFragment || null,
   state: ended(share) || 'on',
   // Why a link ended: you, replaced (a newer link for the same item), admin
   // (account deactivated), encryption (turned on for an older account),
@@ -132,8 +147,11 @@ async function owner(req, url) {
       .filter(s => !ended(s) && s.kind === kind && s.sheet === sheet && (s.file || null) === file)
       .map(s => store.setJSON(`shares/${s.token}`, { ...s, revoked: true, revokedAt: Date.now(), revokedReason: 'replaced' })));
 
+    const pw = await passwordFor(body.password);
+    if (pw === undefined || (pw && !isSealed(body.linkFragment))) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
     const now = Date.now();
     const share = {
+      ...(pw ? { pw, linkFragment: body.linkFragment } : {}),
       token: randomBytes(18).toString('base64url'),
       ns,
       kind,
@@ -162,6 +180,17 @@ async function owner(req, url) {
     return json({ share: ownerView(next), origin: url.origin });
   }
 
+  // Add, change or remove the link's password. The link's key part changes with it.
+  if (body.action === 'password') {
+    if (share.revoked) return json({ error: 'This link is turned off. Make a new one.' }, 409);
+    const pw = await passwordFor(body.password);
+    if (pw === undefined || (pw && !isSealed(body.linkFragment))) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
+    const { pw: _, linkFragment: __, ...rest } = share;
+    const next = pw ? { ...rest, pw, linkFragment: body.linkFragment } : rest;
+    await store.setJSON(`shares/${token}`, next);
+    return json({ share: ownerView(next), origin: url.origin });
+  }
+
   if (body.action === 'revoke') {
     const next = { ...share, revoked: true, revokedAt: Date.now(), revokedReason: REVOKE_REASONS.has(body.reason) ? body.reason : 'you' };
     await store.setJSON(`shares/${token}`, next);
@@ -172,7 +201,7 @@ async function owner(req, url) {
 }
 
 async function visitor(req, url, token) {
-  if (req.method !== 'GET') return publicJson({ error: 'Method not allowed' }, 405);
+  if (req.method !== 'GET' && !(req.method === 'POST' && url.searchParams.get('action') === 'unlock')) return publicJson({ error: 'Method not allowed' }, 405);
   if (!validToken(token)) return publicJson({ error: 'This link doesn’t work.', reason: 'missing' }, 404);
   const store = sharesStore();
   const share = await store.get(`shares/${token}`, { type: 'json' });
@@ -181,6 +210,27 @@ async function visitor(req, url, token) {
   if (why) return publicJson({ error: why === 'off' ? 'This link was turned off.' : 'This link has expired.', reason: why }, 410);
   const found = await target(share);
   if (!found) return publicJson({ error: 'What was shared here has been deleted.', reason: 'gone' }, 410);
+
+  // A link with a password: the viewer proves it once and gets a pass, sent
+  // with every request after (`p`). Wrong tries are limited per link and per IP.
+  if (req.method === 'POST') {
+    if (!sameOrigin(req)) return publicJson({ error: 'Bad origin' }, 403);
+    if (!share.pw) return publicJson({ error: 'This link has no password.' }, 400);
+    const ip = req.headers.get('x-nf-client-connection-ip') || 'unknown';
+    if (!(await allow(`sharepw-${token}`, 20, 15 * 60 * 1000)) || !(await allow(`sharepw-ip-${ip}`, 30, 15 * 60 * 1000))) {
+      return publicJson({ error: 'Too many tries. Wait 15 minutes and try again.' }, 429);
+    }
+    const body = await req.json().catch(() => ({}));
+    if (!b64ish(body.proof, 60) || !(await checkPassword(body.proof, share.pw))) return publicJson({ error: 'That password isn’t right.' }, 400);
+    const pass = await sign({ t: 'sp', tok: token, k: share.pw.kdfSalt, exp: Date.now() + PASS_MS });
+    return publicJson({ pass });
+  }
+  if (share.pw) {
+    const pass = await verify(url.searchParams.get('p') || '');
+    if (!pass || pass.t !== 'sp' || pass.tok !== token || pass.k !== share.pw.kdfSalt) {
+      return publicJson({ error: 'This link needs a password.', reason: 'password', salt: share.pw.kdfSalt, kind: share.kind }, 401);
+    }
+  }
 
   const fileId = url.searchParams.get('file');
   const thumbId = url.searchParams.get('thumb');

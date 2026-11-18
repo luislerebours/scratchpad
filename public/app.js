@@ -575,6 +575,7 @@ const ICON_PATHS = {
   clip: '<path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/>',
   landscape: '<path d="M2.5 19 8.5 11l4.5 5.5 3-3.5 5.5 6z" fill="currentColor" stroke="none"/><circle cx="16.5" cy="7.5" r="2.2" fill="currentColor" stroke="none"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5L5 20"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   shield: '<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/>',
   logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/>',
   folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2.2h8.6A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5Z"/>',
@@ -2262,6 +2263,7 @@ function renderFiles() {
             <div class="file-meta" title="${metaTitle}">${meta}</div>
           </div>
           <button class="icon-btn" type="button" data-save="${id}" aria-label="Download ${name}" title="Download">${icon('download')}</button>
+          <button class="icon-btn" type="button" data-delete-file="${id}" aria-label="Delete ${name}" title="Delete">${icon('trash')}</button>
           <button class="icon-btn" type="button" data-file-menu="${id}" aria-label="More actions for ${name}" aria-haspopup="menu" aria-expanded="false">${icon('more')}</button>
         </div>
       </div>`;
@@ -3000,6 +3002,14 @@ fileList.addEventListener('click', async (e) => {
     saveBtn.disabled = true;
     await saveSharedFile(file);
     saveBtn.disabled = false;
+    return;
+  }
+
+  // Delete right from the row (asks first, the same as from the ••• menu).
+  const deleteBtn = e.target.closest('[data-delete-file]');
+  if (deleteBtn) {
+    const file = fileIndex.get(deleteBtn.dataset.deleteFile);
+    if (file) confirmDeleteFile(file);
     return;
   }
 
@@ -5047,9 +5057,13 @@ function offerProIfChosen() {
 const rawFetch = window.fetch.bind(window);
 
 // Signed out elsewhere ("sign out everywhere", a password reset): back to sign-in.
+// (Not for a request sent before this device's own password change, which
+// already gave it a new sign-in.)
+let signInRenewedAt = 0;
 window.fetch = async (...args) => {
+  const sentAt = Date.now();
   const r = await rawFetch(...args);
-  if (r.status === 401 && appStarted) location.replace('/');
+  if (r.status === 401 && appStarted && sentAt > signInRenewedAt) location.replace('/');
   return r;
 };
 
@@ -5083,7 +5097,7 @@ function profileHtml(view) {
         <h3 class="pf-group">Preferences</h3>
         <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
           <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
-        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
         <h3 class="pf-group">Your data</h3>
         ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
         <h3 class="pf-group">Sessions</h3>
@@ -5179,6 +5193,7 @@ const PROFILE_ACTIONS = {
   back: () => renderProfile('main', { focusRow: profileView }),
   upgrade: () => fromProfile(() => showUpgrade('')),
   billing: () => fromProfile(manageBilling),
+  password: () => fromProfile(openChangePassword),
   recovery: () => fromProfile(confirmNewRecoveryKey),
   export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
@@ -5407,6 +5422,83 @@ deleteAccountForm.addEventListener('submit', async e => {
     deleteAccountError.textContent = err.message;
     submit.disabled = false;
     submit.textContent = 'Delete account';
+  }
+});
+
+// ---- Change password ----
+// The device opens the master key with the current password and locks it again
+// with the new one: nothing else is re-encrypted, the recovery key keeps
+// working, and neither password leaves the device. Other devices are signed out.
+const passwordModal = document.querySelector('#passwordModal');
+const passwordChangeForm = document.querySelector('#passwordChangeForm');
+const passwordChangeError = document.querySelector('#passwordChangeError');
+const passwordFields = ['#currentPassword', '#changedPassword', '#changedPasswordAgain'].map(sel => document.querySelector(sel));
+
+function openChangePassword() {
+  if (blockedOffline()) return;
+  rememberFocus('password');
+  passwordModal.querySelector('#passwordChangeUser').value = account?.email || '';
+  passwordChangeError.textContent = '';
+  for (const field of passwordFields) field.value = '';
+  passwordModal.hidden = false;
+  updateModalOpen();
+  passwordFields[0].focus();
+}
+
+function closeChangePassword() {
+  if (passwordModal.hidden) return;
+  passwordModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('password');
+}
+
+passwordModal.querySelectorAll('[data-close-password]').forEach(btn => btn.addEventListener('click', closeChangePassword));
+passwordModal.addEventListener('click', e => { if (e.target === passwordModal) closeChangePassword(); });
+passwordModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeChangePassword(); });
+passwordChangeForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const submit = passwordChangeForm.querySelector('[type="submit"]');
+  const [current, next, again] = passwordFields.map(field => field.value);
+  passwordChangeError.textContent = '';
+  const fail = message => { passwordChangeError.textContent = message; };
+  if (!current) return fail('Enter your current password.');
+  if (next.length < 8) return fail('Use at least 8 characters for the new password.');
+  if (next !== again) return fail('The new passwords don’t match.');
+  if (next === current) return fail('Choose a password different from the current one.');
+  if (blockedOffline()) return;
+  submit.disabled = true;
+  submit.textContent = 'Changing…';
+  try {
+    const old = await vault.passwordKeys(account.email, current);
+    let master;
+    try {
+      master = await vault.openWithPassword(account.keyring, old.kek);
+    } catch {
+      throw new Error('Your current password isn’t right.');
+    }
+    const fresh = await vault.passwordKeys(account.email, next);
+    const byPassword = await vault.wrap(master, fresh.kek);
+    // The server signs every other device out before it answers: this page
+    // waits for its own answer (with this device's new sign-in) instead.
+    appStarted = false;
+    const r = await rawFetch(`${API_AUTH}?action=change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auth: old.auth, newAuth: fresh.auth, byPassword })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) signInRenewedAt = Date.now();
+    appStarted = true;
+    if (!r.ok) throw new Error(data.error || 'Couldn’t change the password. Try again.');
+    if (data.keyring) account.keyring = data.keyring;
+    closeChangePassword();
+    showToast('Password changed. Your other devices were signed out.');
+  } catch (err) {
+    appStarted = true;
+    fail(err.message);
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Change password';
   }
 });
 

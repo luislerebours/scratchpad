@@ -153,7 +153,7 @@
         <div id="storageText" class="files-foot"></div>
         <p class="privacy">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-          Private to your account
+          <span>Private to your account · <span class="nowrap">AES-256 encrypted</span></span>
         </p>
       </div>
     </section>
@@ -445,6 +445,30 @@
         <div class="modal-actions">
           <button class="btn secondary" type="button" data-close-delete>Cancel</button>
           <button class="btn danger-solid" type="submit">Delete account</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="passwordModal" class="modal-backdrop" hidden>
+    <section class="modal-card delete-modal" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+      <div class="modal-header">
+        <h2 id="passwordTitle">Change password</h2>
+        <button class="modal-close" type="button" data-close-password aria-label="Close">×</button>
+      </div>
+      <form id="passwordChangeForm" class="delete-account-body" novalidate>
+        <p class="delete-account-text">Your sheets and files stay as they are, and your recovery key keeps working. Every other device will be signed out.</p>
+        <input type="email" id="passwordChangeUser" autocomplete="username" hidden />
+        <label class="field-label" for="currentPassword">Current password</label>
+        <input id="currentPassword" class="rename-input" type="password" autocomplete="current-password" required />
+        <label class="field-label" for="changedPassword">New password</label>
+        <input id="changedPassword" class="rename-input" type="password" autocomplete="new-password" minlength="8" required />
+        <label class="field-label" for="changedPasswordAgain">New password again</label>
+        <input id="changedPasswordAgain" class="rename-input" type="password" autocomplete="new-password" minlength="8" required />
+        <p class="auth-error" id="passwordChangeError" role="alert"></p>
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" data-close-password>Cancel</button>
+          <button class="btn primary" type="submit">Change password</button>
         </div>
       </form>
     </section>

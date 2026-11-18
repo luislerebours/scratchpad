@@ -205,7 +205,7 @@ to what the app collects); `branding/play-store/` the listing kit.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Change password, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,
@@ -243,6 +243,14 @@ to what the app collects); `branding/play-store/` the listing kit.
   `icon-192/512`, `icon-maskable-512`, `icon-source`) is ONLY the installed
   app's icon (home screen, taskbar, app stores): never use it inside the site,
   app, emails or link cards; those use the kit's flat marks and logos.
+- Change password (`openChangePassword()` in `app.js`, `auth?action=change-password`):
+  current password, new one twice. The device opens the master key with the
+  current password and locks it with the new one (`byPassword`); nothing else is
+  re-encrypted and the recovery key keeps working. The server checks the current
+  sign-in secret, bumps `version` (every other device signed out; this one gets a
+  new cookie) and sends the `password` security notice.
+- File rows: Download, Delete (trash, not red; asks first like the ••• menu)
+  and •••.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

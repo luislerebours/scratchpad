@@ -446,7 +446,8 @@ body.dragging-files .files.drag-active
 .old-files-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .privacy { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: .9375rem; }
-.privacy .i { width: 17px; height: 17px; }
+.privacy .i { flex: none; width: 17px; height: 17px; color: var(--success); }
+.privacy .nowrap { white-space: nowrap; }
 
 /* Bulk actions while selecting */
 

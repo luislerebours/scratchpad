@@ -168,13 +168,18 @@ to what the app collects); `branding/play-store/` the listing kit.
   cancelled). Box: time (UTC) and the kind of device from the browser
   ("Safari on iPhone"), never stored. A notice that can't be sent never stops
   the action. New accounts and ordinary sign-ins send none.
+- Saving while typing (`onEditorChanged()` in `app.js`): 1.5 s after typing
+  stops, and at least every 5 s while it goes on (each save is a server call,
+  and other devices fetch it); leaving the page or switching sheets saves at once.
 - Sync is real-time: every write sets a change marker (`bumpRev`) and posts a
-  signed notice to the relay in `sync-worker/` (a Cloudflare Worker with one
+  signed notice to the relay (text saves use `bumpRevForDevice`: the server
+  returns the signed notice and the device that saved posts it to the relay,
+  so the save doesn't wait on it) in `sync-worker/` (a Cloudflare Worker with one
   Durable Object room per account, at `SYNC_URL`). Devices hold a WebSocket to
   their room and fetch only what changed. Netlify signs passes and notices with
   an Ed25519 key kept in Blobs; the Worker has only the public key (`PUBLIC_KEY`).
-  `netlify/edge-functions/check.js` (`/api/check`) is the safety-net check: once
-  a minute, on return to the page, and every 2 s while the relay is unreachable.
+  `netlify/edge-functions/check.js` (`/api/check`) is the safety-net check: every
+  5 minutes while live sync is connected, on return to the page, and every 2 s while the relay is unreachable.
   Without `SYNC_URL`, devices just use the 2-second check.
 - Deploy the relay from `sync-worker/` with `npx wrangler deploy` (it binds the R2
   bucket `scrapsheet-files`: create it once with

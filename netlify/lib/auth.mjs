@@ -46,6 +46,18 @@ export async function bumpRev(ns, part) {
   return rev;
 }
 
+// The same, but the device that made the change sends the notice to the relay
+// itself (`notice.url`, body `notice.token`), so the function doesn't wait on
+// it. Used for saves while typing, the most frequent write.
+export async function bumpRevForDevice(ns, part) {
+  const rev = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+  await userStore(ns, 'state').set(`rev/${part}`, rev);
+  const base = syncUrl();
+  if (!base) return { rev, notice: null };
+  const token = await signForSync({ k: 'notify', r: syncRoom(ns), part, rev, exp: Date.now() + 60_000 });
+  return { rev, notice: { url: `${base}/notify`, token } };
+}
+
 // ---- Real-time sync relay (a Cloudflare Worker at SYNC_URL) ----
 // Netlify signs connection passes and change notices with an Ed25519 key
 // made once and kept in Blobs; the relay holds only the public half.

@@ -41,6 +41,15 @@ to what the app collects); `branding/play-store/` the listing kit.
   does not carry over to the next.
 - Work on a branch, test, push the branch, then ask.
 
+## Testing and handoff
+
+- `tests/e2e/` has the browser tests and a local copy of every service (site,
+  Blobs, sync relay with R2, fake Google Play): `NEW_ACCOUNT_PLAN=pro bash
+  reset.sh`, then `node <test>.cjs`. See its README for settings and gotchas.
+  Add a test there for every new feature.
+- `docs/HANDOFF.md`: what's in flight, the live setup, past decisions and
+  costs, how the owner works, and what's left.
+
 ## Layout
 
 - `public/` is the static site (`index.html`, `app.js`, `styles.css`).

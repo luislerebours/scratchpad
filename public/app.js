@@ -4699,11 +4699,15 @@ function closeShare() {
   restoreFocus('share');
 }
 
+// Who can open a new link: once a password is typed, only people who have it too.
+const shareWhoText = (what, withPassword) =>
+  `${withPassword ? 'Anyone with the link and the password' : 'Anyone with the link'} can view and download ${what}. They don’t need an account.`;
+
 function renderShare(focus) {
   const what = shareTarget.kind === 'sheet' ? 'this sheet’s text, images and files' : 'this file';
   if (!shareLink) {
     shareBody.innerHTML = `
-      <p class="share-explain">Anyone with the link can view and download ${what}. They don’t need an account.</p>
+      <p class="share-explain" data-share-who="${escapeHtml(what)}">${shareWhoText(what, false)}</p>
       <p class="seg-label" id="shareDaysLabel">Link expires after</p>
       ${segHtml(7)}
       ${masterKey ? `<details class="share-pw-box"><summary>Add a password (optional)</summary>${passwordFieldHtml('sharePwNew', 'Password')}<p class="share-explain">They’ll need it to open the link. Send it separately (say, in a text). We can’t recover it for you.</p></details>` : ''}
@@ -4856,6 +4860,13 @@ shareBody.addEventListener('click', async e => {
       showToast(err.message);
     }
   }
+});
+
+// Typing a password for a new link updates who can open it.
+shareBody.addEventListener('input', e => {
+  if (e.target.id !== 'sharePwNew') return;
+  const who = shareBody.querySelector('[data-share-who]');
+  if (who) who.textContent = shareWhoText(who.dataset.shareWho, e.target.value.length > 0);
 });
 
 // Arrow keys move between the expiry choices.

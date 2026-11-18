@@ -38,6 +38,9 @@ Each test prints `PASS`/`FAIL` lines and ends with `ALL PASS` or `N FAILED`
 
 ## Gotchas
 
+- **Don't pipe `reset.sh` into another command** (`| tail`, `| grep`): the relay
+  it starts in the background keeps the pipe open, so the command never ends.
+  Send its output to a file or `/dev/null` instead.
 - **Rate limits carry over between runs.** After many sign-ups (or the
   share-password guessing test) a test can stall at the code step or get 429:
   run `reset.sh`. Locally every request comes from the same "unknown" IP.

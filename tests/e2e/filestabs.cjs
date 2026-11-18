@@ -97,8 +97,26 @@ const E = 'filestabs' + Date.now() + '@example.com';
   const t0 = await A.$eval('.sheet-tab >> nth=0', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   const t2 = await A.$eval('.sheet-tab:nth-child(3)', el => { const r = el.getBoundingClientRect(); return { x: r.right - 5, y: r.y + r.height / 2 }; });
   await A.mouse.move(t0.x, t0.y); await A.mouse.down();
-  for (let i = 1; i <= 12; i++) await A.mouse.move(t0.x + (t2.x - t0.x) * i / 12, t0.y, { steps: 2 });
+  // While dragging: the tab stays under the pointer, and the tabs it passes slide over (not jump).
+  let worst = 0, slid = false;
+  for (let i = 1; i <= 12; i++) {
+    const x = t0.x + (t2.x - t0.x) * i / 12;
+    await A.mouse.move(x, t0.y, { steps: 2 });
+    const probe = await A.evaluate(() => {
+      const dragged = document.querySelector('.sheet-tab.dragging');
+      if (!dragged) return null;
+      const r = dragged.getBoundingClientRect();
+      const sliding = [...document.querySelectorAll('.sheet-tab:not(.dragging)')].some(t => Math.abs(parseFloat(getComputedStyle(t).translate) || 0) > 0.5);
+      return { center: r.left + r.width / 2, sliding };
+    });
+    if (!probe) { worst = Infinity; continue; }
+    worst = Math.max(worst, Math.abs(probe.center - x));
+    slid ||= probe.sliding;
+  }
+  ok('the dragged tab follows the mouse', worst < 2, `off by up to ${worst.toFixed(1)} px`);
+  ok('…and the tabs it passes slide out of its way', slid);
   await A.mouse.up(); await sleep(1200);
+  ok('…then it settles into its place, leaving nothing behind', await A.evaluate(() => !document.querySelector('.sheet-tab.dragging, .sheet-tab.settling') && [...document.querySelectorAll('.sheet-tab')].every(t => !t.style.translate && !t.style.transition)));
   const after = await tabsOrder(A);
   ok('dragging a tab with the mouse moves it', after.join() === [before[1], before[2], before[0], ...before.slice(3)].join(), `${before} → ${after}`);
   ok('…without opening it on letting go', await A.$eval('.sheet-tab.active .sheet-label', e => e.textContent) === before[0]);
@@ -119,11 +137,56 @@ const E = 'filestabs' + Date.now() + '@example.com';
   ok('a quick swipe on the tabs doesn’t reorder them', (await tabsOrder(B)).join() === phoneBefore.join());
   s = await center(1); d = await center(2);
   await touch('touchStart', s.x, s.y); await sleep(500);
-  for (let i = 1; i <= 8; i++) { await touch('touchMove', s.x + (d.right + 6 - s.x) * i / 8, s.y); await sleep(30); }
+  // One slot along: the finger moves as far as the next tab's right edge is from this one's.
+  for (let i = 1; i <= 8; i++) { await touch('touchMove', s.x + (d.right - s.right + 4) * i / 8, s.y); await sleep(30); }
   await B.screenshot({ path: OUT + 'tab-drag.png', clip: { x: 0, y: 40, width: 390, height: 120 } });
   await touch('touchEnd'); await sleep(1200);
   const phoneAfter = await tabsOrder(B);
   ok('touch and hold, then drag, moves a tab on a phone', phoneAfter.join() === [phoneBefore[1], phoneBefore[0], ...phoneBefore.slice(2)].join(), `${phoneBefore} → ${phoneAfter}`);
+
+  // Holding a dragged tab near the strip's edge scrolls the tabs along.
+  const strip = await B.$eval('#tabsScroller', el => { const r = el.getBoundingClientRect(); return { right: r.right, scroll: el.scrollLeft, max: el.scrollWidth - el.clientWidth }; });
+  if (strip.max > 0) {
+    s = await center(1);
+    await touch('touchStart', s.x, s.y); await sleep(500);
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', s.x + (strip.right - 10 - s.x) * i / 6, s.y); await sleep(30); }
+    await sleep(700);
+    const scrolled = await B.$eval('#tabsScroller', el => el.scrollLeft);
+    await touch('touchEnd'); await sleep(1200);
+    ok('holding a dragged tab near the edge scrolls the tabs along', scrolled > strip.scroll, `${strip.scroll} → ${scrolled}`);
+  } else ok('(the tabs fit the phone screen: no edge scrolling to check)', true);
+
+  // With reduced motion, the tabs jump into place instead of sliding.
+  await sleep(1500);
+  await A.emulateMedia({ reducedMotion: 'reduce' });
+  const m0 = await A.$eval('.sheet-tab:nth-child(1)', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, right: r.right }; });
+  const m1 = await A.$eval('.sheet-tab:nth-child(2)', el => el.getBoundingClientRect().right);
+  await A.mouse.move(m0.x, m0.y); await A.mouse.down();
+  let anySlide = false;
+  for (let i = 1; i <= 8; i++) {
+    await A.mouse.move(m0.x + (m1 - m0.right + 4) * i / 8, m0.y, { steps: 2 });
+    anySlide ||= await A.evaluate(() => [...document.querySelectorAll('.sheet-tab:not(.dragging)')].some(t => Math.abs(parseFloat(getComputedStyle(t).translate) || 0) > 0.5));
+  }
+  await A.mouse.up(); await sleep(800);
+  ok('with reduced motion, the other tabs jump instead of sliding', !anySlide);
+  await A.emulateMedia({ reducedMotion: 'no-preference' });
+
+  // Dropping a tab and grabbing another while the first still glides home: both moves count.
+  await sleep(1500);
+  const q0 = await tabsOrder(A);
+  const dragOneSlot = async n => {
+    const from = await A.$eval(`.sheet-tab:nth-child(${n})`, el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, right: r.right }; });
+    const toRight = await A.$eval(`.sheet-tab:nth-child(${n + 1})`, el => el.getBoundingClientRect().right);
+    await A.mouse.move(from.x, from.y); await A.mouse.down();
+    for (let i = 1; i <= 6; i++) await A.mouse.move(from.x + (toRight - from.right + 4) * i / 6, from.y, { steps: 2 });
+    await A.mouse.up();
+  };
+  await dragOneSlot(1); await sleep(60); await dragOneSlot(3); await sleep(1500);
+  const q1 = await tabsOrder(A);
+  const want = [q0[1], q0[0], q0[3], q0[2], ...q0.slice(4)];
+  ok('a second drag right after the first one works too', q1.join() === want.join(), `${q0} → ${q1}`);
+  await A.reload(); await A.waitForSelector('.app-shell', { state: 'visible' }); await sleep(1500);
+  ok('…and both moves were saved', (await tabsOrder(A)).join() === want.join());
 
   ok('no page errors', errs.length === 0, errs.join(' | '));
   await b.close(); console.log(fails ? `${fails} FAILED` : 'ALL PASS');

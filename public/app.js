@@ -748,7 +748,18 @@ tipsEl.addEventListener('keydown', e => {
 
 // ---- Sheet tabs: built from the account's sheet list ----
 
+// Dragging tabs (see "Reordering tabs" below): the drag in progress, the glide
+// home after it, and whether a new tab list waits until both are over.
+let tabDrag = null;
+let tabSettling = null;
+let tabsRenderPending = false;
+
 function renderTabs() {
+  // Not under a finger that is dragging a tab: drawn once it lets go.
+  if (tabDrag?.active || tabSettling) {
+    tabsRenderPending = true;
+    return;
+  }
   sheetTabsEl.replaceChildren(...sheets.map(sheet => {
     const tab = document.createElement('button');
     tab.type = 'button';
@@ -1710,10 +1721,19 @@ sheetTabsEl.addEventListener('click', e => {
 });
 
 // ---- Reordering tabs: drag one with a mouse, or touch and hold one, then drag ----
-// The tab moves among the others as it passes their middles; letting go saves
-// the order for every device. A quick swipe on a phone still scrolls the tabs.
-let tabDrag = null;
+// The picked-up tab follows the pointer along the row. The others slide out of
+// its way as it passes their middles (each move is measured before and after,
+// then animated from where they were: "FLIP"). Letting go, it glides into its
+// slot and the order is saved for every device. A quick swipe on a phone still
+// scrolls the tabs. With reduced motion everything jumps instead of sliding.
+const TAB_MOVE_MS = 200;
+const TAB_EASE = 'cubic-bezier(.2, .8, .2, 1)';
 let suppressTabClick = false;
+
+// Where a tab sits in the row (ignoring any slide in progress), in page coordinates.
+function tabHome(el) {
+  return tabsScroller.getBoundingClientRect().left + tabsScroller.clientLeft - tabsScroller.scrollLeft + el.offsetLeft;
+}
 
 function beginTabDrag() {
   if (!tabDrag || tabDrag.active) return;
@@ -1722,26 +1742,99 @@ function beginTabDrag() {
     tabDrag = null;
     return;
   }
+  // A tab still gliding home lands at once; a waiting redraw waits for this drag too.
+  finishTabSettle({ render: false });
+  const { tab } = tabDrag;
   tabDrag.active = true;
   tabDrag.before = [...sheetTabsEl.children].map(t => t.dataset.sheet).join();
-  tabDrag.tab.classList.add('dragging');
+  // Where on the tab it was grabbed, so that spot stays under the finger.
+  tabDrag.grab = tabDrag.x - tabHome(tab);
+  tabDrag.lastX ??= tabDrag.x;
+  tab.classList.add('dragging');
   sheetTabsEl.classList.add('reordering');
   navigator.vibrate?.(10);
+  placeDraggedTab();
+  tabDrag.scroll = requestAnimationFrame(autoScrollTabs);
 }
 
-function moveTabDrag(x) {
-  const { tab } = tabDrag;
-  // Near an edge of the strip: scroll it along.
+// Near an edge of the strip it scrolls along, faster the closer the pointer is.
+function autoScrollTabs() {
+  if (!tabDrag?.active) return;
   const box = tabsScroller.getBoundingClientRect();
-  if (x < box.left + 30) tabsScroller.scrollLeft -= 12;
-  else if (x > box.right - 30) tabsScroller.scrollLeft += 12;
-  for (const other of sheetTabsEl.children) {
-    if (other === tab) continue;
-    const r = other.getBoundingClientRect();
-    const middle = r.left + r.width / 2;
-    const tabFirst = tab.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING;
-    if (tabFirst && x > middle) other.after(tab);
-    else if (!tabFirst && x < middle) other.before(tab);
+  const zone = 40;
+  const x = tabDrag.lastX;
+  const depth = x < box.left + zone ? x - (box.left + zone) : x > box.right - zone ? x - (box.right - zone) : 0;
+  if (depth) {
+    const step = Math.sign(depth) * Math.min(14, Math.ceil(Math.abs(depth) / zone * 10));
+    const was = tabsScroller.scrollLeft;
+    tabsScroller.scrollLeft += step;
+    if (tabsScroller.scrollLeft !== was) {
+      placeDraggedTab();
+      updateTabFades();
+    }
+  }
+  tabDrag.scroll = requestAnimationFrame(autoScrollTabs);
+}
+
+// Moves the dragged tab in the row's order and slides the tabs it passed from
+// where they were to where they now belong.
+function slideTabs(move) {
+  const others = [...sheetTabsEl.children].filter(t => t !== tabDrag.tab);
+  const from = new Map(others.map(t => [t, t.getBoundingClientRect().left]));
+  move();
+  if (prefersReducedMotion()) return;
+  for (const t of others) {
+    t.style.transition = 'none';
+    t.style.translate = '';
+  }
+  const moved = others.filter(t => {
+    const dx = from.get(t) - t.getBoundingClientRect().left;
+    if (Math.abs(dx) < 0.5) return false;
+    t.style.translate = `${dx}px 0`;
+    return true;
+  });
+  if (!moved.length) return;
+  void sheetTabsEl.offsetWidth; // start from where they were...
+  for (const t of moved) {
+    t.style.transition = `translate ${TAB_MOVE_MS}ms ${TAB_EASE}`;
+    t.style.translate = '0px 0'; // ...and glide to their new places
+  }
+}
+
+// The dragged tab follows the pointer, kept within the row. Its right edge
+// passing the next tab's middle (or its left edge the previous one's) swaps them.
+function placeDraggedTab() {
+  const { tab } = tabDrag;
+  const row = sheetTabsEl.children;
+  const first = row[0];
+  const last = row[row.length - 1];
+  const width = tab.offsetWidth;
+  const left = Math.min(tabHome(last) + last.offsetWidth - width, Math.max(tabHome(first), tabDrag.lastX - tabDrag.grab));
+  const middle = el => tabHome(el) + el.offsetWidth / 2;
+  for (let guard = 0; guard < row.length; guard++) {
+    const next = tab.nextElementSibling;
+    const prev = tab.previousElementSibling;
+    if (next && left + width > middle(next)) slideTabs(() => next.after(tab));
+    else if (prev && left < middle(prev)) slideTabs(() => prev.before(tab));
+    else break;
+  }
+  tab.style.translate = `${left - tabHome(tab)}px 0`;
+}
+
+// A dropped tab's glide is over: everything back to its plain style, and a tab
+// list that arrived meanwhile is drawn.
+function finishTabSettle({ render = true } = {}) {
+  if (!tabSettling) return;
+  clearTimeout(tabSettling);
+  tabSettling = null;
+  for (const t of sheetTabsEl.children) {
+    t.style.transition = '';
+    t.style.translate = '';
+    t.classList.remove('settling');
+  }
+  if (render && tabsRenderPending) {
+    tabsRenderPending = false;
+    renderTabs();
   }
 }
 
@@ -1751,20 +1844,32 @@ async function endTabDrag(cancelled = false) {
   if (!drag) return;
   clearTimeout(drag.hold);
   if (!drag.active) return;
-  drag.tab.classList.remove('dragging');
+  cancelAnimationFrame(drag.scroll);
+  const { tab } = drag;
   sheetTabsEl.classList.remove('reordering');
+  // It glides from under the finger into its slot, shrinking back as it lands.
+  const glide = prefersReducedMotion() ? 0 : TAB_MOVE_MS;
+  tab.style.transition = glide ? `translate ${glide}ms ${TAB_EASE}, scale ${glide}ms ${TAB_EASE}, box-shadow ${glide}ms ${TAB_EASE}` : 'none';
+  tab.classList.add('settling');
+  tab.classList.remove('dragging');
+  tab.style.translate = '0px 0';
+  tabSettling = setTimeout(finishTabSettle, glide + 60);
   // The click that ends a drag doesn't open the tab.
   suppressTabClick = true;
   setTimeout(() => { suppressTabClick = false; }, 0);
   const order = [...sheetTabsEl.children].map(t => Number(t.dataset.sheet));
   if (cancelled || order.join() === drag.before) {
-    if (cancelled) renderTabs();
+    if (cancelled) {
+      finishTabSettle();
+      renderTabs();
+    }
     return;
   }
   try {
     await postSheets({ action: 'reorder', order });
   } catch {
     showToast('Couldn’t save the new order');
+    finishTabSettle();
     renderTabs();
   }
 }
@@ -1777,6 +1882,7 @@ sheetTabsEl.addEventListener('pointerdown', e => {
 });
 window.addEventListener('pointermove', e => {
   if (!tabDrag || e.pointerId !== tabDrag.id) return;
+  tabDrag.lastX = e.clientX;
   if (!tabDrag.active) {
     const moved = Math.hypot(e.clientX - tabDrag.x, e.clientY - tabDrag.y);
     // A mouse drags after a few pixels; a finger that moves before the hold is scrolling.
@@ -1785,7 +1891,7 @@ window.addEventListener('pointermove', e => {
     if (!tabDrag?.active) return;
   }
   e.preventDefault();
-  moveTabDrag(e.clientX);
+  placeDraggedTab();
 });
 window.addEventListener('pointerup', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(); });
 window.addEventListener('pointercancel', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(tabDrag.active); });

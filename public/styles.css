@@ -234,7 +234,11 @@ img[data-mark] { transform: translateY(-1px); }
 .tabs-scroller::-webkit-scrollbar { display: none; }
 .sheet-tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .sheet-tabs.reordering .sheet-tab { cursor: grabbing; }
-.sheet-tab.dragging { z-index: 1; transform: scale(1.06); box-shadow: var(--shadow-menu); transition: transform .12s ease, box-shadow .12s ease; }
+/* A picked-up tab lifts (grows in smoothly) and follows the pointer: its
+   `translate` is set by app.js on every move, so only scale and shadow ease.
+   While it glides home after letting go (.settling) it stays above the others. */
+.sheet-tabs .sheet-tab.dragging { z-index: 1; scale: 1.06; box-shadow: var(--shadow-menu); transition: scale .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s cubic-bezier(.2, .8, .2, 1); will-change: translate; }
+.sheet-tab.settling { z-index: 1; }
 .tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }

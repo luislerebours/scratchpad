@@ -305,8 +305,13 @@ to what the app collects); `branding/play-store/` the listing kit.
   `move-start` / `move-piece` (one piece per call, from Netlify or R2 into the
   same kind of storage) / `move-finish` (checks every piece, keeps the dates,
   deletes the original for good, so its share link ends).
-- Sheet tabs can be dragged to reorder them (mouse; touch and hold on a
-  phone, a quick swipe still scrolls): `meta=sheets` action `reorder`.
+- Sheet tabs can be dragged to reorder them (mouse; touch and hold 350 ms on a
+  phone, a quick swipe still scrolls): `meta=sheets` action `reorder`. The
+  picked-up tab lifts and follows the pointer along the row (`translate`); the
+  others slide aside in 200 ms when its edge passes their middle (FLIP in
+  `slideTabs()`); letting go it glides into its slot. Holding near an edge
+  scrolls the row. Reduced motion: no sliding. A tab list that arrives
+  mid-drag is drawn once the drag and glide are over (`tabsRenderPending`).
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

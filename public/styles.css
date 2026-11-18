@@ -588,6 +588,10 @@ body.dragging-files .files.drag-active
 .trash-row .link-btn { padding: 0 10px; font-weight: 600; }
 .trash-row .icon-btn { color: var(--danger); }
 .trash-empty { padding: 28px 0 16px; color: var(--muted); }
+.device-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.device-name { font-weight: 600; }
+.device-meta { color: var(--muted); font-size: .875rem; }
+.device-here { color: var(--accent); font-weight: 600; font-size: .875rem; white-space: nowrap; }
 .history-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .history-when { font-weight: 600; }

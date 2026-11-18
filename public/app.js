@@ -2980,6 +2980,7 @@ document.addEventListener('keydown', e => {
   else if (!trashModal.hidden) closeTrash();
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
+  else if (!devicesModal.hidden) closeDevices();
   else if (!historyModal.hidden) closeHistory();
   else if (!libraryModal.hidden) closeLibrary();
   else if (selecting) setSelecting(false);
@@ -5415,6 +5416,7 @@ function profileHtml(view) {
         <h3 class="pf-group">Your data</h3>
         ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
         <h3 class="pf-group">Sessions</h3>
+        ${pfRow('devices', 'devices', 'Signed-in devices…', { sub: 'See where you’re signed in, sign one out' })}
         ${pfRow('signout', 'logout', 'Sign out')}
         ${pfRow('signout-all', 'devices', 'Sign out of all devices…')}
         <div class="pf-sep"></div>
@@ -5513,6 +5515,7 @@ const PROFILE_ACTIONS = {
   export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
   'signout-all': () => fromProfile(confirmSignOutEverywhere),
+  devices: () => fromProfile(openDevices),
   delete: () => fromProfile(openDeleteAccount),
   support: () => fromProfile(() => { location.href = 'mailto:support@sector809labs.com'; }),
   privacy: () => fromProfile(() => window.open('/privacy', '_blank', 'noopener')),
@@ -5815,6 +5818,79 @@ passwordChangeForm.addEventListener('submit', async e => {
     submit.disabled = false;
     submit.textContent = 'Change password';
   }
+});
+
+// ---- Signed-in devices ----
+const devicesModal = document.querySelector('#devicesModal');
+const devicesBody = document.querySelector('#devicesBody');
+
+function agoLabel(at) {
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 5) return 'Active now';
+  if (minutes < 60) return `Active ${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `Active ${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `Active ${days} day${days === 1 ? '' : 's'} ago`;
+  return `Active ${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
+async function loadDevices() {
+  devicesBody.innerHTML = '<p class="trash-empty">Loading…</p>';
+  try {
+    const r = await fetch(`${API_AUTH}?action=devices`, { cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    const { sessions } = await r.json();
+    if (!sessions.length) {
+      devicesBody.innerHTML = '<p class="trash-empty">Only this device. Others appear here once they sign in again.</p>';
+      return;
+    }
+    const since = at => new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    // This device first, then the most recently used.
+    sessions.sort((a, b) => (b.current - a.current) || (b.lastSeen - a.lastSeen));
+    devicesBody.innerHTML = sessions.map(s => `
+      <div class="device-row">
+        <div>
+          <div class="device-name">${escapeHtml(s.device)}</div>
+          <div class="device-meta">${escapeHtml(s.current ? 'Active now' : agoLabel(s.lastSeen))} · signed in ${escapeHtml(since(s.createdAt))}</div>
+        </div>
+        ${s.current ? '<span class="device-here">This device</span>' : `<button class="btn secondary compact" type="button" data-signout-device="${escapeHtml(s.id)}">Sign out</button>`}
+      </div>`).join('');
+  } catch {
+    devicesBody.innerHTML = '<p class="trash-empty">Couldn’t load your devices. Check your connection and try again.</p>';
+  }
+}
+
+function openDevices() {
+  rememberFocus('devices');
+  devicesModal.hidden = false;
+  updateModalOpen();
+  devicesModal.querySelector('[data-close-devices]').focus();
+  loadDevices();
+}
+
+function closeDevices() {
+  if (devicesModal.hidden) return;
+  devicesModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('devices');
+}
+
+devicesModal.querySelectorAll('[data-close-devices]').forEach(btn => btn.addEventListener('click', closeDevices));
+devicesModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeDevices(); });
+devicesModal.addEventListener('click', async e => {
+  if (e.target === devicesModal) return closeDevices();
+  const btn = e.target.closest('[data-signout-device]');
+  if (!btn || blockedOffline()) return;
+  btn.disabled = true;
+  btn.textContent = 'Signing out…';
+  try {
+    await postJson(`${API_AUTH}?action=signout-device`, { id: btn.dataset.signoutDevice });
+    showToast('That device was signed out');
+  } catch (err) {
+    showToast(err.message || 'Couldn’t sign that device out');
+  }
+  loadDevices();
 });
 
 // ---- Change email ----

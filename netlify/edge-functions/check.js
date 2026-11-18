@@ -52,7 +52,7 @@ export default async req => {
   const session = await readSession(req);
   if (!session) return json({ error: 'Sign in required' }, 401);
   const user = await authStore().get(`users/${session.ek}`, { type: 'json' });
-  if (!user || user.version !== session.v || user.disabledAt) return json({ error: 'Sign in required' }, 401);
+  if (!user || user.version !== session.v || user.disabledAt || (session.sid && !(user.sessions || []).some(s => s.id === session.sid))) return json({ error: 'Sign in required' }, 401);
 
   const sheet = Number(new URL(req.url).searchParams.get('sheet'));
   if (!Number.isInteger(sheet) || sheet < 1 || sheet > MAX_SHEETS) return json({ error: 'Invalid sheet' }, 400);

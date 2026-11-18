@@ -37,7 +37,7 @@ ephemerally: no**.
 |---|---|---|---|
 | Personal info → **Email address** | The account's email: signs in, sign-in codes, security notices | Required | App functionality, Account management |
 | Financial info → **Purchase history** | Plan (Free/Pro), subscription status and renewal date, Stripe or Google Play subscription identifiers | Optional (only people who buy Pro) | App functionality, Account management |
-| App activity → **App interactions** | Sign-in count and times, the days the app was opened (last 60), shown to staff in the admin dashboard | Required | Analytics, Account management |
+| App activity → **App interactions** | Sign-in count and times, the days the app was opened (last 60), shown to staff in the admin dashboard; for each signed-in device, its kind ("Chrome on Windows"), sign-in time and last use, shown to the user (Signed-in devices) | Required | Analytics, Account management, Security |
 | App activity → **Other actions** | Storage used and how many sheets, files and share links an account has (sizes and counts, never content) | Required | App functionality (plan limits), Account management |
 | App info and performance → **Other app performance data** | Server error reports: which function, path and status failed (no email, content or IP), kept 30 days | Required | App functionality |
 
@@ -50,7 +50,8 @@ Notes for the reviewer if asked:
 - IP addresses are used only to limit sign-in code requests; counters are
   stored under a one-way hash and cleared within a day.
 - Security notice emails name the kind of device ("Safari on iPhone"), read
-  from the browser for that email and not stored.
+  from the browser for that email. The signed-in devices list keeps the same
+  kind of label per signed-in device (no device IDs), removed on sign-out.
 
 ## Content rating (IARC questionnaire)
 

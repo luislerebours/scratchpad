@@ -17,7 +17,10 @@ What it sets (tested with a full build, November 2026):
   service that Chrome's Digital Goods API uses.
 - ScrapSheet in the Android Share menu (text, and any file, one or several)
   from the web manifest's `share_target`.
-- No notifications (ScrapSheet sends none, so no notification permission).
+- Notifications switched on (`enableNotifications`) only because Bubblewrap
+  1.27 refuses Play Billing without it (the billing service rides on the same
+  delegation). ScrapSheet never asks for notification permission or sends any,
+  so Android never shows the prompt.
 - Status and navigation bars: warm paper `#F5F1EB` in light, navy `#091524`
   in dark. Icons come from the live site (the approved 3D app icon, plus the
   maskable version).

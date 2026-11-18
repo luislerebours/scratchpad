@@ -11,7 +11,7 @@
   "navigationDividerColor": "#DDD5CC",
   "navigationDividerColorDark": "#2A3747",
   "backgroundColor": "#F5F1EB",
-  "enableNotifications": false,
+  "enableNotifications": true,
   "startUrl": "/?source=twa",
   "iconUrl": "https://scrap.sector809labs.com/assets/icon-512.png?v=3",
   "maskableIconUrl": "https://scrap.sector809labs.com/assets/icon-maskable-512.png?v=3",

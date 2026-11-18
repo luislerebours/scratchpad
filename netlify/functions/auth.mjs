@@ -8,6 +8,7 @@ import { withErrors } from '../lib/errors.mjs';
 import { sendEmail } from '../lib/email.mjs';
 import { deleteAccount, deleteAccountData } from '../lib/account.mjs';
 import { securityNotice } from '../lib/notices.mjs';
+import { followEmail } from '../lib/moves.mjs';
 import { planInfo } from '../lib/plans.mjs';
 
 // Accounts: email a code (an animal and four digits), check it, choose a
@@ -195,6 +196,75 @@ export default withErrors('auth', async (req, context) => {
     await securityNotice(req, user.email, 'password');
     // Every other device was signed out: the list starts again with this one.
     return signedIn({ ...updated, sessions: [] }, {}, req);
+  }
+
+  // A new email, in two steps. 1) email-code: with the current password (as
+  // the sign-in secret), a code goes to the new address. 2) change-email: with
+  // that code and the password again. The page sends the sign-in secret and the
+  // master key's lock made from the new email and the same password (the email
+  // salts the password key). The account moves to the new email; Stripe and
+  // Google Play follow it; other devices are signed out; the old address gets a
+  // security notice.
+  if (action === 'email-code' || action === 'change-email') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const { user } = auth;
+    if (!user.keyring) return json({ error: 'Set up encryption first.' }, 409);
+    const ek = emailKey(user.email);
+    if (!(await allow(`login-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
+    // 400, not 401: a 401 would send the page back to sign-in.
+    if (!(await checkSecret(user, body))) return json({ error: 'Your password isn’t right.' }, 400);
+    const next = normalizeEmail(body.newEmail);
+    if (!validEmail(next)) return json({ error: 'Enter a valid email address.' }, 400);
+    if (next === user.email) return json({ error: 'That’s already your email.' }, 400);
+    const nek = emailKey(next);
+    if (await store.get(`users/${nek}`)) return json({ error: 'That email already has a ScrapSheet account.' }, 409);
+
+    if (action === 'email-code') {
+      if (!(await allow(`code-email-${nek}`, 5, HOUR))) return json({ error: 'Too many codes requested. Try again in an hour.' }, 429);
+      const code = makeCode();
+      await store.setJSON(`email-codes/${ek}`, { to: next, hash: hashCode(code, nek), expiresAt: Date.now() + CODE_MS, tries: 0 });
+      try {
+        await sendEmail({
+          to: next,
+          origin: url.origin,
+          subject: `Your ScrapSheet code: ${code}`,
+          preheader: `Your code is ${code}. It confirms your new email and expires in 15 minutes.`,
+          heading: 'Confirm your new email',
+          intro: 'Enter this code in ScrapSheet to move your account to this email address. It works once and expires in 15 minutes.',
+          box: { title: 'Your code', code },
+          note: 'If you didn’t ask for this, you can ignore this email: nothing changes without the code.',
+          devLog: `[dev mail] to ${next}: code ${code} (email change)`
+        });
+      } catch (err) {
+        console.error('Sending code failed', err);
+        return json({ error: 'Couldn’t send the email. Try again shortly.' }, 502);
+      }
+      return json({ ok: true });
+    }
+
+    const pending = await store.get(`email-codes/${ek}`, { type: 'json' });
+    if (!pending || pending.to !== next || pending.expiresAt < Date.now()) return json({ error: 'That code has expired. Ask for a new one.' }, 400);
+    if (pending.hash !== hashCode(normalizeCode(body.code), nek)) {
+      if (pending.tries + 1 >= MAX_CODE_TRIES) {
+        await store.delete(`email-codes/${ek}`);
+        return json({ error: 'Too many wrong tries. Ask for a new code.' }, 429);
+      }
+      await store.setJSON(`email-codes/${ek}`, { ...pending, tries: pending.tries + 1 });
+      return json({ error: 'That code isn’t right.' }, 400);
+    }
+    if (!validAuth(body.newAuth) || !b64ish(body.byPassword)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
+    const { hash, salt } = await hashPassword(body.newAuth);
+    const moved = { ...user, email: next, hash, salt, authV: 2, keyring: { ...user.keyring, byPassword: body.byPassword }, version: user.version + 1, emailChangedAt: Date.now(), previousKeys: [...(user.previousKeys || []), ek].slice(-10) };
+    await store.setJSON(`users/${nek}`, moved);
+    await store.delete(`users/${ek}`);
+    await store.delete(`email-codes/${ek}`);
+    // Anything that still knows the account by its old email finds it here.
+    await store.set(`email-moves/${ek}`, nek);
+    await followEmail(moved, ek, nek);
+    await notifySync(user.ns, 'session', String(Date.now()));
+    await securityNotice(req, user.email, 'email', { to: next });
+    return signedIn(moved);
   }
 
   // A new recovery key (the old one stops working). Needs the password.

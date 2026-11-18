@@ -56,7 +56,8 @@ export async function deleteAccount(user) {
     }
   }
   await deleteAccountData(user.ns);
-  await Promise.all([`users/${ek}`, `codes/${ek}`, `pending/${ek}`].map(key => store.delete(key)));
+  // Also the pointers left by earlier emails (Change email).
+  await Promise.all([`users/${ek}`, `codes/${ek}`, `pending/${ek}`, `email-codes/${ek}`, ...(user.previousKeys || []).map(k => `email-moves/${k}`)].map(key => store.delete(key)));
   if (user.stripe?.customer) await store.delete(customerKey(user.stripe.customer));
   if (user.play?.token) await forgetPlayToken(user.play.token);
   // Other devices check in and find the account gone.

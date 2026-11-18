@@ -1704,9 +1704,96 @@ function showCachedFiles(sheet) {
 }
 
 sheetTabsEl.addEventListener('click', e => {
+  if (suppressTabClick) return;
   const tab = e.target.closest('.sheet-tab');
   if (tab) switchSheet(Number(tab.dataset.sheet));
 });
+
+// ---- Reordering tabs: drag one with a mouse, or touch and hold one, then drag ----
+// The tab moves among the others as it passes their middles; letting go saves
+// the order for every device. A quick swipe on a phone still scrolls the tabs.
+let tabDrag = null;
+let suppressTabClick = false;
+
+function beginTabDrag() {
+  if (!tabDrag || tabDrag.active) return;
+  clearTimeout(tabDrag.hold);
+  if (blockedOffline()) {
+    tabDrag = null;
+    return;
+  }
+  tabDrag.active = true;
+  tabDrag.before = [...sheetTabsEl.children].map(t => t.dataset.sheet).join();
+  tabDrag.tab.classList.add('dragging');
+  sheetTabsEl.classList.add('reordering');
+  navigator.vibrate?.(10);
+}
+
+function moveTabDrag(x) {
+  const { tab } = tabDrag;
+  // Near an edge of the strip: scroll it along.
+  const box = tabsScroller.getBoundingClientRect();
+  if (x < box.left + 30) tabsScroller.scrollLeft -= 12;
+  else if (x > box.right - 30) tabsScroller.scrollLeft += 12;
+  for (const other of sheetTabsEl.children) {
+    if (other === tab) continue;
+    const r = other.getBoundingClientRect();
+    const middle = r.left + r.width / 2;
+    const tabFirst = tab.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING;
+    if (tabFirst && x > middle) other.after(tab);
+    else if (!tabFirst && x < middle) other.before(tab);
+  }
+}
+
+async function endTabDrag(cancelled = false) {
+  const drag = tabDrag;
+  tabDrag = null;
+  if (!drag) return;
+  clearTimeout(drag.hold);
+  if (!drag.active) return;
+  drag.tab.classList.remove('dragging');
+  sheetTabsEl.classList.remove('reordering');
+  // The click that ends a drag doesn't open the tab.
+  suppressTabClick = true;
+  setTimeout(() => { suppressTabClick = false; }, 0);
+  const order = [...sheetTabsEl.children].map(t => Number(t.dataset.sheet));
+  if (cancelled || order.join() === drag.before) {
+    if (cancelled) renderTabs();
+    return;
+  }
+  try {
+    await postSheets({ action: 'reorder', order });
+  } catch {
+    showToast('Couldn’t save the new order');
+    renderTabs();
+  }
+}
+
+sheetTabsEl.addEventListener('pointerdown', e => {
+  const tab = e.target.closest('.sheet-tab');
+  if (!tab || e.button > 0 || sheets.length < 2) return;
+  tabDrag = { tab, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', active: false };
+  if (!tabDrag.mouse) tabDrag.hold = setTimeout(beginTabDrag, 350);
+});
+window.addEventListener('pointermove', e => {
+  if (!tabDrag || e.pointerId !== tabDrag.id) return;
+  if (!tabDrag.active) {
+    const moved = Math.hypot(e.clientX - tabDrag.x, e.clientY - tabDrag.y);
+    // A mouse drags after a few pixels; a finger that moves before the hold is scrolling.
+    if (tabDrag.mouse && moved > 6) beginTabDrag();
+    else if (!tabDrag.mouse && moved > 8) return endTabDrag();
+    if (!tabDrag?.active) return;
+  }
+  e.preventDefault();
+  moveTabDrag(e.clientX);
+});
+window.addEventListener('pointerup', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(); });
+window.addEventListener('pointercancel', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(tabDrag.active); });
+// While dragging on a touch screen, the page doesn't scroll instead.
+document.addEventListener('touchmove', e => { if (tabDrag?.active) e.preventDefault(); }, { passive: false });
+sheetTabsEl.addEventListener('contextmenu', e => { if (e.target.closest('.sheet-tab') && tabDrag) e.preventDefault(); });
+// Mouse: no native drag of the button's text.
+sheetTabsEl.addEventListener('dragstart', e => e.preventDefault());
 
 sheetTabsEl.addEventListener('dblclick', e => {
   const tab = e.target.closest('.sheet-tab');
@@ -1800,15 +1887,25 @@ function confirmDeleteSheet() {
   });
 }
 
-function openRenameModal() {
+// Renames the open sheet, or a file ({ file }).
+let renameFile = null;
+function openRenameModal({ file = null } = {}) {
   if (blockedOffline()) return;
   rememberFocus('rename');
-  renameInput.value = currentSheetName();
+  renameFile = file?.id ? file : null;
+  renameModal.querySelector('.modal-kicker').textContent = renameFile ? 'File' : 'Current sheet';
+  renameModal.querySelector('#renameTitle').textContent = renameFile ? 'Rename file' : 'Rename sheet';
+  renameModal.querySelector('label[for="renameInput"]').textContent = renameFile ? 'File name' : 'Sheet name';
+  renameInput.maxLength = renameFile ? 200 : 40;
+  renameInput.value = renameFile ? renameFile.name : currentSheetName();
   renameModal.hidden = false;
   document.body.classList.add('modal-open');
   requestAnimationFrame(() => {
     renameInput.focus();
-    renameInput.select();
+    // A file: the name before its extension is selected, ready to type over.
+    const dot = renameFile ? renameInput.value.lastIndexOf('.') : -1;
+    if (dot > 0) renameInput.setSelectionRange(0, dot);
+    else renameInput.select();
   });
 }
 
@@ -1824,6 +1921,7 @@ renameModal.addEventListener('click', e => { if (e.target === renameModal) close
 
 renameForm.addEventListener('submit', async e => {
   e.preventDefault();
+  if (renameFile) return renameFileSubmit(renameFile);
   const name = renameInput.value.replace(/[\r\n\t]/g, ' ').trim().slice(0, 40);
   if (!name) {
     renameInput.focus();
@@ -1838,6 +1936,72 @@ renameForm.addEventListener('submit', async e => {
   }
 });
 
+
+async function renameFileSubmit(file) {
+  const name = renameInput.value.replace(/[\r\n\t]/g, ' ').trim().slice(0, 200);
+  if (!name) {
+    renameInput.focus();
+    return;
+  }
+  if (name === file.name) return closeRenameModal();
+  if (blockedOffline()) return;
+  try {
+    const sealed = file.enc ? await vault.encryptText(await fileKeyFor(file), name) : name;
+    await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=rename`), { name: sealed });
+    closeRenameModal();
+    showToast('File renamed');
+    if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
+    libraryChanged();
+  } catch {
+    showToast('Couldn’t rename the file');
+  }
+}
+
+// ---- Moving a file to another sheet ----
+function chooseMoveTarget(file) {
+  if (blockedOffline()) return;
+  const others = sheets.filter(s => s.id !== file.sheet);
+  const shared = liveShareFor('file', file.sheet, file.id);
+  openSheet({
+    title: `Move ${file.name} to…`,
+    text: shared ? 'Its share link stops working once it’s moved (you can make a new one).' : 'Pick the sheet to move it to.',
+    files: [file],
+    actions: [
+      ...others.map(s => ({ label: s.name, kind: 'secondary', full: true, run: () => moveFile(file, s.id) })),
+      { label: 'Cancel', kind: 'secondary', full: true }
+    ]
+  });
+}
+
+// The page re-locks the file's key for the other sheet; the server copies the
+// pieces one by one (the page drives it, so a big file never times out), then
+// deletes the original.
+async function moveFile(file, to) {
+  if (blockedOffline()) return;
+  const toName = currentSheetName(to);
+  const transfer = createTransfer(file.name, `Moving to ${toName}`, file.size || 0);
+  const wait = why => transfer.waiting(why);
+  const url = action => filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=${action}`);
+  try {
+    const key = file.enc ? await vault.wrap(await fileKeyFor(file), await keyForSheet(to)) : undefined;
+    const start = await withRetry(() => postJson(url('move-start'), { to, key }), transfer.signal, wait);
+    let done = 0;
+    await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
+      await withRetry(() => postJson(url('move-piece'), { to, copy: start.copy, i }), transfer.signal, wait);
+      transfer.update(Math.min(file.size || 0, ++done * Math.ceil((file.size || 0) / start.chunks)));
+    });
+    await withRetry(() => postJson(url('move-finish'), { to, copy: start.copy }), transfer.signal, wait);
+    transfer.done(`Moved to ${toName}`);
+    showToast(`Moved to ${toName}`);
+    fileKeys.delete(file.id);
+    await loadFiles(true, file.sheet);
+    refreshFilesFor(to);
+    libraryChanged();
+  } catch (err) {
+    if (err?.name === 'AbortError') transfer.fail('Cancelled');
+    else transfer.fail(err?.message || 'Couldn’t move the file. Try again.');
+  }
+}
 
 function bytes(n) {
   if (n < 1024) return `${n} B`;
@@ -3016,6 +3180,8 @@ function openFileMenu(trigger, file) {
     { label: 'Download', icon: 'download', run: () => saveSharedFile(file) },
     { label: liveShareFor('file', file.sheet, file.id) ? 'Shared link…' : 'Share link…', icon: 'link', run: () => openShare({ kind: 'file', sheet: file.sheet, file: file.id, name: file.name }) },
     canKeep(file) ? { label: file.kept ? 'Stop keeping' : 'Keep (no reminders)', icon: 'pin', run: () => toggleKeep(file) } : null,
+    { label: 'Rename…', icon: 'pencil', run: () => openRenameModal({ file }) },
+    sheets.length > 1 ? { label: 'Move to…', icon: 'folder', run: () => chooseMoveTarget(file) } : null,
     'separator',
     { label: 'Delete file…', icon: 'trash', danger: true, run: () => confirmDeleteFile(file) }
   ], `Actions for ${file.name}`);
@@ -5246,7 +5412,7 @@ function profileHtml(view) {
         <h3 class="pf-group">Preferences</h3>
         <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
           <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
-        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('email', 'mail', 'Change email…', { sub: account?.email || '' })}${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
         <h3 class="pf-group">Your data</h3>
         ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
         <h3 class="pf-group">Sessions</h3>
@@ -5344,6 +5510,7 @@ const PROFILE_ACTIONS = {
   upgrade: () => fromProfile(() => showUpgrade('')),
   billing: () => fromProfile(manageBilling),
   password: () => fromProfile(openChangePassword),
+  email: () => fromProfile(openChangeEmail),
   recovery: () => fromProfile(confirmNewRecoveryKey),
   export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
@@ -5724,6 +5891,110 @@ devicesModal.addEventListener('click', async e => {
     showToast(err.message || 'Couldn’t sign that device out');
   }
   loadDevices();
+});
+
+// ---- Change email ----
+// The email salts the password key, so the device makes the sign-in secret and
+// the master key's lock again from the new email and the same password (the
+// recovery key doesn't depend on the email). A code to the new address proves
+// it's yours. Other devices are signed out; the old address gets a notice.
+const emailModal = document.querySelector('#emailModal');
+const emailChangeForm = document.querySelector('#emailChangeForm');
+const emailChangeError = document.querySelector('#emailChangeError');
+const emailChangeSubmit = document.querySelector('#emailChangeSubmit');
+let emailChange = null; // { newEmail, old, master, password } between the two steps
+
+function setEmailStep(step) {
+  emailModal.querySelectorAll('[data-email-step]').forEach(el => { el.hidden = el.dataset.emailStep !== String(step); });
+  emailChangeSubmit.textContent = step === 1 ? 'Send code' : 'Change email';
+}
+
+function openChangeEmail() {
+  if (blockedOffline()) return;
+  rememberFocus('email');
+  emailChange = null;
+  emailModal.querySelector('#emailChangeUser').value = account?.email || '';
+  for (const id of ['#emailChangeNew', '#emailChangePassword', '#emailChangeCode']) emailModal.querySelector(id).value = '';
+  emailChangeError.textContent = '';
+  setEmailStep(1);
+  emailModal.hidden = false;
+  updateModalOpen();
+  emailModal.querySelector('#emailChangeNew').focus();
+}
+
+function closeChangeEmail() {
+  if (emailModal.hidden) return;
+  emailModal.hidden = true;
+  emailChange = null;
+  updateModalOpen();
+  restoreFocus('email');
+}
+
+emailModal.querySelectorAll('[data-close-email]').forEach(btn => btn.addEventListener('click', closeChangeEmail));
+emailModal.addEventListener('click', e => { if (e.target === emailModal) closeChangeEmail(); });
+emailModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeChangeEmail(); });
+emailChangeForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  emailChangeError.textContent = '';
+  if (blockedOffline()) return;
+  const label = emailChangeSubmit.textContent;
+  emailChangeSubmit.disabled = true;
+  try {
+    if (!emailChange) {
+      const newEmail = emailModal.querySelector('#emailChangeNew').value.trim().toLowerCase();
+      const password = emailModal.querySelector('#emailChangePassword').value;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) throw new Error('Enter a valid email address.');
+      if (newEmail === account.email) throw new Error('That’s already your email.');
+      if (!password) throw new Error('Enter your password.');
+      emailChangeSubmit.textContent = 'Checking…';
+      const old = await vault.passwordKeys(account.email, password);
+      let master;
+      try {
+        master = await vault.openWithPassword(account.keyring, old.kek);
+      } catch {
+        throw new Error('Your password isn’t right.');
+      }
+      emailChangeSubmit.textContent = 'Sending…';
+      await postJson(`${API_AUTH}?action=email-code`, { auth: old.auth, newEmail });
+      emailChange = { newEmail, old, master, password };
+      emailModal.querySelector('#emailChangeTo').textContent = newEmail;
+      setEmailStep(2);
+      emailModal.querySelector('#emailChangeCode').focus();
+      return;
+    }
+    const code = emailModal.querySelector('#emailChangeCode').value.trim();
+    if (!code) throw new Error('Enter the code from the email.');
+    emailChangeSubmit.textContent = 'Changing…';
+    const { newEmail, old, master, password } = emailChange;
+    const fresh = await vault.passwordKeys(newEmail, password);
+    const byPassword = await vault.wrap(master, fresh.kek);
+    // As with a new password: this page waits for its own answer (and its new sign-in).
+    appStarted = false;
+    const r = await rawFetch(`${API_AUTH}?action=change-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auth: old.auth, newEmail, code, newAuth: fresh.auth, byPassword })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) signInRenewedAt = Date.now();
+    appStarted = true;
+    if (!r.ok) throw new Error(data.error || 'Couldn’t change the email. Try again.');
+    account.email = data.email;
+    if (data.keyring) account.keyring = data.keyring;
+    await vault.rememberMaster(data.email, master);
+    avatarEl.textContent = data.email.charAt(0).toUpperCase();
+    accountBtn.title = data.email;
+    accountBtn.setAttribute('aria-label', `Account: ${data.email}`);
+    saveSnapshot();
+    closeChangeEmail();
+    showToast(`Your email is now ${data.email}`);
+  } catch (err) {
+    appStarted = true;
+    emailChangeError.textContent = err.message;
+  } finally {
+    emailChangeSubmit.disabled = false;
+    if (emailChangeSubmit.textContent.endsWith('…')) emailChangeSubmit.textContent = label;
+  }
 });
 
 function confirmSignOutEverywhere() {

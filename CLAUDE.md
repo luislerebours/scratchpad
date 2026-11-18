@@ -185,7 +185,8 @@ to what the app collects); `branding/play-store/` the listing kit.
   Sector 809 Labs". New emails pass content only (heading, intro, box, button,
   note), never their own HTML; a plain-text part is made from the same content.
 - Security notices (`securityNotice()` in `netlify/lib/notices.mjs`): one email when the
-  password changes (reset), the account is started over, a new recovery key is
+  password changes (reset or Change password), the email changes (to the old
+  address), the account is started over, a new recovery key is
   made, every device is signed out, or the account is deleted (says if Pro was
   cancelled). Box: time (UTC) and the kind of device from the browser
   ("Safari on iPhone"), never stored. A notice that can't be sent never stops
@@ -221,7 +222,7 @@ to what the app collects); `branding/play-store/` the listing kit.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Change password, Generate new recovery key, Download my data, Signed-in devices, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data, Signed-in devices, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,
@@ -274,8 +275,25 @@ to what the app collects); `branding/play-store/` the listing kit.
   sizes and image ids). They count toward storage, their images aren't cleaned
   up, and wiping a sheet slot clears them. Sheet menu → Version history…: list,
   Show (unlocked on the device), Restore (with Undo). Clear sheet text has Undo.
+- Change email (`openChangeEmail()` in `app.js`, `auth?action=email-code` then
+  `change-email`): new email + password, then a code sent to the new address.
+  The email salts the password key, so the device re-derives the sign-in secret
+  and `byPassword` from the new email and the same password (the recovery key
+  doesn't depend on the email). The server moves `users/<ek>` to the new email
+  key, leaves `email-moves/<old ek>` → new (erased with the account, via
+  `previousKeys`), points Stripe (`stripe-customers/…`, customer and
+  subscription metadata) and the Play token at the new key (`followEmail` in
+  `lib/moves.mjs`; Stripe/Play lookups go through `currentUserKey`), bumps
+  `version` and emails a notice to the old address (`email`, new address masked).
 - File rows: Download, Delete (trash, not red; asks first like the ••• menu)
-  and •••.
+  and •••. The ••• menu also has Rename… (the rename dialog, `openRenameModal({ file })`;
+  the new name locked with the file's key, `files?action=rename`) and Move to…
+  (`moveFile()`): the page re-locks the file's key for the other sheet and drives
+  `move-start` / `move-piece` (one piece per call, from Netlify or R2 into the
+  same kind of storage) / `move-finish` (checks every piece, keeps the dates,
+  deletes the original for good, so its share link ends).
+- Sheet tabs can be dragged to reorder them (mouse; touch and hold on a
+  phone, a quick swipe still scrolls): `meta=sheets` action `reorder`.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

@@ -250,7 +250,14 @@ to what the app collects); `branding/play-store/` the listing kit.
   sign-in secret, bumps `version` (every other device signed out; this one gets a
   new cookie) and sends the `password` security notice.
 - File rows: Download, Delete (trash, not red; asks first like the ••• menu)
-  and •••.
+  and •••. The ••• menu also has Rename… (the rename dialog, `openRenameModal({ file })`;
+  the new name locked with the file's key, `files?action=rename`) and Move to…
+  (`moveFile()`): the page re-locks the file's key for the other sheet and drives
+  `move-start` / `move-piece` (one piece per call, from Netlify or R2 into the
+  same kind of storage) / `move-finish` (checks every piece, keeps the dates,
+  deletes the original for good, so its share link ends).
+- Sheet tabs can be dragged to reorder them (mouse; touch and hold on a
+  phone, a quick swipe still scrolls): `meta=sheets` action `reorder`.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

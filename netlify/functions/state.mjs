@@ -258,6 +258,9 @@ export default withErrors('state', async req => {
       next = { text: '', html, filled: Boolean(body.filled), images, updatedAt: next.updatedAt };
     }
     await store.setJSON(key, next);
+    // A device that can't reach the relay (its network blocks it) asks the
+    // server to tell the other devices (`notify: 1`); otherwise it does so itself.
+    if (body.notify === 1) return json({ updatedAt: next.updatedAt, rev: await bumpRev(ns, `text-${sheet}`) });
     const { rev, notice } = await bumpRevForDevice(ns, `text-${sheet}`);
     return json({ updatedAt: next.updatedAt, rev, ...(notice ? { notice } : {}) });
   }

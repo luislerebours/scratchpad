@@ -37,6 +37,14 @@ export async function pieceUrl(ns, sheet, record, index) {
   return `${base()}/files/get?t=${encodeURIComponent(t)}&i=${index}`;
 }
 
+// One piece fetched here and passed on, for devices whose network blocks the
+// relay (the page asks with `via=netlify` after a direct download failed).
+export async function pieceBytes(ns, sheet, record, index) {
+  const r = await fetch(await pieceUrl(ns, sheet, record, index), { signal: AbortSignal.timeout(20_000) });
+  if (!r.ok) throw new Error(`R2 get ${r.status}`);
+  return r.arrayBuffer();
+}
+
 async function call(op, prefix, extra) {
   const r = await fetch(`${base()}/files/${op}`, { method: 'POST', body: await pass(prefix, op, extra), signal: AbortSignal.timeout(10_000) });
   if (!r.ok) throw new Error(`R2 ${op} ${r.status}`);

@@ -5,7 +5,7 @@ import { isSealed, isWrappedKey } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { accountUsage, overQuota } from '../lib/usage.mjs';
 import { withErrors } from '../lib/errors.mjs';
-import { onR2, pieceSizes, pieceUrl, r2Enabled, uploadTarget } from '../lib/r2.mjs';
+import { onR2, pieceBytes, pieceSizes, pieceUrl, r2Enabled, uploadTarget } from '../lib/r2.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
@@ -177,10 +177,11 @@ export default withErrors('files', async req => {
   if (req.method === 'GET' && chunkIndex !== null) {
     if (!record.complete) return json({ error: 'Upload not finished' }, 409);
     // In R2: sent there to download it (nothing passes through Netlify).
-    if (onR2(record)) {
+    // On a network that blocks the relay, the page asks for it through here.
+    if (onR2(record) && url.searchParams.get('via') !== 'netlify') {
       return new Response(null, { status: 302, headers: { Location: await pieceUrl(auth.ns, sheet, record, chunkIndex), 'Cache-Control': 'private, max-age=3600' } });
     }
-    const data = await store.chunks.get(chunkKey(id, chunkIndex), { type: 'arrayBuffer' });
+    const data = onR2(record) ? await pieceBytes(auth.ns, sheet, record, chunkIndex) : await store.chunks.get(chunkKey(id, chunkIndex), { type: 'arrayBuffer' });
     if (!data) return json({ error: 'Chunk missing' }, 404);
     return new Response(data, {
       // A file's chunks never change, so a device can keep them: opening the

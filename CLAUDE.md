@@ -55,7 +55,14 @@ to what the app collects); `branding/play-store/` the listing kit.
 - `public/` is the static site (`index.html`, `app.js`, `styles.css`).
 - `netlify/functions/` holds the API, backed by Netlify Blobs:
   - `auth.mjs`: accounts (emailed animal+4-digit code, then a password),
-    one-year session cookie renewed on each visit
+    one-year session cookie renewed on each visit. Each sign-in has an id
+    (`sid` in the cookie) and an entry in `user.sessions` ({ id, device kind
+    from `lib/device.mjs`, createdAt, lastSeen }, newest 20, lastSeen updated at
+    most hourly); `requireUser` and `/api/check` refuse a cookie whose entry is
+    gone. Signed-in devices (`auth?action=devices`, `signout-device`) lists them
+    and signs one out; Sign out removes this device's entry; a version bump
+    (sign out everywhere, password change or reset, admin sign-out or
+    deactivation) clears the list. Cookies from before ids work and get one on renewal.
   - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin-api.mjs`: the admin dashboard's API (see "Admin dashboard" below)
@@ -84,6 +91,14 @@ to what the app collects); `branding/play-store/` the listing kit.
     sheet; a link stops working if what it shares is deleted. Links live in the
     `scratchpad-shares` store; each account lists its tokens in `meta/shares`.
     Downloads are capped per link per hour (about 2.4 GB, counted by piece size). Viewer pages are noindex/no-referrer.
+    Optional password (`linkPassword()` in `app.js`, `vault.linkPasswordKeys`):
+    PBKDF2 of the password and a salt gives a proof and a key; the link's part
+    after `#` becomes `p.<salt>.<item key locked with that key>`; the share keeps
+    `pw` { kdfSalt, scrypt hash of the proof } and `linkFragment` (that part,
+    locked with the sheet key, for the owner's devices). The viewer posts the
+    proof (`action=unlock`, limited per link and IP) for a 12-hour pass (`p`)
+    sent with every request; without it the link serves nothing (401 with the
+    salt). Changing or removing the password changes the link and ends old passes.
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none),
   enforced when an upload starts; an admin can change it from the admin
@@ -178,7 +193,8 @@ to what the app collects); `branding/play-store/` the listing kit.
   Sector 809 Labs". New emails pass content only (heading, intro, box, button,
   note), never their own HTML; a plain-text part is made from the same content.
 - Security notices (`securityNotice()` in `netlify/lib/notices.mjs`): one email when the
-  password changes (reset), the account is started over, a new recovery key is
+  password changes (reset or Change password), the email changes (to the old
+  address), the account is started over, a new recovery key is
   made, every device is signed out, or the account is deleted (says if Pro was
   cancelled). Box: time (UTC) and the kind of device from the browser
   ("Safari on iPhone"), never stored. A notice that can't be sent never stops
@@ -214,7 +230,7 @@ to what the app collects); `branding/play-store/` the listing kit.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Change password, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data, Signed-in devices, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,
@@ -234,6 +250,11 @@ to what the app collects); `branding/play-store/` the listing kit.
   requests) and its own `--auth-*` tokens (brighter cyan on dark, teal on
   light). `.only-wide` / `.only-narrow` swap copy at 860px; the sun/moon is
   `#authThemeBtn`. Help/Support go to support@sector809labs.com.
+- Help (`public/help.html`, served at `/help`, legal.css): short answers by
+  topic (getting started, sheets, files and sharing, syncing, privacy and
+  security, plans, account), linked from Help & support (Help center), the
+  front page's Help link and the legal pages' nav. Keep it true to the app:
+  update it when a feature, limit or price changes.
 - Privacy policy and Terms of service: `public/privacy.html` and `public/terms.html`
   (served at `/privacy` and `/terms`, styled by `legal.css`; also in the account
   menu). Keep them true to what the app does: update them when data handling,
@@ -267,8 +288,25 @@ to what the app collects); `branding/play-store/` the listing kit.
   sizes and image ids). They count toward storage, their images aren't cleaned
   up, and wiping a sheet slot clears them. Sheet menu → Version history…: list,
   Show (unlocked on the device), Restore (with Undo). Clear sheet text has Undo.
+- Change email (`openChangeEmail()` in `app.js`, `auth?action=email-code` then
+  `change-email`): new email + password, then a code sent to the new address.
+  The email salts the password key, so the device re-derives the sign-in secret
+  and `byPassword` from the new email and the same password (the recovery key
+  doesn't depend on the email). The server moves `users/<ek>` to the new email
+  key, leaves `email-moves/<old ek>` → new (erased with the account, via
+  `previousKeys`), points Stripe (`stripe-customers/…`, customer and
+  subscription metadata) and the Play token at the new key (`followEmail` in
+  `lib/moves.mjs`; Stripe/Play lookups go through `currentUserKey`), bumps
+  `version` and emails a notice to the old address (`email`, new address masked).
 - File rows: Download, Delete (trash, not red; asks first like the ••• menu)
-  and •••.
+  and •••. The ••• menu also has Rename… (the rename dialog, `openRenameModal({ file })`;
+  the new name locked with the file's key, `files?action=rename`) and Move to…
+  (`moveFile()`): the page re-locks the file's key for the other sheet and drives
+  `move-start` / `move-piece` (one piece per call, from Netlify or R2 into the
+  same kind of storage) / `move-finish` (checks every piece, keeps the dates,
+  deletes the original for good, so its share link ends).
+- Sheet tabs can be dragged to reorder them (mouse; touch and hold on a
+  phone, a quick swipe still scrolls): `meta=sheets` action `reorder`.
 - Files can be swiped left to delete (touch only). The server delete waits
   5 s for Undo, and happens at once if the page is closed.
 - Recently Deleted (`netlify/lib/files.mjs`, `state?meta=trash`): deleting a

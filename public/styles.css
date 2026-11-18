@@ -232,6 +232,9 @@ img[data-mark] { transform: translateY(-1px); }
 .sheet-bar { display: flex; align-items: center; gap: 4px; margin: 0 0 14px; }
 .tabs-scroller { position: relative; flex: 1 1 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-padding-inline: 24px; }
 .tabs-scroller::-webkit-scrollbar { display: none; }
+.sheet-tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.sheet-tabs.reordering .sheet-tab { cursor: grabbing; }
+.sheet-tab.dragging { z-index: 1; transform: scale(1.06); box-shadow: var(--shadow-menu); transition: transform .12s ease, box-shadow .12s ease; }
 .tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
@@ -565,6 +568,16 @@ body.dragging-files .files.drag-active
 .share-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .share-status { color: var(--muted); font-size: .875rem; }
 .share-status b { color: var(--text); font-weight: 600; }
+.share-status .i { width: 15px; height: 15px; margin-right: 5px; vertical-align: -2px; color: var(--success); }
+.share-pw-box summary { color: var(--accent); font-size: .9375rem; font-weight: 600; cursor: pointer; }
+.share-pw-box[open] summary { margin-bottom: 8px; }
+.share-pw-box .share-explain { margin-top: 6px; }
+.share-pw-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.share-pw-row .link-btn + .link-btn { margin-left: 12px; }
+.share-pw-edit { display: grid; gap: 6px; }
+.share-pw-edit[hidden] { display: none; }
+.share-pw-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.share-pw { width: 100%; }
 .share-off { color: var(--danger); }
 .btn.full { width: 100%; }
 .shared-tag { display: inline-flex; align-items: center; margin-right: 6px; color: var(--accent); vertical-align: -2px; }
@@ -585,6 +598,10 @@ body.dragging-files .files.drag-active
 .trash-row .link-btn { padding: 0 10px; font-weight: 600; }
 .trash-row .icon-btn { color: var(--danger); }
 .trash-empty { padding: 28px 0 16px; color: var(--muted); }
+.device-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.device-name { font-weight: 600; }
+.device-meta { color: var(--muted); font-size: .875rem; }
+.device-here { color: var(--accent); font-weight: 600; font-size: .875rem; white-space: nowrap; }
 .history-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .history-when { font-weight: 600; }
@@ -604,6 +621,8 @@ body.dragging-files .files.drag-active
 .delete-account-body .rename-input { margin-top: 6px; }
 .delete-account-body .auth-error { min-height: 1.2em; margin: 8px 0 4px; }
 .delete-account-body .rename-input + .field-label { margin-top: 12px; }
+.delete-account-body > [data-email-step] { display: grid; gap: 4px; }
+.delete-account-body > [data-email-step][hidden] { display: none; }
 
 /* ---------- Sign-in ---------- */
 /* The sign-in page is also the front door: pitch, plans and the sign-in card.

@@ -88,7 +88,10 @@ const KEEPS_PRO = new Set(['active', 'trialing', 'past_due']);
 export async function applySubscription(sub) {
   const store = authStore();
   const customer = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
-  const ek = sub.metadata?.ek || (customer && (await store.get(customerKey(customer))));
+  // Known by its email key; an account that changed its email is found where it moved.
+  const { currentUserKey } = await import('./moves.mjs');
+  // Our own customer link first (Change email always updates it), then the subscription's metadata.
+  const ek = await currentUserKey((customer && (await store.get(customerKey(customer)))) || sub.metadata?.ek);
   if (!ek) return null;
   const user = await store.get(`users/${ek}`, { type: 'json' });
   if (!user) return null;

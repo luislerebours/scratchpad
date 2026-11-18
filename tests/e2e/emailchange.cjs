@@ -71,6 +71,9 @@ const T = Date.now(); const OLD = `before${T}@example.com`, NEW = `after${T}@exa
   ok('anything keyed by the old email finds the account where it moved', (await currentUserKey(oldEk)) === newEk);
   ok('the Google Play subscription follows it', (await accountForToken('play-token-abc')) === newEk);
   ok('the old address got a security notice', log().includes(`to ${OLD}: security email`));
+  // Signed-in devices: the list starts again with just this device (the others were signed out).
+  const devs = await A.evaluate(async () => (await fetch('/.netlify/functions/auth?action=devices', { cache: 'no-store' })).json());
+  ok('Signed-in devices now lists only this device', devs.sessions?.length === 1 && devs.sessions[0].current === true && !devs.unlisted, JSON.stringify(devs));
 
   // ---- Signing in afterwards ----
   const C = await page(); await signIn(C, OLD); await sleep(4000);

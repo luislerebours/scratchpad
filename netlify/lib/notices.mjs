@@ -1,4 +1,5 @@
 import { sendEmail } from './email.mjs';
+import { deviceOf } from './device.mjs';
 
 // ---- Security notices ----
 // A short email when something changes about how the account is reached or
@@ -7,16 +8,6 @@ import { sendEmail } from './email.mjs';
 // be sent never stops the action itself.
 
 const SUPPORT = 'support@sector809labs.com';
-
-function deviceOf(req) {
-  const ua = req.headers.get('user-agent') || '';
-  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
-    : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
-  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows'
-    : /CrOS/.test(ua) ? 'ChromeOS' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
-  if (browser && os) return `${browser} on ${os}`;
-  return browser || os || 'An unknown device';
-}
 
 const whenText = () => `${new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date())} UTC`;
 
@@ -36,6 +27,11 @@ const NOTICES = {
     heading: 'A new recovery key was made',
     intro: 'A new recovery key was just made for your ScrapSheet account. The old one no longer works.'
   },
+  email: {
+    subject: 'Your ScrapSheet email was changed',
+    heading: 'Your email was changed',
+    intro: 'Your ScrapSheet account now signs in with a different email address, and every device was signed out.'
+  },
   'signout-all': {
     subject: 'Signed out of ScrapSheet everywhere',
     heading: 'Signed out of all devices',
@@ -48,10 +44,16 @@ const NOTICES = {
   }
 };
 
-export async function securityNotice(req, email, kind, { cancelled = false } = {}) {
+// Part of an address, so the old one can recognise the new one without seeing it whole.
+const masked = email => {
+  const [name, domain] = String(email).split('@');
+  return `${name.slice(0, 2)}${'•'.repeat(Math.max(1, Math.min(6, name.length - 2)))}@${domain}`;
+};
+
+export async function securityNotice(req, email, kind, { cancelled = false, to = null } = {}) {
   const n = NOTICES[kind];
   const origin = new URL(req.url).origin;
-  const intro = n.intro + (cancelled ? ' Your Pro subscription was cancelled too, so you won’t be charged again.' : '');
+  const intro = n.intro + (cancelled ? ' Your Pro subscription was cancelled too, so you won’t be charged again.' : '') + (to ? ` The new address starts ${masked(to)}.` : '');
   try {
     await sendEmail({
       to: email,
@@ -65,7 +67,9 @@ export async function securityNotice(req, email, kind, { cancelled = false } = {
       ...(kind.startsWith('deleted') ? {} : { button: { label: 'Open ScrapSheet', url: origin } }),
       note: kind.startsWith('deleted')
         ? `If you didn’t do this, email ${SUPPORT} right away. Thanks for using ScrapSheet.`
-        : `Wasn’t you? Reset your password right away (“Forgot password?” on the sign-in page) and email ${SUPPORT}.`,
+        : kind === 'email'
+          ? `Wasn’t you? Email ${SUPPORT} from this address right away.`
+          : `Wasn’t you? Reset your password right away (“Forgot password?” on the sign-in page) and email ${SUPPORT}.`,
       // Local tests read this line.
       devLog: `[dev mail] to ${email}: security ${kind} (${deviceOf(req)})${cancelled ? ' +cancelled' : ''}`
     });

@@ -93,7 +93,7 @@
             <ul>
               <li><strong>Images:</strong> paste or drop them right into the text.</li>
               <li><strong>Resize:</strong> tap an image, then pick a size or drag its corner.</li>
-              <li><strong>Sheets:</strong> rename, clear or delete from the ••• menu. On a computer, double-click a tab to rename it.</li>
+              <li><strong>Sheets:</strong> rename, clear or delete from the ••• menu. On a computer, double-click a tab to rename it. Drag a tab to move it (on a phone, touch and hold it first).</li>
               <li><strong>Files:</strong> use Upload, or drag files onto the Files section on a computer. On a phone, swipe a file left to delete it.</li>
             </ul>
           </div>
@@ -186,6 +186,19 @@
     </section>
   </div>
 
+  <div id="devicesModal" class="modal-backdrop" hidden>
+    <section class="modal-card trash-modal" role="dialog" aria-modal="true" aria-labelledby="devicesTitle">
+      <div class="modal-header">
+        <div>
+          <h2 id="devicesTitle">Signed-in devices</h2>
+          <p class="trash-sub">Where your account is signed in. Sign out any you don’t recognise, then change your password.</p>
+        </div>
+        <button class="modal-close" type="button" data-close-devices aria-label="Close">×</button>
+      </div>
+      <div id="devicesBody" class="trash-body"></div>
+    </section>
+  </div>
+
   <div id="historyModal" class="modal-backdrop" hidden>
     <section class="modal-card trash-modal" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
       <div class="modal-header">
@@ -247,7 +260,7 @@
           <span>ScrapSheet</span>
         </div>
         <nav class="auth-nav" aria-label="Help and appearance">
-          <a class="auth-help" href="mailto:support@sector809labs.com">Help</a>
+          <a class="auth-help" href="/help">Help</a>
           <button class="auth-theme" id="authThemeBtn" type="button" aria-label="Switch to light mode" title="Switch to light mode">
             <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2.3M12 19.5v2.3M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.2 12h2.3M19.5 12h2.3M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
             <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg>
@@ -482,6 +495,35 @@
         <div class="modal-actions">
           <button class="btn secondary" type="button" data-close-password>Cancel</button>
           <button class="btn primary" type="submit">Change password</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="emailModal" class="modal-backdrop" hidden>
+    <section class="modal-card delete-modal" role="dialog" aria-modal="true" aria-labelledby="emailChangeTitle">
+      <div class="modal-header">
+        <h2 id="emailChangeTitle">Change email</h2>
+        <button class="modal-close" type="button" data-close-email aria-label="Close">×</button>
+      </div>
+      <form id="emailChangeForm" class="delete-account-body" novalidate>
+        <div data-email-step="1">
+          <p class="delete-account-text">You’ll sign in with the new email from now on. Your sheets, files, password and recovery key stay as they are. Every other device will be signed out.</p>
+          <input type="email" id="emailChangeUser" autocomplete="username" hidden />
+          <label class="field-label" for="emailChangeNew">New email</label>
+          <input id="emailChangeNew" class="rename-input" type="email" autocomplete="email" inputmode="email" required />
+          <label class="field-label" for="emailChangePassword">Your password</label>
+          <input id="emailChangePassword" class="rename-input" type="password" autocomplete="current-password" required />
+        </div>
+        <div data-email-step="2" hidden>
+          <p class="delete-account-text">We sent a code to <strong id="emailChangeTo"></strong>. Enter it to finish.</p>
+          <label class="field-label" for="emailChangeCode">Code</label>
+          <input id="emailChangeCode" class="rename-input" type="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" placeholder="otter4821" required />
+        </div>
+        <p class="auth-error" id="emailChangeError" role="alert"></p>
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" data-close-email>Cancel</button>
+          <button class="btn primary" type="submit" id="emailChangeSubmit">Send code</button>
         </div>
       </form>
     </section>

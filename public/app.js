@@ -4590,13 +4590,30 @@ async function openShareLinks(list) {
         if (!file?.enc) return s;
         key = await fileKeyFor(file, s.sheet);
       }
-      shareFragments.set(s.token, await vault.exportKey(key));
+      // A link with a password carries its key locked with it; the owner keeps
+      // that part of the link, locked with the sheet's key.
+      shareFragments.set(s.token, s.linkFragment ? await vault.decryptText(await keyForSheet(s.sheet), s.linkFragment) : await vault.exportKey(key));
       return { ...s, name: await vault.decryptText(key, s.name) };
     } catch {
       return s;
     }
   }));
 }
+
+// What a link's password needs: the proof for the server, and the link's key
+// part ("p.<salt>.<the item's key locked with the password>") locked with the
+// sheet's key for the owner's devices.
+async function linkPassword(target, password) {
+  const key = target.kind === 'sheet' ? await keyForSheet(target.sheet) : await fileKeyFor(knownFiles.get(target.file), target.sheet);
+  const salt = vault.newLinkSalt();
+  const { proof, kek } = await vault.linkPasswordKeys(password, salt);
+  const fragment = `p.${salt}.${await vault.wrap(key, kek)}`;
+  return { password: { salt, proof }, linkFragment: await vault.encryptText(await keyForSheet(target.sheet), fragment) };
+}
+
+const passwordFieldHtml = (id, label) => `
+  <label class="field-label" for="${id}">${label}</label>
+  <input id="${id}" class="rename-input share-pw" type="password" autocomplete="new-password" placeholder="At least 4 characters" />`;
 
 function setLiveShares(list) {
   liveShares = new Map(list.filter(s => s.expiresAt > Date.now() && !s.revoked).map(s => [shareKey(s.kind, s.sheet, s.file), s]));
@@ -4682,13 +4699,18 @@ function closeShare() {
   restoreFocus('share');
 }
 
+// Who can open a new link: once a password is typed, only people who have it too.
+const shareWhoText = (what, withPassword) =>
+  `${withPassword ? 'Anyone with the link and the password' : 'Anyone with the link'} can view and download ${what}. They don’t need an account.`;
+
 function renderShare(focus) {
   const what = shareTarget.kind === 'sheet' ? 'this sheet’s text, images and files' : 'this file';
   if (!shareLink) {
     shareBody.innerHTML = `
-      <p class="share-explain">Anyone with the link can view and download ${what}. They don’t need an account.</p>
+      <p class="share-explain" data-share-who="${escapeHtml(what)}">${shareWhoText(what, false)}</p>
       <p class="seg-label" id="shareDaysLabel">Link expires after</p>
       ${segHtml(7)}
+      ${masterKey ? `<details class="share-pw-box"><summary>Add a password (optional)</summary>${passwordFieldHtml('sharePwNew', 'Password')}<p class="share-explain">They’ll need it to open the link. Send it separately (say, in a text). We can’t recover it for you.</p></details>` : ''}
       <button class="btn full" type="button" data-share-create>${icon('link')}Create link</button>`;
     if (focus) shareBody.querySelector('[data-share-create]').focus({ preventScroll: true });
     return;
@@ -4708,8 +4730,19 @@ function renderShare(focus) {
     <p class="share-status"><b>${escapeHtml(untilText(shareLink.expiresAt))}</b> · ${escapeHtml(viewsText(shareLink.views || 0))}</p>
     <p class="seg-label">Change to expire after (from now)</p>
     ${segHtml(0)}
+    ${masterKey ? `<div class="share-pw-row">
+      <span class="share-status">${shareLink.protected ? `${icon('lock')}<b>Password protected</b>` : 'No password'}</span>
+      <span>
+        <button class="link-btn" type="button" data-share-pw="set">${shareLink.protected ? 'Change password' : 'Add a password'}</button>
+        ${shareLink.protected ? '<button class="link-btn" type="button" data-share-pw="remove">Remove</button>' : ''}
+      </span>
+    </div>
+    <div class="share-pw-edit" hidden>${passwordFieldHtml('sharePwEdit', shareLink.protected ? 'New password' : 'Password')}
+      <p class="share-explain">The link changes: send the new one, and the password separately.</p>
+      <div class="share-pw-actions"><button class="btn secondary compact" type="button" data-share-pw="cancel">Cancel</button><button class="btn compact" type="button" data-share-pw="save">Save password</button></div>
+    </div>` : ''}
     <div class="share-actions">
-      <span class="share-status">Anyone with the link can open ${what}.</span>
+      <span class="share-status">${shareLink.protected ? 'Anyone with the link and the password' : 'Anyone with the link'} can open ${what}.</span>
       <button class="link-btn share-off" type="button" data-share-revoke>Turn off link</button>
     </div>`;
   if (focus) shareBody.querySelector(phone ? '[data-share-send]' : '[data-share-copy]').focus({ preventScroll: true });
@@ -4763,9 +4796,12 @@ shareBody.addEventListener('click', async e => {
     }
   } else if ('shareCreate' in btn.dataset) {
     const days = Number(shareBody.querySelector('.seg [aria-checked="true"]')?.dataset.days || 7);
+    const password = shareBody.querySelector('#sharePwNew')?.value || '';
+    if (password && password.length < 4) return showToast('Use at least 4 characters for the password');
     btn.disabled = true;
     try {
-      const { share: made } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days });
+      const extra = password ? await linkPassword(shareTarget, password) : {};
+      const { share: made } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days, ...extra });
       const [share] = await openShareLinks([made]);
       shareLink = share;
       noteShare(share);
@@ -4775,6 +4811,36 @@ shareBody.addEventListener('click', async e => {
       } else {
         copyLink(shareUrl(share), shareBody.querySelector('#shareUrlInput'));
       }
+    } catch (err) {
+      btn.disabled = false;
+      showToast(err.message);
+    }
+  } else if (btn.dataset.sharePw) {
+    const edit = shareBody.querySelector('.share-pw-edit');
+    const which = btn.dataset.sharePw;
+    if (which === 'set') {
+      edit.hidden = false;
+      edit.querySelector('input').focus();
+      return;
+    }
+    if (which === 'cancel') {
+      edit.hidden = true;
+      return;
+    }
+    if (blockedOffline()) return;
+    try {
+      let body = { password: null };
+      if (which === 'save') {
+        const password = edit.querySelector('input').value;
+        if (password.length < 4) return showToast('Use at least 4 characters for the password');
+        btn.disabled = true;
+        body = await linkPassword(shareTarget, password);
+      }
+      const { share } = await sharePost({ action: 'password', token: shareLink.token, ...body });
+      shareLink = (await openShareLinks([share]))[0];
+      noteShare(share);
+      renderShare();
+      showToast(which === 'remove' ? 'Password removed: the link changed' : 'Password saved: send the new link');
     } catch (err) {
       btn.disabled = false;
       showToast(err.message);
@@ -4794,6 +4860,13 @@ shareBody.addEventListener('click', async e => {
       showToast(err.message);
     }
   }
+});
+
+// Typing a password for a new link updates who can open it.
+shareBody.addEventListener('input', e => {
+  if (e.target.id !== 'sharePwNew') return;
+  const who = shareBody.querySelector('[data-share-who]');
+  if (who) who.textContent = shareWhoText(who.dataset.shareWho, e.target.value.length > 0);
 });
 
 // Arrow keys move between the expiry choices.

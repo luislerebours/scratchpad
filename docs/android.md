@@ -105,8 +105,9 @@ again right before submitting.
 ## Steps
 
 The Bubblewrap settings are in `android/twa-manifest.json` (tested with a full
-build here: target API 36, minimum Android 7.0, Play Billing on, Share menu, no
-notifications). `android/README.md` has the commands.
+build here: target API 36, minimum Android 7.0, Play Billing on, Share menu).
+Bubblewrap 1.27 requires `enableNotifications: true` for Play Billing, so it is
+on; the site never asks for notification permission, so no prompt appears. `android/README.md` has the commands.
 
 1. In `android/`: `bubblewrap update`, then `bubblewrap build` (it creates the
    upload key the first time: back it up, never commit it).

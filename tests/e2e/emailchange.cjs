@@ -13,9 +13,9 @@ const T = Date.now(); const OLD = `before${T}@example.com`, NEW = `after${T}@exa
 
 (async () => {
   process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
-  const { emailKey, authStore } = await import(REPO + '/netlify/lib/auth.mjs');
-  const { currentUserKey } = await import(REPO + '/netlify/lib/moves.mjs');
-  const { accountForToken } = await import(REPO + '/netlify/lib/play.mjs');
+  const { emailKey, authStore } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/auth.mjs').href);
+  const { currentUserKey } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/moves.mjs').href);
+  const { accountForToken } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/play.mjs').href);
   const b = await chromium.launch(); const errs = [];
   const page = async (vp = { width: 1280, height: 900 }) => { const p = await (await b.newContext({ viewport: vp })).newPage(); p.on('pageerror', e => errs.push(e.message)); return p; };
   const signUp = async (p, email) => {

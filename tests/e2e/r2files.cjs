@@ -16,8 +16,8 @@ const restart = r2 => execFileSync('bash', [DIR + '/restart-server.sh'], { env: 
 (async () => {
   process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
   process.env.SYNC_URL = RELAY; process.env.FILES_R2 = '1';
-  const { userStore, emailKey, authStore } = await import(REPO + '/netlify/lib/auth.mjs');
-  const r2 = await import(REPO + '/netlify/lib/r2.mjs');
+  const { userStore, emailKey, authStore } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/auth.mjs').href);
+  const r2 = await import(require('url').pathToFileURL(REPO + '/netlify/lib/r2.mjs').href);
 
   ok('(server restarted with R2 off)', restart('0') === 'restarted');
   const b = await chromium.launch(); const errs = [];

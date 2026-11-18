@@ -12,8 +12,8 @@ const E = 'filestabs' + Date.now() + '@example.com';
 (async () => {
   process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
   process.env.SYNC_URL = 'http://localhost:8787'; process.env.FILES_R2 = '1';
-  const { userStore, emailKey, authStore } = await import(REPO + '/netlify/lib/auth.mjs');
-  const r2 = await import(REPO + '/netlify/lib/r2.mjs');
+  const { userStore, emailKey, authStore } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/auth.mjs').href);
+  const r2 = await import(require('url').pathToFileURL(REPO + '/netlify/lib/r2.mjs').href);
   const b = await chromium.launch(); const errs = [];
   const A = await (await b.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })).newPage(); A.on('pageerror', e => errs.push(e.message));
   await A.goto(BASE); await A.click('.auth-create'); await A.fill('#codeEmail', E); await A.click('#emailForm .auth-submit');

@@ -3,6 +3,7 @@ const REPO = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 const { BlobsServer } = await import(REPO + '/node_modules/@netlify/blobs/dist/server.js');
 const blobs = new BlobsServer({ directory: path.resolve('blobdata'), port: 8971, token: 'tok' });
 await blobs.start();
@@ -24,7 +25,7 @@ http.createServer(async (req, res) => {
       const waits = []; const r = await fns[m[1]](new Request(url, { method: req.method, headers: req.headers, body: chunks.length ? Buffer.concat(chunks) : undefined, duplex: 'half' }), { waitUntil: p => waits.push(p), ip: req.socket.remoteAddress }); await Promise.all(waits);
       const h = Object.fromEntries(r.headers); const sc = r.headers.getSetCookie?.(); if (sc?.length) h['set-cookie'] = sc; res.writeHead(r.status, h); res.end(Buffer.from(await r.arrayBuffer())); return;
     }
-    const p = path.join(REPO, 'public', url.pathname === '/' ? 'index.html' : url.pathname.startsWith('/s/') ? 'share.html' : ['/privacy', '/terms', '/admin', '/delete-account', '/help'].includes(url.pathname) ? url.pathname + '.html' : url.pathname);
+    const p = path.join(fileURLToPath(new URL('../../public/', import.meta.url)), url.pathname === '/' ? 'index.html' : url.pathname.startsWith('/s/') ? 'share.html' : ['/privacy', '/terms', '/admin', '/delete-account', '/help'].includes(url.pathname) ? url.pathname + '.html' : url.pathname);
     const data = await fs.readFile(p); const salt = await fs.readFile(new URL('./deploy-salt.txt', import.meta.url), 'utf8').catch(() => ''); const etag = '"' + (await import('node:crypto')).createHash('md5').update(data).update(salt).digest('hex') + '"'; res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream', ETag: etag, 'Cache-Control': 'public,max-age=0,must-revalidate', ...(url.pathname.startsWith('/admin') && path.extname(p) === '.html' ? { 'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" } : {}) }); res.end(data);
   } catch (e) { console.error(e); res.writeHead(500); res.end(String(e)); }
 }).listen(8970, () => console.log('ready'));

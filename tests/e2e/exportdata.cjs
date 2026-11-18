@@ -61,7 +61,7 @@ const E = 'export' + Date.now() + '@example.com';
   await sleep(300); await p.screenshot({ path: OUT + 'export-progress.png', clip: { x: 0, y: 0, width: 1280, height: 860 } });
 
   // What's inside (checked with Python's zipfile: every CRC, names, contents)
-  const info = JSON.parse(execFileSync('python3', ['-I', '-c', `
+  const info = JSON.parse(execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-I', '-c', `
 import zipfile, json, sys, hashlib
 z = zipfile.ZipFile(sys.argv[1]); bad = z.testzip(); names = z.namelist()
 r = lambda n: z.read(n)

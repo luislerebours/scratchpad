@@ -7,9 +7,10 @@
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 cd "$HERE" || exit 1
-for pid in $(pgrep -f "node serve.mjs"); do kill "$pid"; done
-for pid in $(pgrep -f "node playmock.mjs"); do kill "$pid"; done
-for pid in $(pgrep -f "wrangler|workerd"); do kill -9 "$pid" 2>/dev/null; done
+. "$HERE/procs.sh"
+stop_matching "serve\.mjs"
+stop_matching "playmock\.mjs"
+stop_matching "wrangler|workerd" KILL
 sleep 1
 rm -rf ./blobdata
 mkdir -p out
@@ -19,7 +20,7 @@ nohup node playmock.mjs > playmock.log 2>&1 &
 bash "$HERE/start-server.sh" > server.log 2>&1
 sleep 2
 node seed.mjs
-KEY=$(curl -s "http://localhost:8970/.netlify/functions/sync?action=key" | python3 -c "import sys,json; print(json.load(sys.stdin)['publicKey'])")
+KEY=$(curl -s "http://localhost:8970/.netlify/functions/sync?action=key" | node -e "let s = ''; process.stdin.on('data', d => s += d).on('end', () => console.log(JSON.parse(s).publicKey))")
 echo "$KEY" > pubkey.txt
 (cd "$REPO/sync-worker" && nohup npx wrangler dev --local --port 8787 --var "PUBLIC_KEY:$KEY" > "$HERE/wrangler.log" 2>&1 &)
 for i in $(seq 1 40); do grep -q "Ready on" wrangler.log && break; sleep 1; done

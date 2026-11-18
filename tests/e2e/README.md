@@ -9,8 +9,11 @@ relay with R2 simulated (`wrangler dev`, 8787) and a fake Google Play API
 
 From the repo: `npm install` once (the server uses `@netlify/blobs` from it).
 Playwright and Chromium must be available (`require('playwright')`; in a
-Claude Code cloud session they're preinstalled). The relay needs `npx wrangler`
-(downloaded on first use).
+Claude Code cloud session they're preinstalled; elsewhere
+`npm install --no-save playwright` and `npx playwright install chromium`).
+The relay needs `npx wrangler` (`npm install` in `sync-worker/`, or downloaded
+on first use). Works on Linux, macOS and Windows (Git Bash; Python as
+`python` for `exportdata` and `storecompose`).
 
 ```bash
 cd tests/e2e

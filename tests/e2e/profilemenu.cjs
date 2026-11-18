@@ -154,7 +154,7 @@ const pfText = p => p.textContent('#profilePanel');
   // ---- Another account sees none of it ----
   const o = await (await b.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   await signUp(o, OTHER);
-  { const { getStore } = await import(REPO + '/node_modules/@netlify/blobs/dist/main.js');
+  { const { getStore } = await import(require('url').pathToFileURL(REPO + '/node_modules/@netlify/blobs/dist/main.js').href);
     const auth = getStore({ name: 'scratchpad-auth', siteID: 'site', token: 'tok', apiURL: 'http://localhost:8971', consistency: 'strong' });
     const ek = crypto.createHash('sha256').update(OTHER).digest('hex').slice(0, 32);
     await auth.setJSON(`users/${ek}`, { ...(await auth.get(`users/${ek}`, { type: 'json' })), plan: 'free' });

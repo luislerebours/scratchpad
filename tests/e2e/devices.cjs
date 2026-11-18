@@ -15,7 +15,7 @@ const WINDOWS = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 
 (async () => {
   process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
-  const { emailKey, authStore, sign } = await import(REPO + '/netlify/lib/auth.mjs');
+  const { emailKey, authStore, sign } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/auth.mjs').href);
   const b = await chromium.launch(); const errs = [];
   const page = async (opts = {}) => { const p = await (await b.newContext({ viewport: { width: 1280, height: 900 }, ...opts })).newPage(); p.on('pageerror', e => errs.push(e.message)); return p; };
   const signIn = async (p, pass = PASS) => { await p.goto(BASE); await p.fill('#signinEmail', E); await p.fill('#signinPassword', pass); await p.click('#signinForm .auth-submit'); await p.waitForSelector('.app-shell', { state: 'visible', timeout: 20000 }); await sleep(1500); };

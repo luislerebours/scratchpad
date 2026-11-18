@@ -13,7 +13,7 @@ const E = 'sharepw' + Date.now() + '@example.com';
 
 (async () => {
   process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
-  const { sharesStore } = await import(REPO + '/netlify/lib/shares.mjs');
+  const { sharesStore } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/shares.mjs').href);
   const b = await chromium.launch(); const errs = [];
   const A = await (await b.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true, permissions: ['clipboard-read', 'clipboard-write'] })).newPage(); A.on('pageerror', e => errs.push(e.message));
   await A.goto(BASE); await A.click('.auth-create'); await A.fill('#codeEmail', E); await A.click('#emailForm .auth-submit');

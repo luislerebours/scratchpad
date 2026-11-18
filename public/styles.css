@@ -234,16 +234,19 @@ img[data-mark] { transform: translateY(-1px); }
 .tabs-scroller::-webkit-scrollbar { display: none; }
 .sheet-tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .sheet-tabs.reordering .sheet-tab { cursor: grabbing; }
-/* A picked-up tab lifts (grows in smoothly) and follows the pointer: its
-   `translate` is set by app.js on every move, so only scale and shadow ease.
-   While it glides home after letting go (.settling) it stays above the others. */
-.sheet-tabs .sheet-tab.dragging { z-index: 1; scale: 1.06; box-shadow: var(--shadow-menu); transition: scale .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s cubic-bezier(.2, .8, .2, 1); will-change: translate; }
+/* A picked-up tab rises off the row (up 7px, a little bigger, deeper shadow)
+   and the others dim, all easing in. It follows the pointer by its `translate`,
+   which app.js sets on every move (so that doesn't ease); the rise is
+   `transform`. While it glides home after letting go (.settling) it stays above
+   the others, and they brighten again. */
+.sheet-tabs .sheet-tab.dragging { z-index: 1; scale: 1.07; transform: translateY(-7px); box-shadow: var(--shadow-menu); transition: scale .2s cubic-bezier(.2, .8, .2, 1), transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s cubic-bezier(.2, .8, .2, 1); will-change: translate; }
+.sheet-tabs.reordering .sheet-tab:not(.dragging) { opacity: .5; }
 .sheet-tab.settling { z-index: 1; }
 .tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .sheet-tabs { display: flex; gap: 10px; width: max-content; padding: 2px; }
-.sheet-tab { appearance: none; position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 44px; min-width: 84px; max-width: 200px; padding: 2px 20px; border: 1px solid var(--tab-line); border-radius: 12px; background: var(--tab-bg); color: var(--tab-text); font-size: 1rem; font-weight: 600; letter-spacing: -.005em; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
+.sheet-tab { appearance: none; position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 44px; min-width: 84px; max-width: 200px; padding: 2px 20px; border: 1px solid var(--tab-line); border-radius: 12px; background: var(--tab-bg); color: var(--tab-text); font-size: 1rem; font-weight: 600; letter-spacing: -.005em; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, color .15s ease, border-color .15s ease, opacity .2s ease; }
 .sheet-tab::after { content: ''; position: absolute; inset: -2px 0; }
 @media (hover: hover) { .sheet-tab:hover { background: var(--tab-bg-hover); color: var(--text); } }
 .sheet-tab.active { background: linear-gradient(180deg, var(--tab-active-top), var(--tab-active-bottom)); border-color: var(--tab-active-line); color: #fff; box-shadow: var(--tab-active-shadow); }

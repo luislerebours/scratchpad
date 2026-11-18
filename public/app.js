@@ -1728,6 +1728,7 @@ sheetTabsEl.addEventListener('click', e => {
 // scrolls the tabs. With reduced motion everything jumps instead of sliding.
 const TAB_MOVE_MS = 200;
 const TAB_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+const TAB_HOLD_MS = 260; // touch and hold this long to pick a tab up
 let suppressTabClick = false;
 
 // Where a tab sits in the row (ignoring any slide in progress), in page coordinates.
@@ -1796,7 +1797,7 @@ function slideTabs(move) {
   if (!moved.length) return;
   void sheetTabsEl.offsetWidth; // start from where they were...
   for (const t of moved) {
-    t.style.transition = `translate ${TAB_MOVE_MS}ms ${TAB_EASE}`;
+    t.style.transition = `translate ${TAB_MOVE_MS}ms ${TAB_EASE}, opacity ${TAB_MOVE_MS}ms ease`;
     t.style.translate = '0px 0'; // ...and glide to their new places
   }
 }
@@ -1849,7 +1850,7 @@ async function endTabDrag(cancelled = false) {
   sheetTabsEl.classList.remove('reordering');
   // It glides from under the finger into its slot, shrinking back as it lands.
   const glide = prefersReducedMotion() ? 0 : TAB_MOVE_MS;
-  tab.style.transition = glide ? `translate ${glide}ms ${TAB_EASE}, scale ${glide}ms ${TAB_EASE}, box-shadow ${glide}ms ${TAB_EASE}` : 'none';
+  tab.style.transition = glide ? `translate ${glide}ms ${TAB_EASE}, transform ${glide}ms ${TAB_EASE}, scale ${glide}ms ${TAB_EASE}, box-shadow ${glide}ms ${TAB_EASE}` : 'none';
   tab.classList.add('settling');
   tab.classList.remove('dragging');
   tab.style.translate = '0px 0';
@@ -1878,7 +1879,7 @@ sheetTabsEl.addEventListener('pointerdown', e => {
   const tab = e.target.closest('.sheet-tab');
   if (!tab || e.button > 0 || sheets.length < 2) return;
   tabDrag = { tab, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', active: false };
-  if (!tabDrag.mouse) tabDrag.hold = setTimeout(beginTabDrag, 350);
+  if (!tabDrag.mouse) tabDrag.hold = setTimeout(beginTabDrag, TAB_HOLD_MS);
 });
 window.addEventListener('pointermove', e => {
   if (!tabDrag || e.pointerId !== tabDrag.id) return;

@@ -136,12 +136,21 @@ const E = 'filestabs' + Date.now() + '@example.com';
   await touch('touchEnd'); await sleep(800);
   ok('a quick swipe on the tabs doesn’t reorder them', (await tabsOrder(B)).join() === phoneBefore.join());
   s = await center(1); d = await center(2);
-  await touch('touchStart', s.x, s.y); await sleep(500);
+  await touch('touchStart', s.x, s.y); await sleep(300);
+  ok('holding a tab for 300 ms picks it up (the hold is 260 ms)', await B.$('.sheet-tab.dragging') !== null);
+  await sleep(250);
+  const held = await B.evaluate(() => {
+    const dragged = document.querySelector('.sheet-tab.dragging'); if (!dragged) return null;
+    const others = [...document.querySelectorAll('.sheet-tab:not(.dragging)')];
+    return { lift: others[0].getBoundingClientRect().top - dragged.getBoundingClientRect().top, dim: Math.max(...others.map(t => Number(getComputedStyle(t).opacity))) };
+  });
+  ok('…it rises off the row while the other tabs dim', held && held.lift > 5 && held.dim < 0.6, JSON.stringify(held));
   // One slot along: the finger moves as far as the next tab's right edge is from this one's.
   for (let i = 1; i <= 8; i++) { await touch('touchMove', s.x + (d.right - s.right + 4) * i / 8, s.y); await sleep(30); }
   await B.screenshot({ path: OUT + 'tab-drag.png', clip: { x: 0, y: 40, width: 390, height: 120 } });
   await touch('touchEnd'); await sleep(1200);
   const phoneAfter = await tabsOrder(B);
+  ok('…and after letting go the tabs are bright and level again', await B.evaluate(() => [...document.querySelectorAll('.sheet-tab')].every(t => Number(getComputedStyle(t).opacity) === 1 && getComputedStyle(t).transform === 'none')));
   ok('touch and hold, then drag, moves a tab on a phone', phoneAfter.join() === [phoneBefore[1], phoneBefore[0], ...phoneBefore.slice(2)].join(), `${phoneBefore} → ${phoneAfter}`);
 
   // Holding a dragged tab near the strip's edge scrolls the tabs along.

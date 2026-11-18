@@ -255,7 +255,7 @@ export default withErrors('auth', async (req, context) => {
     }
     if (!validAuth(body.newAuth) || !b64ish(body.byPassword)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
     const { hash, salt } = await hashPassword(body.newAuth);
-    const moved = { ...user, email: next, hash, salt, authV: 2, keyring: { ...user.keyring, byPassword: body.byPassword }, version: user.version + 1, emailChangedAt: Date.now(), previousKeys: [...(user.previousKeys || []), ek].slice(-10) };
+    const moved = { ...user, email: next, hash, salt, authV: 2, keyring: { ...user.keyring, byPassword: body.byPassword }, version: user.version + 1, sessions: [], emailChangedAt: Date.now(), previousKeys: [...(user.previousKeys || []), ek].slice(-10) };
     await store.setJSON(`users/${nek}`, moved);
     await store.delete(`users/${ek}`);
     await store.delete(`email-codes/${ek}`);
@@ -264,7 +264,8 @@ export default withErrors('auth', async (req, context) => {
     await followEmail(moved, ek, nek);
     await notifySync(user.ns, 'session', String(Date.now()));
     await securityNotice(req, user.email, 'email', { to: next });
-    return signedIn(moved);
+    // Every other device was signed out: the devices list starts again with this one.
+    return signedIn(moved, {}, req);
   }
 
   // A new recovery key (the old one stops working). Needs the password.

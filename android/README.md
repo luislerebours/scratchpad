@@ -39,18 +39,32 @@ cd android
 ```
 
 ```bash
-bubblewrap update
+bubblewrap update --skipVersionUpgrade
 ```
+
+(`update` raises the version each time unless told not to; drop the flag for
+a new release, or raise `appVersionCode` by hand.)
 
 ```bash
-bubblewrap build
+bubblewrap build --skipPwaValidation
 ```
 
-The first `build` asks to create the signing key `scrapsheet-upload.keystore`
-(alias `scrapsheet-upload`). This is the **upload key**: back it up somewhere
-safe with its passwords and never commit it. With Play App Signing (the
-default), Google holds the real app signing key, and a lost upload key can be
-reset through Play Console support.
+(The flag skips an online quality check of the website that the app doesn't
+need.)
+
+**The upload key** `scrapsheet-upload.keystore` (alias `scrapsheet-upload`)
+was made on November 18, 2026 and lives only on the owner's PC (and its
+backup), never in the repo. `build` asks for its passwords (the same one
+twice) but never creates a key: only `bubblewrap init` does. To make one again,
+run the JDK's keytool in a regular PowerShell window (the Claude app's terminal
+doesn't pass hidden password typing to Java):
+
+```powershell
+& "$env:USERPROFILE.bubblewrapjdkjdk-17.0.11+9inkeytool.exe" -genkeypair -v -keystore scrapsheet-upload.keystore -alias scrapsheet-upload -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Sector 809 Labs LLC, O=Sector 809 Labs LLC, C=US"
+```
+
+With Play App Signing (the default), Google holds the real app signing key,
+and a lost upload key can be reset through Play Console support.
 
 `build` makes `app-release-bundle.aab` (upload this to Play Console) and a
 signed `app-release-signed.apk` (to install on a phone directly).
@@ -58,10 +72,16 @@ signed `app-release-signed.apk` (to install on a phone directly).
 If Gradle fails with "429 Too Many Requests" from Maven Central, wait a minute
 and run `bubblewrap build` again (downloads are cached).
 
-## After the first upload
+## Fingerprints (Digital Asset Links)
+
+The upload key's SHA-256 is already in `public/.well-known/assetlinks.json` and
+`twa-manifest.json` (`fingerprints`), so a phone with the APK installed
+directly opens full screen.
+
+After the first upload:
 
 1. Play Console → Test and release → App integrity → App signing: copy the
-   **SHA-256** of the app signing key (and the upload key's).
-2. Put both in `public/.well-known/assetlinks.json` and deploy. Without it the
+   **SHA-256** of the app signing key.
+2. Add it to `public/.well-known/assetlinks.json` (and `fingerprints`) and deploy. Without it the
    app shows a browser bar instead of running full screen. Check it with
    `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://scrap.sector809labs.com&relation=delegate_permission/common.handle_all_urls`.

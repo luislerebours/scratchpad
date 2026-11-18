@@ -58,7 +58,12 @@
     }
   },
   "orientation": "default",
-  "fingerprints": [],
+  "fingerprints": [
+    {
+      "name": "upload",
+      "value": "7E:B1:87:BE:32:3D:B6:D0:2E:EB:63:F9:F2:DB:0F:37:59:6C:A6:09:55:8B:02:E1:B6:09:1A:13:BE:78:65:91"
+    }
+  ],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],
   "protocolHandlers": [],

@@ -1,0 +1,40 @@
+// The paperclip + file count sits beside Copy and jumps to the Files section.
+const REPO = require('path').resolve(__dirname, '../..');
+const OUT = require('path').join(__dirname, 'out') + '/'; require('fs').mkdirSync(OUT + 'store/raw', { recursive: true });
+const { chromium } = require('playwright'); const fs = require('fs');
+const BASE = 'http://localhost:8970'; 
+const lastCode = email => [...fs.readFileSync(__dirname + '/server.log', 'utf8').matchAll(/\[dev mail\] to (\S+): code (\S+)/g)].filter(x => x[1] === email).pop()[2];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let fails = 0; const ok = (n, c, x = '') => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`); };
+const E = 'attach' + Date.now() + '@example.com';
+(async () => {
+  const b = await chromium.launch(); const errs = [];
+  const p = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); p.on('pageerror', e => errs.push(e.message));
+  await p.goto(BASE); await p.click('.auth-create'); await p.fill('#codeEmail', E); await p.click('#emailForm .auth-submit');
+  await p.waitForSelector('#codeForm:not([hidden])'); await p.fill('#codeInput', lastCode(E)); await p.click('#codeForm .auth-submit');
+  await p.waitForSelector('#passwordForm:not([hidden])'); await p.fill('#newPassword', 'pass-12345'); await p.click('#passwordForm .auth-submit');
+  await p.waitForSelector('#recoveryKeyForm:not([hidden])', { timeout: 15000 }); await p.check('#recoverySaved'); await p.click('#recoveryKeyForm .auth-submit');
+  await p.waitForSelector('.app-shell', { state: 'visible' }); await sleep(1000);
+  ok('no files: no paperclip', await p.isHidden('#attachLink'));
+  await p.click('#scratchpad'); await p.keyboard.type('Line one\n'.repeat(40));
+  await p.setInputFiles('#fileInput', ['a.txt', 'b.txt', 'c.txt'].map(n => ({ name: n, mimeType: 'text/plain', buffer: Buffer.from(n) })));
+  await p.waitForFunction(() => document.querySelectorAll('#fileList .file-row').length === 3, null, { timeout: 20000 });
+  await p.evaluate(() => window.scrollTo(0, 0)); await sleep(300);
+  const order = await p.$$eval('.pad-actions > *', els => els.filter(e => !e.hidden).map(e => e.id));
+  ok('order: Copy, then paperclip + count, then •••', JSON.stringify(order) === '["copyBtn","attachLink","sheetMenuBtn"]', JSON.stringify(order));
+  ok('shows just the number', (await p.textContent('#attachText')).trim() === '3' && await p.isVisible('#attachText'));
+  ok('says what it is to screen readers', (await p.getAttribute('#attachLink', 'aria-label')) === '3 attachments: go to Files');
+  ok('nothing left at the bottom but Tips', (await p.$$('.pad-footer #attachLink')).length === 0);
+  await p.screenshot({ path: OUT + 'attach-phone.png', clip: { x: 0, y: 0, width: 390, height: 360 } });
+  await p.tap('#attachLink'); await sleep(900);
+  const top = await p.$eval('#filesSection', el => el.getBoundingClientRect().top);
+  ok('tapping it brings you to Files', top >= -2 && top < 120, String(top));
+  const d = await b.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 }); d.on('pageerror', e => errs.push(e.message));
+  await d.goto(BASE); await d.fill('#signinEmail', E); await d.fill('#signinPassword', 'pass-12345'); await d.click('#signinForm .auth-submit');
+  await d.waitForSelector('.app-shell', { state: 'visible' }); await d.waitForSelector('#attachLink:not([hidden])'); await sleep(500);
+  await d.screenshot({ path: OUT + 'attach-desktop.png', clip: { x: 0, y: 0, width: 1280, height: 330 } });
+  await d.click('#attachLink'); await sleep(900);
+  { const r = await d.evaluate(() => [document.querySelector('#filesSection').getBoundingClientRect().top, scrollY, document.documentElement.scrollHeight - innerHeight]); ok('desktop: click brings you to Files (scrolled as far as the page goes)', r[1] > 0 && (Math.abs(r[0]) < 120 || Math.abs(r[1] - r[2]) < 2), JSON.stringify(r)); }
+  ok('no page errors', errs.length === 0, errs.join(' | '));
+  await b.close(); console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+})().catch(e => { console.error(e); process.exit(1); });

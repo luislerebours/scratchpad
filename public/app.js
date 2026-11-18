@@ -16,6 +16,7 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const PARALLEL_CHUNKS = 3;
 const CHUNK_RETRIES = 5;
 const STUCK_AFTER_RETURN_MS = 8000;
+const STALLED_MS = 30000; // a transfer piece with no progress for this long is started again
 const LAST_SHEET_KEY = 'scratchpad:lastSheet';
 const MAX_PREVIEW_BYTES = 3_900_000;
 const PREVIEW_DIM = 2560;
@@ -1878,10 +1879,20 @@ function restartIfStuck(isBusy, lastActivity, restart) {
     clearTimeout(timer);
     timer = setTimeout(() => { if (isBusy() && lastActivity() < back) restart(); }, STUCK_AFTER_RETURN_MS);
   };
+  // A connection can die without the request ever ending (the piece was sent,
+  // the answer never comes). Going offline, or no progress at all for a while
+  // in front, starts the piece again (it then waits for a connection).
+  const onOffline = () => { if (isBusy()) restart(); };
+  const watchdog = setInterval(() => {
+    if (isBusy() && pageActive() && Date.now() - lastActivity() > STALLED_MS) restart();
+  }, 5000);
   document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('offline', onOffline);
   return () => {
     clearTimeout(timer);
+    clearInterval(watchdog);
     document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('offline', onOffline);
   };
 }
 

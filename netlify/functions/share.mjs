@@ -19,7 +19,9 @@ import { onR2, pieceUrl } from '../lib/r2.mjs';
 const DAY = 24 * 60 * 60 * 1000;
 const DAY_CHOICES = new Set([1, 7, 30]);
 const KEEP_ENDED_MS = 30 * DAY; // ended links stay in the owner's list this long
-const CHUNKS_PER_HOUR = 600; // per link: about 2.4 GB of downloads an hour
+// Per link: about 2.4 GB of downloads an hour, counted by piece size (pieces
+// are 4 MB on Netlify, 1 MB in R2).
+const BYTES_PER_HOUR = 2_400_000_000;
 
 const validToken = t => typeof t === 'string' && /^[A-Za-z0-9_-]{24,64}$/.test(t);
 const validId = id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
@@ -77,13 +79,13 @@ async function sheetFiles(files, sheet) {
 }
 
 // A coarse per-hour counter on downloads, so a leaked link can't run up unlimited traffic.
-async function underLimit(token) {
+async function underLimit(token, pieceBytes) {
   const store = sharesStore();
   const hour = Math.floor(Date.now() / 3_600_000);
   const key = `count/${token}/${hour}`;
   const used = Number(await store.get(key)) || 0;
-  if (used >= CHUNKS_PER_HOUR) return false;
-  await store.set(key, String(used + 1));
+  if (used >= BYTES_PER_HOUR) return false;
+  await store.set(key, String(used + pieceBytes));
   // Starting a new hour: last hour's count is no longer needed.
   if (!used) await store.delete(`count/${token}/${hour - 1}`);
   return true;
@@ -196,7 +198,7 @@ async function visitor(req, url, token) {
     const record = await fileOfShare(fileId);
     const chunk = Number(url.searchParams.get('chunk'));
     if (!record || !Number.isInteger(chunk) || chunk < 0 || chunk >= record.chunks) return publicJson({ error: 'Not found' }, 404);
-    if (!(await underLimit(token))) return publicJson({ error: 'This link is busy. Try again in an hour.' }, 429);
+    if (!(await underLimit(token, record.chunkSize || 4_000_000))) return publicJson({ error: 'This link is busy. Try again in an hour.' }, 429);
     // In R2: counted here, then downloaded from there.
     if (onR2(record)) {
       return new Response(null, { status: 302, headers: { Location: await pieceUrl(share.ns, share.sheet, record, chunk), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });

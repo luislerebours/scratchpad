@@ -50,7 +50,9 @@ to what the app collects); `branding/play-store/` the listing kit.
   - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin-api.mjs`: the admin dashboard's API (see "Admin dashboard" below)
-  - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
+  - `files.mjs`: per-sheet file uploads in chunks (up to 100 MB): 4 MB on
+    Netlify, 1 MB in R2 (`record.chunkSize`; a piece cut off on a slow phone
+    connection loses less),
     plus a small thumbnail for images (made in the browser, `thumb=1`).
     With `FILES_R2=1` (and `SYNC_URL`), new uploads' chunks live in Cloudflare
     R2 (`netlify/lib/r2.mjs`, record `store: 'r2'`): the page PUTs each piece
@@ -66,7 +68,7 @@ to what the app collects); `branding/play-store/` the listing kit.
     until it expires (1, 7 or 30 days) or is turned off. One link per file or
     sheet; a link stops working if what it shares is deleted. Links live in the
     `scratchpad-shares` store; each account lists its tokens in `meta/shares`.
-    Downloads are capped per link per hour. Viewer pages are noindex/no-referrer.
+    Downloads are capped per link per hour (about 2.4 GB, counted by piece size). Viewer pages are noindex/no-referrer.
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none),
   enforced when an upload starts; an admin can change it from the admin
@@ -278,8 +280,10 @@ to what the app collects); `branding/play-store/` the listing kit.
 - Transfers already running (uploads, pasted images, downloads) don't fail when
   the page goes to the background or offline: `withRetry` waits (`whenActive`)
   without using up tries and carries on from the piece it was on (pieces already
-  sent stay sent). A piece stuck after coming back restarts after 8 s
-  (`restartIfStuck`). Only a refusal from the server (4xx) or Cancel ends one.
+  sent stay sent). A piece stuck after coming back restarts after 8 s, and
+  one with no progress for 30 s in front, or when the browser goes offline, is
+  sent again (`restartIfStuck`); an abort only counts as Cancel when the Cancel
+  signal fired (phones abort transfers themselves on an app switch). Only a refusal from the server (4xx) or Cancel ends one.
   Upload rows say "Keep ScrapSheet open until uploads finish."; a page that is
   closed (or that the phone discards) still loses its upload.
 - Share to ScrapSheet (installed app on Android): `share_target` in the

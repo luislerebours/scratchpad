@@ -10,7 +10,10 @@ import { onR2, pieceSizes, pieceUrl, r2Enabled, uploadTarget } from '../lib/r2.m
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
+// Pieces: 4 MB on Netlify (fewer function calls), 1 MB in R2, so on a slow
+// phone connection a piece cut off by an app switch loses at most 1 MB.
 const CHUNK_BYTES = 4 * 1000 * 1000;
+const R2_CHUNK_BYTES = 1000 * 1000;
 // A small square the page makes from an image, shown in the file list.
 const MAX_THUMB_BYTES = 64 * 1024;
 const THUMB_TYPES = new Set(['image/jpeg', 'image/webp', 'image/png']);
@@ -72,23 +75,25 @@ export default withErrors('files', async req => {
       if (full) return json({ error: full, quota: true }, 413);
     }
 
+    const toR2 = r2Enabled();
+    const pieceBytes = toR2 ? R2_CHUNK_BYTES : CHUNK_BYTES;
     const record = {
       id: randomUUID(),
       name: sealed ? body.name : String(body?.name || 'file').slice(0, 200),
       type: sealed ? body.type : String(body?.type || 'application/octet-stream').slice(0, 200),
       size,
-      chunkSize: CHUNK_BYTES,
-      chunks: Math.max(1, Math.ceil(size / CHUNK_BYTES)),
+      chunkSize: pieceBytes,
+      chunks: Math.max(1, Math.ceil(size / pieceBytes)),
       complete: false,
       startedAt: Date.now(),
       // New uploads go to Cloudflare R2 when it's switched on (see lib/r2.mjs).
-      ...(r2Enabled() ? { store: 'r2' } : {}),
+      ...(toR2 ? { store: 'r2' } : {}),
       ...(sealed ? { enc: 1, key: body.key } : {}),
       ...(old ? { migrateFrom: old.id, keepDates: { uploadedAt: old.uploadedAt, kept: Boolean(old.kept), deletedAt: old.deletedAt || null } } : {})
     };
     await store.records.setJSON(record.id, record);
     // R2: the page sends each piece straight there (PUT `${upload.url}&i=<piece>`).
-    const upload = onR2(record) ? await uploadTarget(auth.ns, sheet, record, CHUNK_BYTES + SEALED_OVERHEAD) : null;
+    const upload = onR2(record) ? await uploadTarget(auth.ns, sheet, record, record.chunkSize + SEALED_OVERHEAD) : null;
     return json({ id: record.id, chunkSize: record.chunkSize, chunks: record.chunks, ...(upload ? { upload } : {}) });
   }
 

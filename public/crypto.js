@@ -51,6 +51,18 @@ export async function passwordKeys(email, password) {
   return { auth, kek };
 }
 
+// ---- A share link's password ----
+// One PBKDF2 run gives a proof (sent to the server, which keeps only a one-way
+// hash of it and asks for it before serving the link) and a key that locks the
+// item's key inside the link. The password itself never leaves the device.
+export const newLinkSalt = () => toB64(random(16));
+
+export async function linkPasswordKeys(password, salt) {
+  const base = await subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations: KDF_ITERATIONS }, base, 512));
+  return { proof: toB64(bits.slice(0, 32)), kek: await subtle.importKey('raw', bits.slice(32), AES, false, ['wrapKey', 'unwrapKey']) };
+}
+
 // ---- Recovery key: 20 random bytes as 32 letters and digits, in groups of four ----
 
 const B32 = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0 or 1 to misread

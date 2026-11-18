@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { deviceOf } from './device.mjs';
 import {
   createHash, createHmac, createPrivateKey, generateKeyPairSync, randomBytes, randomInt, scrypt,
   sign as signBytes, timingSafeEqual
@@ -237,9 +238,25 @@ export async function pruneRates({ max = 300 } = {}) {
 
 // ---- Sessions ----
 
-export async function sessionCookie(user) {
+// Signed-in devices: each sign-in has an id (in its cookie) and an entry on the
+// account, { id, device, createdAt, lastSeen }, newest 20 kept. Signing a device
+// out removes its entry, and its cookie stops working. Cookies from before
+// there were ids keep working and get one when renewed.
+export const MAX_SESSIONS = 20;
+
+export function withSession(user, req, sid = null) {
   const now = Date.now();
-  const token = await sign({ t: 's', ek: emailKey(user.email), v: user.version, iat: now, exp: now + SESSION_MS });
+  const list = Array.isArray(user.sessions) ? user.sessions : [];
+  const id = sid || randomBytes(9).toString('base64url');
+  const existing = list.find(s => s.id === id);
+  const entry = existing ? { ...existing, lastSeen: now } : { id, device: deviceOf(req), createdAt: now, lastSeen: now };
+  const sessions = [entry, ...list.filter(s => s.id !== id)].sort((a, b) => b.lastSeen - a.lastSeen).slice(0, MAX_SESSIONS);
+  return { user: { ...user, sessions }, sid: id };
+}
+
+export async function sessionCookie(user, sid = null) {
+  const now = Date.now();
+  const token = await sign({ t: 's', ek: emailKey(user.email), v: user.version, ...(sid ? { sid } : {}), iat: now, exp: now + SESSION_MS });
   return `${COOKIE}=${token}; Path=/; Max-Age=${SESSION_MS / 1000}; HttpOnly; Secure; SameSite=Lax`;
 }
 
@@ -269,8 +286,9 @@ export async function requireUser(req) {
   if (!session || session.t !== 's') return { error: json({ error: 'Sign in required' }, 401) };
   const user = await authStore().get(`users/${session.ek}`, { type: 'json' });
   // A deactivated account (admin dashboard) can't use its sessions.
-  if (!user || user.version !== session.v || user.disabledAt) {
+  // Also refused: a device that was signed out on its own (its entry is gone).
+  if (!user || user.version !== session.v || user.disabledAt || (session.sid && !(user.sessions || []).some(s => s.id === session.sid))) {
     return { error: json({ error: 'Sign in required' }, 401, { 'Set-Cookie': clearedCookie() }) };
   }
-  return { user, ns: user.ns };
+  return { user, ns: user.ns, sid: session.sid || null };
 }

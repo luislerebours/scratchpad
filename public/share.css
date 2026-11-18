@@ -45,6 +45,10 @@ body.share-page { min-height: 100dvh; }
 .share-problem-mark { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 8px; border-radius: 50%; background: var(--raised); color: var(--muted); }
 .share-problem-mark .i { width: 28px; height: 28px; }
 .share-problem .share-title { font-size: 1.375rem; }
+.share-password { justify-items: stretch; }
+.share-password .share-problem-mark { justify-self: center; }
+.share-password .rename-input { width: 100%; margin-top: 12px; }
+.share-password .auth-error { min-height: 1.2em; margin: 6px 0 2px; }
 
 .share-foot { display: flex; align-items: flex-start; justify-content: center; gap: 8px; margin-top: 18px; color: var(--faint); font-size: .8125rem; text-align: center; }
 .share-foot .i { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; }

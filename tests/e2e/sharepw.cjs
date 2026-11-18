@@ -29,7 +29,9 @@ const E = 'sharepw' + Date.now() + '@example.com';
   // ---- Create a file link with a password ----
   await A.click('#fileList .file-row [data-file-menu]'); await A.click('.menu-item:has-text("link")');
   await A.waitForSelector('[data-share-create]');
+  const whoBefore = await A.textContent('[data-share-who]');
   await A.click('.share-pw-box summary'); await A.fill('#sharePwNew', 'blue-river');
+  ok('typing a password says only people with it can open the link', whoBefore.startsWith('Anyone with the link can') && (await A.textContent('[data-share-who]')).startsWith('Anyone with the link and the password can'), await A.textContent('[data-share-who]'));
   await A.screenshot({ path: OUT + 'share-pw-create.png' });
   await A.click('[data-share-create]');
   await A.waitForSelector('#shareUrlInput');

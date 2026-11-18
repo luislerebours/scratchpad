@@ -1,5 +1,6 @@
 import { MAX_SHEETS, userStore } from './auth.mjs';
 import { limitsFor } from './plans.mjs';
+import { versionsSummary } from './versions.mjs';
 
 // Storage per account: what it holds, and its limit (the plan's, unless the admin set one).
 
@@ -39,11 +40,13 @@ export async function accountUsage(ns) {
     const text = doc ? Buffer.byteLength(doc.text || '') + Buffer.byteLength(doc.html || '') : 0;
     return { text, files, images };
   }));
+  // Earlier versions of the text (Version history) take space too.
+  const versions = await versionsSummary(ns, Array.from({ length: MAX_SHEETS }, (_, i) => i + 1));
   return perSheet.reduce((sum, s) => ({
     bytes: sum.bytes + s.text + s.files.bytes + s.images.bytes,
     files: sum.files + s.files.count,
     images: sum.images + s.images.count
-  }), { bytes: 0, files: 0, images: 0 });
+  }), { bytes: versions.bytes, files: 0, images: 0 });
 }
 
 function size(n) {

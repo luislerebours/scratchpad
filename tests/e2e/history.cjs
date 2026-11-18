@@ -100,9 +100,13 @@ const FIRST = 'Grocery list\nMilk, eggs, bread, coffee beans, olive oil and lemo
   // ---- An empty history ----
   await A.click('.sheet-tab >> nth=1'); await sleep(800);
   await A.click('#sheetMenuBtn'); await A.click('.menu-item:has-text("Version history")');
-  await A.waitForSelector('#historyModal:not([hidden]) .trash-empty');
+  // ("Loading…" uses the same class, so wait for the answer itself.)
+  await A.waitForSelector('#historyModal:not([hidden]) .trash-empty:not(:text("Loading"))').catch(() => {});
   ok('a sheet with no history says so', (await A.textContent('#historyBody')).includes('No earlier versions yet'));
+  // Escape closes it from anywhere on the page (the page-wide handler), not only from inside it.
+  await A.evaluate(() => document.activeElement?.blur());
   await A.keyboard.press('Escape');
+  ok('Escape closes Version history, even with focus outside it', await A.isHidden('#historyModal'));
 
   // ---- Deleting the sheet for good clears its versions ----
   await A.click('.sheet-tab >> nth=0'); await sleep(800);

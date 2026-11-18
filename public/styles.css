@@ -585,6 +585,13 @@ body.dragging-files .files.drag-active
 .trash-row .link-btn { padding: 0 10px; font-weight: 600; }
 .trash-row .icon-btn { color: var(--danger); }
 .trash-empty { padding: 28px 0 16px; color: var(--muted); }
+.history-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.history-when { font-weight: 600; }
+.history-size { color: var(--muted); font-size: .875rem; }
+.history-preview { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--files-bg); color: var(--text); font-size: .9375rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; }
+.history-preview.empty { color: var(--muted); font-style: italic; }
+.history-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 .trash-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-weight: 600; }
 .trash-foot { display: flex; justify-content: flex-end; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
 

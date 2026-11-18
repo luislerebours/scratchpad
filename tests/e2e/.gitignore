@@ -1,0 +1,10 @@
+# Made when the tests run: never committed.
+blobdata/
+gcdata/
+out/
+*.log
+pubkey.txt
+playkey.json
+playkey.pub.pem
+deploy-salt.txt
+*.bin

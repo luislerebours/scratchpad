@@ -41,6 +41,15 @@ to what the app collects); `branding/play-store/` the listing kit.
   does not carry over to the next.
 - Work on a branch, test, push the branch, then ask.
 
+## Testing and handoff
+
+- `tests/e2e/` has the browser tests and a local copy of every service (site,
+  Blobs, sync relay with R2, fake Google Play): `NEW_ACCOUNT_PLAN=pro bash
+  reset.sh`, then `node <test>.cjs`. See its README for settings and gotchas.
+  Add a test there for every new feature.
+- `docs/HANDOFF.md`: what's in flight, the live setup, past decisions and
+  costs, how the owner works, and what's left.
+
 ## Layout
 
 - `public/` is the static site (`index.html`, `app.js`, `styles.css`).
@@ -250,6 +259,15 @@ to what the app collects); `branding/play-store/` the listing kit.
   re-encrypted and the recovery key keeps working. The server checks the current
   sign-in secret, bumps `version` (every other device signed out; this one gets a
   new cookie) and sends the `password` security notice.
+- Version history (`netlify/lib/versions.mjs`, `state?sheet=N&meta=versions[&at=]`,
+  `openHistory()` in `app.js`): before a save replaces a sheet's text, the stored
+  text is kept as a version (a copy, so locked text stays locked): at most once
+  every 10 minutes while typing, and always when the save sends `checkpoint: 1`
+  (clearing, restoring, or most of the text gone). Up to 20 per sheet for 30
+  days, in the state store (`versions/<sheet>/<at>`, index `vindex/<sheet>` with
+  sizes and image ids). They count toward storage, their images aren't cleaned
+  up, and wiping a sheet slot clears them. Sheet menu → Version history…: list,
+  Show (unlocked on the device), Restore (with Undo). Clear sheet text has Undo.
 - Change email (`openChangeEmail()` in `app.js`, `auth?action=email-code` then
   `change-email`): new email + password, then a code sent to the new address.
   The email salts the password key, so the device re-derives the sign-in secret

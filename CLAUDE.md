@@ -305,9 +305,11 @@ to what the app collects); `branding/play-store/` the listing kit.
   `move-start` / `move-piece` (one piece per call, from Netlify or R2 into the
   same kind of storage) / `move-finish` (checks every piece, keeps the dates,
   deletes the original for good, so its share link ends).
-- Sheet tabs can be dragged to reorder them (mouse; touch and hold 350 ms on a
-  phone, a quick swipe still scrolls): `meta=sheets` action `reorder`. The
-  picked-up tab lifts and follows the pointer along the row (`translate`); the
+- Sheet tabs can be dragged to reorder them (mouse; touch and hold 260 ms on a
+  phone, `TAB_HOLD_MS`, a quick swipe still scrolls): `meta=sheets` action
+  `reorder`. The picked-up tab rises off the row (up 7px, `scale: 1.07`,
+  deeper shadow) while the others dim to half, and it follows the pointer along
+  the row (`translate`); the
   others slide aside in 200 ms when its edge passes their middle (FLIP in
   `slideTabs()`); letting go it glides into its slot. Holding near an edge
   scrolls the row. Reduced motion: no sliding. A tab list that arrives

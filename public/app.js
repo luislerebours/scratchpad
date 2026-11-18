@@ -3513,8 +3513,8 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
     // piece and the thumbnail are locked with it.
     const key = isLocked() ? await vault.newKey() : null;
     const meta = key
-      ? { name: await vault.encryptText(key, file.name), type: await vault.encryptText(key, file.type || 'application/octet-stream'), size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), ...extra }
-      : { name: file.name, type: file.type, size: file.size };
+      ? { name: await vault.encryptText(key, file.name), type: await vault.encryptText(key, file.type || 'application/octet-stream'), size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), direct: 1, ...extra }
+      : { name: file.name, type: file.type, size: file.size, direct: 1 };
     const wait = why => transfer.waiting(why);
     const start = await withRetry(() => postJson(filesUrl(targetSheet, 'action=start'), meta), transfer.signal, wait);
     id = start.id;

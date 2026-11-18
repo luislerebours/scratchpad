@@ -5,6 +5,7 @@ import { isSealed, isWrappedKey } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { accountUsage, overQuota } from '../lib/usage.mjs';
 import { withErrors } from '../lib/errors.mjs';
+import { onR2, pieceSizes, pieceUrl, r2Enabled, uploadTarget } from '../lib/r2.mjs';
 
 // Netlify functions accept roughly 4.5 MB of binary per request, so files
 // travel in chunks: each upload/download request carries one chunk.
@@ -34,7 +35,7 @@ export default withErrors('files', async req => {
   if (req.method === 'GET' && !id) {
     const { store, records } = await readRecords(auth.ns, sheet);
     for (const record of records) {
-      if (!record.complete && Date.now() - record.startedAt > STALE_UPLOAD_MS) await deleteFileForGood(store, record);
+      if (!record.complete && Date.now() - record.startedAt > STALE_UPLOAD_MS) await deleteFileForGood(store, record).catch(err => console.error('Clearing an abandoned upload', err.message));
     }
     // ?all=1: also Recently Deleted, for locking files from before encryption.
     if (url.searchParams.get('all') === '1') {
@@ -80,11 +81,15 @@ export default withErrors('files', async req => {
       chunks: Math.max(1, Math.ceil(size / CHUNK_BYTES)),
       complete: false,
       startedAt: Date.now(),
+      // New uploads go to Cloudflare R2 when it's switched on (see lib/r2.mjs).
+      ...(r2Enabled() ? { store: 'r2' } : {}),
       ...(sealed ? { enc: 1, key: body.key } : {}),
       ...(old ? { migrateFrom: old.id, keepDates: { uploadedAt: old.uploadedAt, kept: Boolean(old.kept), deletedAt: old.deletedAt || null } } : {})
     };
     await store.records.setJSON(record.id, record);
-    return json({ id: record.id, chunkSize: record.chunkSize, chunks: record.chunks });
+    // R2: the page sends each piece straight there (PUT `${upload.url}&i=<piece>`).
+    const upload = onR2(record) ? await uploadTarget(auth.ns, sheet, record, CHUNK_BYTES + SEALED_OVERHEAD) : null;
+    return json({ id: record.id, chunkSize: record.chunkSize, chunks: record.chunks, ...(upload ? { upload } : {}) });
   }
 
   if (!validId(id)) return json({ error: 'Invalid id' }, 400);
@@ -99,6 +104,7 @@ export default withErrors('files', async req => {
   // Upload one chunk as the raw request body.
   if (req.method === 'PUT' && chunkIndex !== null) {
     if (record.complete) return json({ error: 'Upload already finished' }, 409);
+    if (onR2(record)) return json({ error: 'Reload ScrapSheet to keep uploading.' }, 409);
     const data = await req.arrayBuffer();
     const expected = Math.min(record.chunkSize, record.size - chunkIndex * record.chunkSize) + (record.enc ? SEALED_OVERHEAD : 0);
     if (data.byteLength !== expected) return json({ error: 'Wrong chunk size' }, 400);
@@ -132,11 +138,19 @@ export default withErrors('files', async req => {
 
   // Finish an upload once every chunk has arrived.
   if (req.method === 'POST' && action === 'finish') {
-    const present = await Promise.all(
-      Array.from({ length: record.chunks }, (_, i) => store.chunks.getMetadata(chunkKey(id, i)))
-    );
-    const missing = present.findIndex(meta => !meta);
-    if (missing !== -1) return json({ error: `Chunk ${missing} missing` }, 400);
+    if (onR2(record)) {
+      // Every piece in R2, each exactly the size it should be.
+      const sizes = await pieceSizes(auth.ns, sheet, record);
+      const expected = i => Math.min(record.chunkSize, record.size - i * record.chunkSize) + (record.enc ? SEALED_OVERHEAD : 0);
+      const wrong = sizes.findIndex((size, i) => size !== expected(i));
+      if (wrong !== -1) return json({ error: `Chunk ${wrong} ${sizes[wrong] === null ? 'missing' : 'is the wrong size'}` }, 400);
+    } else {
+      const present = await Promise.all(
+        Array.from({ length: record.chunks }, (_, i) => store.chunks.getMetadata(chunkKey(id, i)))
+      );
+      const missing = present.findIndex(meta => !meta);
+      if (missing !== -1) return json({ error: `Chunk ${missing} missing` }, 400);
+    }
     let done = { ...record, complete: true, uploadedAt: Date.now() };
     if (record.migrateFrom) {
       // The locked copy takes the old file's place: same dates, then the old one goes.
@@ -155,6 +169,10 @@ export default withErrors('files', async req => {
   // Download one chunk.
   if (req.method === 'GET' && chunkIndex !== null) {
     if (!record.complete) return json({ error: 'Upload not finished' }, 409);
+    // In R2: sent there to download it (nothing passes through Netlify).
+    if (onR2(record)) {
+      return new Response(null, { status: 302, headers: { Location: await pieceUrl(auth.ns, sheet, record, chunkIndex), 'Cache-Control': 'private, max-age=3600' } });
+    }
     const data = await store.chunks.get(chunkKey(id, chunkIndex), { type: 'arrayBuffer' });
     if (!data) return json({ error: 'Chunk missing' }, 404);
     return new Response(data, {

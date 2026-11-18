@@ -16,7 +16,8 @@ Google's rules that decide the answers
   file names and types, thumbnails) is locked on the device with AES-256 and
   the server never has the keys, so none of it is declared.
 - Sending data to a **service provider** that processes it for us (Netlify
-  hosting, Resend email, Stripe, Google Play, Cloudflare sync relay) is not
+  hosting, Resend email, Stripe, Google Play, Cloudflare sync relay and R2 file
+  storage) is not
   *sharing*.
 
 ### Overview questions

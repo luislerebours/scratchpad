@@ -51,7 +51,15 @@ to what the app collects); `branding/play-store/` the listing kit.
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin-api.mjs`: the admin dashboard's API (see "Admin dashboard" below)
   - `files.mjs`: per-sheet file uploads in 4 MB chunks (up to 100 MB),
-    plus a small thumbnail for images (made in the browser, `thumb=1`)
+    plus a small thumbnail for images (made in the browser, `thumb=1`).
+    With `FILES_R2=1` (and `SYNC_URL`), new uploads' chunks live in Cloudflare
+    R2 (`netlify/lib/r2.mjs`, record `store: 'r2'`): the page PUTs each piece
+    to the relay (`/files/up`) with a pass Netlify signs with the sync key;
+    `finish` checks sizes through the relay; chunk GETs (owner and share
+    links, still counted per piece) 302 to the relay's `/files/get`, so
+    downloads never pass through Netlify. Older files stay in Blobs. Deleting
+    a file for good, or wiping a sheet slot, clears its R2 objects. The relay
+    never overwrites a stored piece.
   - `images.mjs`: images in the text (chunked original plus a display copy)
   - `share.mjs`: share links. A file, or a sheet with its text, images and
     files, for anyone with `/s/<token>` (viewer: `public/share.html`/`share.js`)
@@ -166,7 +174,9 @@ to what the app collects); `branding/play-store/` the listing kit.
   `netlify/edge-functions/check.js` (`/api/check`) is the safety-net check: once
   a minute, on return to the page, and every 2 s while the relay is unreachable.
   Without `SYNC_URL`, devices just use the 2-second check.
-- Deploy the relay from `sync-worker/` with `npx wrangler deploy`.
+- Deploy the relay from `sync-worker/` with `npx wrangler deploy` (it binds the R2
+  bucket `scrapsheet-files`: create it once with
+  `npx wrangler r2 bucket create scrapsheet-files` before deploying).
 - Stored html is sanitized on every load and save.
 - UI: colors and sizes are tokens at the top of `public/styles.css`: dark in
   `:root`, light (warm paper, teal) in `:root[data-theme="light"]`. Use tokens,

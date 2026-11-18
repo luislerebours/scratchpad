@@ -15,6 +15,7 @@ import { applySubscription, stripe, stripeReady } from '../lib/stripe.mjs';
 import { applyPlay, getSubscription, playReady } from '../lib/play.mjs';
 import { accountUsage, quotaFor } from '../lib/usage.mjs';
 import { deleteAccount } from '../lib/account.mjs';
+import { r2Enabled } from '../lib/r2.mjs';
 import { securityNotice } from '../lib/notices.mjs';
 
 // The admin dashboard's API (/admin). Every action except signing in checks
@@ -468,6 +469,7 @@ async function adminRead(req, admin, view) {
         playNotices: Boolean(env('PLAY_RTDN_SECRET')),
         email: Boolean(env('RESEND_API_KEY') && env('MAIL_FROM')),
         sync: Boolean(env('SYNC_URL')),
+        filesR2: r2Enabled(),
         legacyOwnerEmail: Boolean(env('OWNER_EMAIL')),
         setupToken: setupConfigured()
       }

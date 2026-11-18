@@ -14,6 +14,12 @@ class_name = "Room"
 tag = "v1"
 new_sqlite_classes = ["Room"]
 
+# File pieces (end-to-end encrypted) for Netlify's file uploads. Create once:
+#   npx wrangler r2 bucket create scrapsheet-files
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "scrapsheet-files"
+
 [vars]
 # Netlify's sync public key: GET https://scratch.sector809labs.com/.netlify/functions/sync?action=key
 PUBLIC_KEY = "M7dqzUBr/6KCRGsNpqJLTCFQJgaHgd6TtcHoAtPp86A="

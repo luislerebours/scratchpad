@@ -5,6 +5,7 @@ import { ended, readShareIndex as readIndex, readShares, sharesStore, writeShare
 import { readSheets } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { withErrors } from '../lib/errors.mjs';
+import { onR2, pieceUrl } from '../lib/r2.mjs';
 
 // Share links: anyone with the link can view and download a file, or a sheet
 // with its text, images and files, until the link expires or is turned off.
@@ -196,6 +197,10 @@ async function visitor(req, url, token) {
     const chunk = Number(url.searchParams.get('chunk'));
     if (!record || !Number.isInteger(chunk) || chunk < 0 || chunk >= record.chunks) return publicJson({ error: 'Not found' }, 404);
     if (!(await underLimit(token))) return publicJson({ error: 'This link is busy. Try again in an hour.' }, 429);
+    // In R2: counted here, then downloaded from there.
+    if (onR2(record)) {
+      return new Response(null, { status: 302, headers: { Location: await pieceUrl(share.ns, share.sheet, record, chunk), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
+    }
     const data = await fileStores(share.ns, share.sheet).chunks.get(`${record.id}-${chunk}`, { type: 'arrayBuffer' });
     return data ? bytesResponse(data, 'application/octet-stream') : publicJson({ error: 'Not found' }, 404);
   }

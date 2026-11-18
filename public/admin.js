@@ -744,6 +744,7 @@ const SERVICE_LABELS = {
   playNotices: ['Google Play notices (PLAY_RTDN_SECRET)', v => (v ? 'set' : 'not set')],
   email: ['Sign-in email (Resend)', v => (v ? 'set up' : 'not set up')],
   sync: ['Real-time sync relay', v => (v ? 'set up' : 'off (devices check every 2 s)')],
+  filesR2: ['New files stored in', v => (v ? 'Cloudflare R2 (FILES_R2=1)' : 'Netlify Blobs (FILES_R2 off)')],
   legacyOwnerEmail: ['OWNER_EMAIL', v => (v ? 'still set but no longer used: you can remove it' : 'not set (not needed)')],
   setupToken: ['ADMIN_SETUP_TOKEN', v => (v ? 'set: no longer needed after the first admin, you can remove it' : 'not set')]
 };

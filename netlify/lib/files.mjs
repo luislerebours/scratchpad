@@ -1,4 +1,5 @@
 import { userStore } from './auth.mjs';
+import { deletePieces, filePrefix, onR2, purge, r2Enabled, sheetPrefix } from './r2.mjs';
 
 // Files and Recently Deleted, shared by files.mjs and state.mjs.
 // Deleting a file or a sheet moves it to Recently Deleted; it is deleted for
@@ -13,6 +14,8 @@ export const expired = deletedAt => Date.now() - Number(deletedAt || 0) > TRASH_
 
 // Records are kept in their own store so listing never touches chunk data.
 export const fileStores = (ns, sheet) => ({
+  ns,
+  sheet,
   records: userStore(ns, 'files', sheet),
   chunks: userStore(ns, 'chunks', sheet),
   thumbs: userStore(ns, 'file-thumbs', sheet)
@@ -37,7 +40,9 @@ export const publicRecord = (record, sheet) => ({
 // Each 4 MB piece of a locked file is 28 bytes bigger (its IV and tag).
 export const SEALED_OVERHEAD = 28;
 
-export async function deleteFileForGood({ records, chunks, thumbs }, record) {
+export async function deleteFileForGood({ ns, sheet, records, chunks, thumbs }, record) {
+  // Pieces in R2 go first; if that fails the record stays, so it's tried again.
+  if (onR2(record)) await deletePieces(filePrefix(ns, sheet, record.id), record.chunks);
   await Promise.all([
     ...Array.from({ length: record.chunks }, (_, i) => chunks.delete(chunkKey(record.id, i))),
     record.thumb ? thumbs.delete(record.id) : null
@@ -54,8 +59,10 @@ export async function readRecords(ns, sheet) {
   const records = [];
   for (const record of all) {
     if (!record) continue;
-    if (record.deletedAt && expired(record.deletedAt)) await deleteFileForGood(store, record);
-    else records.push(record);
+    if (record.deletedAt && expired(record.deletedAt)) {
+      // Cleanup never breaks a list: if it can't finish now, it's tried next time.
+      await deleteFileForGood(store, record).catch(err => { console.error('Clearing an expired file', err.message); records.push(record); });
+    } else records.push(record);
   }
   return { store, records };
 }
@@ -73,6 +80,10 @@ async function emptyStore(store) {
 
 // Everything in a sheet's slot: its text, files and images.
 export async function wipeSheet(ns, sheet) {
+  // The slot's pieces in R2 (if any file there ever went to R2).
+  const { blobs } = await userStore(ns, 'files', sheet).list();
+  const records = await Promise.all(blobs.map(({ key }) => userStore(ns, 'files', sheet).get(key, { type: 'json' }).catch(() => null)));
+  if (r2Enabled() || records.some(onR2)) await purge(sheetPrefix(ns, sheet));
   await userStore(ns, 'state').delete(`sheets/${sheet}`);
   await Promise.all(FILE_KINDS.map(kind => emptyStore(userStore(ns, kind, sheet))));
 }

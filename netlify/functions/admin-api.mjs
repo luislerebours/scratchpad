@@ -158,7 +158,7 @@ async function accountAction(req, admin, body) {
       if (user.disabledAt) return json({ error: 'Already deactivated' }, 409);
       // Signs out every device (sessions carry the version), and stops sign-in,
       // codes and share links. Everything the account holds is kept.
-      updated = { ...user, disabledAt: Date.now(), disabledBy: admin.email, version: (user.version || 1) + 1 };
+      updated = { ...user, disabledAt: Date.now(), disabledBy: admin.email, version: (user.version || 1) + 1, sessions: [] };
       await store.setJSON(key, updated);
       const ek = body.id;
       await Promise.all([store.delete(`codes/${ek}`), store.delete(`pending/${ek}`)]);
@@ -188,7 +188,7 @@ async function accountAction(req, admin, body) {
       break;
     }
     case 'signout': {
-      updated = { ...user, version: (user.version || 1) + 1 };
+      updated = { ...user, version: (user.version || 1) + 1, sessions: [] };
       await store.setJSON(key, updated);
       await notifySync(user.ns, 'session', String(Date.now()));
       await audit(req, admin, 'account.signout', { target });

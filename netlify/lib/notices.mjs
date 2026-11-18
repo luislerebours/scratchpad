@@ -1,4 +1,5 @@
 import { sendEmail } from './email.mjs';
+import { deviceOf } from './device.mjs';
 
 // ---- Security notices ----
 // A short email when something changes about how the account is reached or
@@ -7,16 +8,6 @@ import { sendEmail } from './email.mjs';
 // be sent never stops the action itself.
 
 const SUPPORT = 'support@sector809labs.com';
-
-function deviceOf(req) {
-  const ua = req.headers.get('user-agent') || '';
-  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
-    : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
-  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows'
-    : /CrOS/.test(ua) ? 'ChromeOS' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
-  if (browser && os) return `${browser} on ${os}`;
-  return browser || os || 'An unknown device';
-}
 
 const whenText = () => `${new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date())} UTC`;
 

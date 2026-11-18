@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   DEACTIVATED, allow, authStore, checkPassword, clearedCookie, emailKey, env, hashCode, hashPassword, json, notifySync,
-  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify
+  makeCode, normalizeCode, normalizeEmail, requireUser, sameOrigin, sessionCookie, sign, validEmail, verify, withSession
 } from '../lib/auth.mjs';
 import { readSettings } from '../lib/admin.mjs';
 import { withErrors } from '../lib/errors.mjs';
@@ -56,7 +56,12 @@ async function checkSecret(user, body) {
   return { ...user, ...(await hashPassword(body.auth)), authV: 2 };
 }
 
-async function signedIn(user, body = {}) {
+// Signs this device in: a new entry in the account's signed-in devices (or the
+// same one, renewed), saved, and a cookie that names it.
+async function signedIn(user, body = {}, req = null, sid = null) {
+  const fresh = req ? withSession(user, req, sid) : { user, sid };
+  if (req) await authStore().setJSON(`users/${emailKey(user.email)}`, fresh.user);
+  user = fresh.user;
   return json({
     email: user.email,
     keyring: user.keyring || null,
@@ -65,7 +70,7 @@ async function signedIn(user, body = {}) {
     typesSealed: Boolean(user.typesSealedAt),
     plan: planInfo(user),
     ...body
-  }, 200, { 'Set-Cookie': await sessionCookie(user) });
+  }, 200, { 'Set-Cookie': await sessionCookie(user, fresh.sid) });
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -90,12 +95,17 @@ export default withErrors('auth', async (req, context) => {
     const auth = await requireUser(req);
     if (auth.error) return auth.error;
     let user = auth.user;
-    // Record at most one visit an hour, to keep writes down.
-    if (Date.now() - (user.lastSeenAt || 0) > 60 * 60 * 1000 || user.visitDays?.at(-1) !== today()) {
-      user = { ...user, ...withVisit(user) };
-      await store.setJSON(`users/${emailKey(user.email)}`, user);
+    // Signed-in devices: what this one is, and the devices list on request.
+    if (action === 'devices') {
+      const sessions = (user.sessions || []).map(({ id, device, createdAt, lastSeen }) => ({ id, device, createdAt, lastSeen, current: id === auth.sid }));
+      return json({ sessions, unlisted: !auth.sid });
     }
-    return signedIn(user);
+    // Record at most one visit an hour (and this device's last use), to keep writes down.
+    const entry = (user.sessions || []).find(s => s.id === auth.sid);
+    if (!auth.sid || !entry || Date.now() - entry.lastSeen > 60 * 60 * 1000 || Date.now() - (user.lastSeenAt || 0) > 60 * 60 * 1000 || user.visitDays?.at(-1) !== today()) {
+      return signedIn({ ...user, ...withVisit(user) }, {}, req, auth.sid);
+    }
+    return signedIn(user, {}, null, auth.sid);
   }
 
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -103,14 +113,33 @@ export default withErrors('auth', async (req, context) => {
   const body = await req.json().catch(() => ({}));
 
   if (action === 'logout') {
+    // This device leaves the signed-in devices list.
+    const auth = await requireUser(req);
+    if (!auth.error && auth.sid) {
+      await store.setJSON(`users/${emailKey(auth.user.email)}`, { ...auth.user, sessions: (auth.user.sessions || []).filter(s => s.id !== auth.sid) });
+    }
     return json({ ok: true }, 200, { 'Set-Cookie': clearedCookie() });
+  }
+
+  // Signs one other device out (Account & security → Signed-in devices).
+  if (action === 'signout-device') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const id = String(body.id || '');
+    if (id === auth.sid) return json({ error: 'Use Sign out for this device.' }, 400);
+    const sessions = auth.user.sessions || [];
+    if (!sessions.some(s => s.id === id)) return json({ error: 'That device is already signed out.' }, 404);
+    await store.setJSON(`users/${emailKey(auth.user.email)}`, { ...auth.user, sessions: sessions.filter(s => s.id !== id) });
+    // That device re-checks right away and finds itself signed out.
+    await notifySync(auth.user.ns, 'session', String(Date.now()));
+    return json({ ok: true });
   }
 
   if (action === 'logout-all') {
     const auth = await requireUser(req);
     if (auth.error) return auth.error;
     const ek = emailKey(auth.user.email);
-    await store.setJSON(`users/${ek}`, { ...auth.user, version: auth.user.version + 1 });
+    await store.setJSON(`users/${ek}`, { ...auth.user, version: auth.user.version + 1, sessions: [] });
     // Open devices re-check right away and find themselves signed out.
     await notifySync(auth.user.ns, 'session', String(Date.now()));
     await securityNotice(req, auth.user.email, 'signout-all');
@@ -164,7 +193,8 @@ export default withErrors('auth', async (req, context) => {
     // Open devices re-check right away and find themselves signed out.
     await notifySync(user.ns, 'session', String(Date.now()));
     await securityNotice(req, user.email, 'password');
-    return signedIn(updated);
+    // Every other device was signed out: the list starts again with this one.
+    return signedIn({ ...updated, sessions: [] }, {}, req);
   }
 
   // A new recovery key (the old one stops working). Needs the password.
@@ -313,7 +343,8 @@ export default withErrors('auth', async (req, context) => {
       await notifySync(user.ns, 'session', String(Date.now()));
       await securityNotice(req, user.email, body.startOver ? 'start-over' : 'password');
     }
-    return signedIn(user, { created: !existing });
+    // A reset or a fresh start signed every other device out.
+    return signedIn({ ...user, sessions: [] }, { created: !existing }, req);
   }
 
   if (action === 'login') {
@@ -329,8 +360,7 @@ export default withErrors('auth', async (req, context) => {
     if (!checked) return json({ error: 'Wrong email or password.' }, 401);
     if (checked.disabledAt) return json({ error: DEACTIVATED }, 403);
     const updated = withSignIn(checked);
-    await store.setJSON(`users/${ek}`, updated);
-    return signedIn(updated);
+    return signedIn(updated, {}, req);
   }
 
   return json({ error: 'Unknown action' }, 400);

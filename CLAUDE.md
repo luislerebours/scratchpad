@@ -55,7 +55,14 @@ to what the app collects); `branding/play-store/` the listing kit.
 - `public/` is the static site (`index.html`, `app.js`, `styles.css`).
 - `netlify/functions/` holds the API, backed by Netlify Blobs:
   - `auth.mjs`: accounts (emailed animal+4-digit code, then a password),
-    one-year session cookie renewed on each visit
+    one-year session cookie renewed on each visit. Each sign-in has an id
+    (`sid` in the cookie) and an entry in `user.sessions` ({ id, device kind
+    from `lib/device.mjs`, createdAt, lastSeen }, newest 20, lastSeen updated at
+    most hourly); `requireUser` and `/api/check` refuse a cookie whose entry is
+    gone. Signed-in devices (`auth?action=devices`, `signout-device`) lists them
+    and signs one out; Sign out removes this device's entry; a version bump
+    (sign out everywhere, password change or reset, admin sign-out or
+    deactivation) clears the list. Cookies from before ids work and get one on renewal.
   - `state.mjs`: sheet list (starts at 5, up to 10 per account), sheet text/html, current sheet,
     and every sheet at once (`meta=all`) so the page can switch tabs instantly
   - `admin-api.mjs`: the admin dashboard's API (see "Admin dashboard" below)
@@ -223,7 +230,7 @@ to what the app collects); `branding/play-store/` the listing kit.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data, Signed-in devices, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,

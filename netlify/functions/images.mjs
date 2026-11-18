@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { versionsSummary } from '../lib/versions.mjs';
 import { MAX_SHEETS, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 import { isSealed } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
@@ -57,6 +58,8 @@ async function removeUnusedImages(ns, sheet) {
     if (Array.isArray(doc?.images)) doc.images.forEach(id => used.add(id));
     for (const match of String(doc?.html || '').matchAll(/[?&;]id=([A-Za-z0-9-]{1,64})/g)) used.add(match[1]);
   }
+  // Images an earlier version uses stay, so restoring it shows them.
+  (await versionsSummary(ns, Array.from({ length: MAX_SHEETS }, (_, i) => i + 1))).images.forEach(id => used.add(id));
 
   const store = stores(ns, sheet);
   const { blobs } = await store.records.list();

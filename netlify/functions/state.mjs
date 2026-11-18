@@ -1,4 +1,5 @@
 import { MAX_SHEETS, bumpRev, bumpRevForDevice, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { keepVersion, listVersions, readVersion } from '../lib/versions.mjs';
 import {
   TRASH_DAYS, deleteFileForGood, publicRecord, readRecords, readSheetTrash, visibleFiles, wipeSheet, writeSheetTrash
 } from '../lib/files.mjs';
@@ -246,6 +247,14 @@ export default withErrors('state', async req => {
   if (!sheet) return json({ error: 'Invalid sheet' }, 400);
   const key = `sheets/${sheet}`;
 
+  // Earlier versions of this sheet's text: the list, or one of them (?at=).
+  if (meta === 'versions' && req.method === 'GET') {
+    const at = Number(url.searchParams.get('at'));
+    if (!at) return json({ versions: await listVersions(ns, sheet) });
+    const version = await readVersion(ns, sheet, at);
+    return version ? json(version) : json({ error: 'That version is gone.' }, 404);
+  }
+
   if (req.method === 'GET') {
     const data = await store.get(key, { type: 'json' });
     return json({ text: data?.text || '', html: data?.html ?? null, updatedAt: Number(data?.updatedAt || 0) });
@@ -267,6 +276,8 @@ export default withErrors('state', async req => {
       const images = Array.isArray(body.images) ? body.images.filter(id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id)).slice(0, 2000) : [];
       next = { text: '', html, filled: Boolean(body.filled), images, updatedAt: next.updatedAt };
     }
+    // The text being replaced is kept as a version first (see lib/versions.mjs).
+    await keepVersion(ns, sheet, { checkpoint: body.checkpoint === 1 }).catch(err => console.error('Keeping a version failed:', err.message));
     await store.setJSON(key, next);
     // A device that can't reach the relay (its network blocks it) asks the
     // server to tell the other devices (`notify: 1`); otherwise it does so itself.

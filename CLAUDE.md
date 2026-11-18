@@ -225,6 +225,11 @@ to what the app collects); `branding/play-store/` the listing kit.
   requests) and its own `--auth-*` tokens (brighter cyan on dark, teal on
   light). `.only-wide` / `.only-narrow` swap copy at 860px; the sun/moon is
   `#authThemeBtn`. Help/Support go to support@sector809labs.com.
+- Help (`public/help.html`, served at `/help`, legal.css): short answers by
+  topic (getting started, sheets, files and sharing, syncing, privacy and
+  security, plans, account), linked from Help & support (Help center), the
+  front page's Help link and the legal pages' nav. Keep it true to the app:
+  update it when a feature, limit or price changes.
 - Privacy policy and Terms of service: `public/privacy.html` and `public/terms.html`
   (served at `/privacy` and `/terms`, styled by `legal.css`; also in the account
   menu). Keep them true to what the app does: update them when data handling,

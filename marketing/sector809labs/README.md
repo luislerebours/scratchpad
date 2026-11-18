@@ -27,8 +27,11 @@ accents (see "Brand").
 - **Keep the privacy claims exactly as written.** They're true to how the app
   works. Don't strengthen them (for example, don't write "military-grade",
   "unhackable" or "zero-knowledge").
-- **The screenshots use a demo account with made-up content.** That's fine to
-  show as is.
+- **The screenshots use a demo account with made-up notes and files.** That's
+  fine to show as is. The Lisbon photo in them is real and needs a credit on
+  the page (see "Photo credit").
+- **Photo credit is required.** Put the credit line from "Photo credit" in
+  small type near the hero, or in the page footer.
 
 ## Links
 
@@ -206,6 +209,19 @@ add which plan includes it.)
   - `horizontal-white.svg`: the same for dark backgrounds.
   - `mark-primary.svg` / `mark-white.svg`: the notepad mark alone, for cards and small spaces.
   - Leave clear space around the logo of at least the height of the mark's top binding. Don't recolor, stretch, add shadows or put it on a busy photo.
+
+## Photo credit
+
+The Lisbon photo inside the screenshots, hero and card images is licensed
+under CC BY 4.0, which allows commercial use as long as it's credited. It has
+been cropped. Use this line on the ScrapSheet page:
+
+> Lisbon photo in screenshots: "Panoramic View from Miradouro da Senhora do
+> Monte in Lisbon" by Dale Cruse, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
+> cropped. [Source](https://commons.wikimedia.org/wiki/File:Panoramic_View_from_Miradouro_da_Senhora_do_Monte_in_Lisbon_(54742879994).jpg)
+
+Wherever the card image (`card-1200x750`) is used without the ScrapSheet page
+nearby, add the same credit in the site footer or credits page.
 
 ## Files
 

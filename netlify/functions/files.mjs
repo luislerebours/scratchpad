@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { bumpRev, json, parseSheet, requireUser } from '../lib/auth.mjs';
+import { bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 import { SEALED_OVERHEAD, deleteFileForGood, fileStores, publicRecord, readRecords, visibleFiles } from '../lib/files.mjs';
 import { isSealed, isWrappedKey } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
@@ -199,6 +199,81 @@ export default withErrors('files', async req => {
     const latest = (await store.records.get(id, { type: 'json' })) || record;
     await store.records.setJSON(id, { ...latest, type: body.type, ...(latest.thumb ? { thumb: { ...latest.thumb, type: 'application/octet-stream' } } : {}) });
     return json({ ok: true });
+  }
+
+  // A new name (locked with the file's own key on an encrypted account).
+  if (req.method === 'POST' && action === 'rename') {
+    if (!record.complete) return json({ error: 'Upload not finished' }, 409);
+    const body = await req.json().catch(() => ({}));
+    const name = record.enc ? (isSealed(body.name) ? body.name : null) : String(body.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 200);
+    if (!name) return json({ error: 'Enter a name' }, 400);
+    const updated = { ...((await store.records.get(id, { type: 'json' })) || record), name };
+    await store.records.setJSON(id, updated);
+    await bumpRev(auth.ns, `files-${sheet}`);
+    return json(publicRecord(updated, sheet));
+  }
+
+  // Moving to another sheet, in steps the page drives (a file can be 100 MB):
+  // move-start makes the copy's record in the other sheet (its key locked for
+  // that sheet by the page), move-piece copies one piece (Netlify or R2, as the
+  // file is stored), move-finish checks the copy, finishes it with the file's
+  // dates and deletes the original for good. A copy left unfinished is cleared
+  // like any abandoned upload.
+  if (req.method === 'POST' && ['move-start', 'move-piece', 'move-finish'].includes(action)) {
+    const body = await req.json().catch(() => ({}));
+    const to = parseSheet(body.to);
+    const live = (await userStore(auth.ns, 'state').get('meta/sheets', { type: 'json' }))?.sheets || [];
+    if (!to || to === sheet || !live.some(s => s.id === to)) return json({ error: 'Pick another sheet.' }, 400);
+    const target = fileStores(auth.ns, to);
+    if (action === 'move-start') {
+      if (!record.complete || record.deletedAt) return json({ error: 'This file can’t be moved.' }, 409);
+      if (record.enc && !isWrappedKey(body.key)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
+      const toR2 = onR2(record) && r2Enabled();
+      const copy = {
+        id: randomUUID(), name: record.name, type: record.type, size: record.size, chunkSize: record.chunkSize, chunks: record.chunks,
+        complete: false, startedAt: Date.now(), moveOf: record.id,
+        ...(toR2 ? { store: 'r2' } : {}),
+        ...(record.enc ? { enc: 1, key: body.key } : {}),
+        ...(record.thumb ? { thumb: record.thumb } : {})
+      };
+      if (record.thumb) {
+        const thumb = await store.thumbs.get(record.id, { type: 'arrayBuffer' });
+        if (thumb) await target.thumbs.set(copy.id, thumb);
+      }
+      await target.records.setJSON(copy.id, copy);
+      return json({ copy: copy.id, chunks: copy.chunks });
+    }
+    const copy = validId(body.copy) ? await target.records.get(body.copy, { type: 'json' }) : null;
+    if (!copy || copy.moveOf !== record.id || copy.complete) return json({ error: 'Start the move again.' }, 409);
+    if (action === 'move-piece') {
+      const i = Number(body.i);
+      if (!Number.isInteger(i) || i < 0 || i >= record.chunks) return json({ error: 'Invalid chunk' }, 400);
+      const data = onR2(record) ? await pieceBytes(auth.ns, sheet, record, i) : await store.chunks.get(chunkKey(record.id, i), { type: 'arrayBuffer' });
+      if (!data) return json({ error: 'Chunk missing' }, 404);
+      if (onR2(copy)) {
+        const { url: up } = await uploadTarget(auth.ns, to, copy, copy.chunkSize + SEALED_OVERHEAD);
+        const r = await fetch(`${up}&i=${i}`, { method: 'PUT', body: data, signal: AbortSignal.timeout(20_000) });
+        if (!r.ok) throw new Error(`R2 copy ${r.status}`);
+      } else {
+        await target.chunks.set(chunkKey(copy.id, i), data);
+      }
+      return json({ ok: true });
+    }
+    // move-finish
+    const expected = i => Math.min(copy.chunkSize, copy.size - i * copy.chunkSize) + (copy.enc ? SEALED_OVERHEAD : 0);
+    if (onR2(copy)) {
+      const sizes = await pieceSizes(auth.ns, to, copy);
+      if (sizes.some((size, i) => size !== expected(i))) return json({ error: 'Not every piece was copied. Try again.' }, 400);
+    } else {
+      const present = await Promise.all(Array.from({ length: copy.chunks }, (_, i) => target.chunks.getMetadata(chunkKey(copy.id, i))));
+      if (present.some(meta => !meta)) return json({ error: 'Not every piece was copied. Try again.' }, 400);
+    }
+    const { moveOf, ...rest } = copy;
+    const done = { ...rest, complete: true, uploadedAt: record.uploadedAt || Date.now(), ...(record.kept ? { kept: true } : {}) };
+    await target.records.setJSON(done.id, done);
+    await deleteFileForGood(store, record);
+    await Promise.all([bumpRev(auth.ns, `files-${sheet}`), bumpRev(auth.ns, `files-${to}`)]);
+    return json(publicRecord(done, to));
   }
 
   if (req.method === 'POST' && action === 'keep') {

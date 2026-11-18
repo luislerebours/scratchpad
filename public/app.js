@@ -1704,9 +1704,96 @@ function showCachedFiles(sheet) {
 }
 
 sheetTabsEl.addEventListener('click', e => {
+  if (suppressTabClick) return;
   const tab = e.target.closest('.sheet-tab');
   if (tab) switchSheet(Number(tab.dataset.sheet));
 });
+
+// ---- Reordering tabs: drag one with a mouse, or touch and hold one, then drag ----
+// The tab moves among the others as it passes their middles; letting go saves
+// the order for every device. A quick swipe on a phone still scrolls the tabs.
+let tabDrag = null;
+let suppressTabClick = false;
+
+function beginTabDrag() {
+  if (!tabDrag || tabDrag.active) return;
+  clearTimeout(tabDrag.hold);
+  if (blockedOffline()) {
+    tabDrag = null;
+    return;
+  }
+  tabDrag.active = true;
+  tabDrag.before = [...sheetTabsEl.children].map(t => t.dataset.sheet).join();
+  tabDrag.tab.classList.add('dragging');
+  sheetTabsEl.classList.add('reordering');
+  navigator.vibrate?.(10);
+}
+
+function moveTabDrag(x) {
+  const { tab } = tabDrag;
+  // Near an edge of the strip: scroll it along.
+  const box = tabsScroller.getBoundingClientRect();
+  if (x < box.left + 30) tabsScroller.scrollLeft -= 12;
+  else if (x > box.right - 30) tabsScroller.scrollLeft += 12;
+  for (const other of sheetTabsEl.children) {
+    if (other === tab) continue;
+    const r = other.getBoundingClientRect();
+    const middle = r.left + r.width / 2;
+    const tabFirst = tab.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING;
+    if (tabFirst && x > middle) other.after(tab);
+    else if (!tabFirst && x < middle) other.before(tab);
+  }
+}
+
+async function endTabDrag(cancelled = false) {
+  const drag = tabDrag;
+  tabDrag = null;
+  if (!drag) return;
+  clearTimeout(drag.hold);
+  if (!drag.active) return;
+  drag.tab.classList.remove('dragging');
+  sheetTabsEl.classList.remove('reordering');
+  // The click that ends a drag doesn't open the tab.
+  suppressTabClick = true;
+  setTimeout(() => { suppressTabClick = false; }, 0);
+  const order = [...sheetTabsEl.children].map(t => Number(t.dataset.sheet));
+  if (cancelled || order.join() === drag.before) {
+    if (cancelled) renderTabs();
+    return;
+  }
+  try {
+    await postSheets({ action: 'reorder', order });
+  } catch {
+    showToast('Couldn’t save the new order');
+    renderTabs();
+  }
+}
+
+sheetTabsEl.addEventListener('pointerdown', e => {
+  const tab = e.target.closest('.sheet-tab');
+  if (!tab || e.button > 0 || sheets.length < 2) return;
+  tabDrag = { tab, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', active: false };
+  if (!tabDrag.mouse) tabDrag.hold = setTimeout(beginTabDrag, 350);
+});
+window.addEventListener('pointermove', e => {
+  if (!tabDrag || e.pointerId !== tabDrag.id) return;
+  if (!tabDrag.active) {
+    const moved = Math.hypot(e.clientX - tabDrag.x, e.clientY - tabDrag.y);
+    // A mouse drags after a few pixels; a finger that moves before the hold is scrolling.
+    if (tabDrag.mouse && moved > 6) beginTabDrag();
+    else if (!tabDrag.mouse && moved > 8) return endTabDrag();
+    if (!tabDrag?.active) return;
+  }
+  e.preventDefault();
+  moveTabDrag(e.clientX);
+});
+window.addEventListener('pointerup', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(); });
+window.addEventListener('pointercancel', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(tabDrag.active); });
+// While dragging on a touch screen, the page doesn't scroll instead.
+document.addEventListener('touchmove', e => { if (tabDrag?.active) e.preventDefault(); }, { passive: false });
+sheetTabsEl.addEventListener('contextmenu', e => { if (e.target.closest('.sheet-tab') && tabDrag) e.preventDefault(); });
+// Mouse: no native drag of the button's text.
+sheetTabsEl.addEventListener('dragstart', e => e.preventDefault());
 
 sheetTabsEl.addEventListener('dblclick', e => {
   const tab = e.target.closest('.sheet-tab');
@@ -1800,15 +1887,25 @@ function confirmDeleteSheet() {
   });
 }
 
-function openRenameModal() {
+// Renames the open sheet, or a file ({ file }).
+let renameFile = null;
+function openRenameModal({ file = null } = {}) {
   if (blockedOffline()) return;
   rememberFocus('rename');
-  renameInput.value = currentSheetName();
+  renameFile = file?.id ? file : null;
+  renameModal.querySelector('.modal-kicker').textContent = renameFile ? 'File' : 'Current sheet';
+  renameModal.querySelector('#renameTitle').textContent = renameFile ? 'Rename file' : 'Rename sheet';
+  renameModal.querySelector('label[for="renameInput"]').textContent = renameFile ? 'File name' : 'Sheet name';
+  renameInput.maxLength = renameFile ? 200 : 40;
+  renameInput.value = renameFile ? renameFile.name : currentSheetName();
   renameModal.hidden = false;
   document.body.classList.add('modal-open');
   requestAnimationFrame(() => {
     renameInput.focus();
-    renameInput.select();
+    // A file: the name before its extension is selected, ready to type over.
+    const dot = renameFile ? renameInput.value.lastIndexOf('.') : -1;
+    if (dot > 0) renameInput.setSelectionRange(0, dot);
+    else renameInput.select();
   });
 }
 
@@ -1824,6 +1921,7 @@ renameModal.addEventListener('click', e => { if (e.target === renameModal) close
 
 renameForm.addEventListener('submit', async e => {
   e.preventDefault();
+  if (renameFile) return renameFileSubmit(renameFile);
   const name = renameInput.value.replace(/[\r\n\t]/g, ' ').trim().slice(0, 40);
   if (!name) {
     renameInput.focus();
@@ -1838,6 +1936,72 @@ renameForm.addEventListener('submit', async e => {
   }
 });
 
+
+async function renameFileSubmit(file) {
+  const name = renameInput.value.replace(/[\r\n\t]/g, ' ').trim().slice(0, 200);
+  if (!name) {
+    renameInput.focus();
+    return;
+  }
+  if (name === file.name) return closeRenameModal();
+  if (blockedOffline()) return;
+  try {
+    const sealed = file.enc ? await vault.encryptText(await fileKeyFor(file), name) : name;
+    await postJson(filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=rename`), { name: sealed });
+    closeRenameModal();
+    showToast('File renamed');
+    if (file.sheet === activeSheet) await loadFiles(true, file.sheet);
+    libraryChanged();
+  } catch {
+    showToast('Couldn’t rename the file');
+  }
+}
+
+// ---- Moving a file to another sheet ----
+function chooseMoveTarget(file) {
+  if (blockedOffline()) return;
+  const others = sheets.filter(s => s.id !== file.sheet);
+  const shared = liveShareFor('file', file.sheet, file.id);
+  openSheet({
+    title: `Move ${file.name} to…`,
+    text: shared ? 'Its share link stops working once it’s moved (you can make a new one).' : 'Pick the sheet to move it to.',
+    files: [file],
+    actions: [
+      ...others.map(s => ({ label: s.name, kind: 'secondary', full: true, run: () => moveFile(file, s.id) })),
+      { label: 'Cancel', kind: 'secondary', full: true }
+    ]
+  });
+}
+
+// The page re-locks the file's key for the other sheet; the server copies the
+// pieces one by one (the page drives it, so a big file never times out), then
+// deletes the original.
+async function moveFile(file, to) {
+  if (blockedOffline()) return;
+  const toName = currentSheetName(to);
+  const transfer = createTransfer(file.name, `Moving to ${toName}`, file.size || 0);
+  const wait = why => transfer.waiting(why);
+  const url = action => filesUrl(file.sheet, `id=${encodeURIComponent(file.id)}&action=${action}`);
+  try {
+    const key = file.enc ? await vault.wrap(await fileKeyFor(file), await keyForSheet(to)) : undefined;
+    const start = await withRetry(() => postJson(url('move-start'), { to, key }), transfer.signal, wait);
+    let done = 0;
+    await runPool(start.chunks, PARALLEL_CHUNKS, async i => {
+      await withRetry(() => postJson(url('move-piece'), { to, copy: start.copy, i }), transfer.signal, wait);
+      transfer.update(Math.min(file.size || 0, ++done * Math.ceil((file.size || 0) / start.chunks)));
+    });
+    await withRetry(() => postJson(url('move-finish'), { to, copy: start.copy }), transfer.signal, wait);
+    transfer.done(`Moved to ${toName}`);
+    showToast(`Moved to ${toName}`);
+    fileKeys.delete(file.id);
+    await loadFiles(true, file.sheet);
+    refreshFilesFor(to);
+    libraryChanged();
+  } catch (err) {
+    if (err?.name === 'AbortError') transfer.fail('Cancelled');
+    else transfer.fail(err?.message || 'Couldn’t move the file. Try again.');
+  }
+}
 
 function bytes(n) {
   if (n < 1024) return `${n} B`;
@@ -3015,6 +3179,8 @@ function openFileMenu(trigger, file) {
     { label: 'Download', icon: 'download', run: () => saveSharedFile(file) },
     { label: liveShareFor('file', file.sheet, file.id) ? 'Shared link…' : 'Share link…', icon: 'link', run: () => openShare({ kind: 'file', sheet: file.sheet, file: file.id, name: file.name }) },
     canKeep(file) ? { label: file.kept ? 'Stop keeping' : 'Keep (no reminders)', icon: 'pin', run: () => toggleKeep(file) } : null,
+    { label: 'Rename…', icon: 'pencil', run: () => openRenameModal({ file }) },
+    sheets.length > 1 ? { label: 'Move to…', icon: 'folder', run: () => chooseMoveTarget(file) } : null,
     'separator',
     { label: 'Delete file…', icon: 'trash', danger: true, run: () => confirmDeleteFile(file) }
   ], `Actions for ${file.name}`);

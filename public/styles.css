@@ -338,8 +338,10 @@ body.dragging-files .drop-zone { border-color: var(--accent); background: var(--
 body:not(.selecting) .select-row:has(#selectBtn:not([hidden])) + .transfer-list:empty ~ .file-list { margin-top: 0; }
 .file-list:empty { display: none; }
 .file-row { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
-.file-row-inner { position: relative; z-index: 1; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; min-height: 72px; padding: 10px 0; background: var(--files-bg); touch-action: pan-y; transition: transform .22s ease; }
+.file-row-inner { position: relative; z-index: 1; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto auto; align-items: center; gap: 14px; min-height: 72px; padding: 10px 0; background: var(--files-bg); touch-action: pan-y; transition: transform .22s ease; }
 .file-row.swiping .file-row-inner { transition: none; }
+/* Download, Delete and ••• sit close together (one group of actions). */
+.file-row-inner > .icon-btn + .icon-btn { margin-left: -10px; }
 .swipe-delete { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; padding: 0 22px; border: 0; background: var(--danger-solid); color: #fff; font: inherit; font-size: .9375rem; font-weight: 600; cursor: pointer; }
 .file-row:not(.swiping):not(.open):not(.removing) .swipe-delete { visibility: hidden; }
 .file-main { min-width: 0; }
@@ -593,6 +595,7 @@ body.dragging-files .files.drag-active
 .delete-account-text strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
 .delete-account-body .rename-input { margin-top: 6px; }
 .delete-account-body .auth-error { min-height: 1.2em; margin: 8px 0 4px; }
+.delete-account-body .rename-input + .field-label { margin-top: 12px; }
 
 /* ---------- Sign-in ---------- */
 /* The sign-in page is also the front door: pitch, plans and the sign-in card.

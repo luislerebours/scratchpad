@@ -143,6 +143,30 @@ export default withErrors('auth', async (req, context) => {
     return json({ ok: true, keyring: cleanKeyring(body.keyring) });
   }
 
+  // A new password, chosen while signed in. Needs the current one (as the
+  // sign-in secret). The page sends the master key locked with the new password
+  // (it opened it with the current one), so nothing else changes. Every other
+  // device is signed out; this one gets a new sign-in.
+  if (action === 'change-password') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const { user } = auth;
+    if (!user.keyring) return json({ error: 'Set up encryption first.' }, 409);
+    const ek = emailKey(user.email);
+    if (!(await allow(`login-${ek}`, 10, 15 * 60 * 1000))) return json({ error: 'Too many tries. Wait 15 minutes.' }, 429);
+    // 400, not 401: a 401 would send the page back to sign-in.
+    if (!(await checkSecret(user, body))) return json({ error: 'Your current password isn’t right.' }, 400);
+    if (!validAuth(body.newAuth) || !b64ish(body.byPassword)) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
+    if (body.newAuth === body.auth) return json({ error: 'Choose a password different from the current one.' }, 400);
+    const { hash, salt } = await hashPassword(body.newAuth);
+    const updated = { ...user, hash, salt, authV: 2, keyring: { ...user.keyring, byPassword: body.byPassword }, version: user.version + 1 };
+    await store.setJSON(`users/${ek}`, updated);
+    // Open devices re-check right away and find themselves signed out.
+    await notifySync(user.ns, 'session', String(Date.now()));
+    await securityNotice(req, user.email, 'password');
+    return signedIn(updated);
+  }
+
   // A new recovery key (the old one stops working). Needs the password.
   if (action === 'recovery') {
     const auth = await requireUser(req);

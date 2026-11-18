@@ -3491,7 +3491,8 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
       if (transfer.signal.aborted) throw abortError();
       const plain = file.slice(i * start.chunkSize, Math.min(file.size, (i + 1) * start.chunkSize));
       const blob = key ? new Blob([await vault.encryptBytes(key, new Uint8Array(await plain.arrayBuffer()))]) : plain;
-      const url = filesUrl(targetSheet, `id=${encodeURIComponent(id)}&chunk=${i}`);
+      // Straight to R2 when the server says so (start.upload), otherwise to Netlify.
+      const url = start.upload ? `${start.upload.url}&i=${i}` : filesUrl(targetSheet, `id=${encodeURIComponent(id)}&chunk=${i}`);
       await withRetry(() => {
         loaded[i] = 0;
         return putChunk(url, blob, transfer.signal, n => {

@@ -91,8 +91,12 @@ export async function accountForToken(token, sub = null) {
 
 // Records a subscription on its account and sets the plan to match. A Stripe
 // subscription that still pays for Pro keeps it, whatever Play says.
-export async function applyPlay(ek, token, sub) {
+export async function applyPlay(ekGiven, token, sub) {
   const store = authStore();
+  // An account that changed its email is found where it moved.
+  const { currentUserKey } = await import('./moves.mjs');
+  const ek = await currentUserKey(ekGiven);
+  if (!ek) return null;
   const user = await store.get(`users/${ek}`, { type: 'json' });
   if (!user) return null;
   const line = proLine(sub);

@@ -127,6 +127,16 @@ export default withErrors('state', async req => {
       return json(await readSheets(store, startSheets));
     }
 
+    // A new tab order (every sheet, each once).
+    if (body.action === 'reorder') {
+      const order = Array.isArray(body.order) ? body.order.map(parseSheet) : [];
+      const ids = sheets.map(s => s.id);
+      if (order.length !== ids.length || new Set(order).size !== ids.length || !order.every(id => ids.includes(id))) {
+        return json({ error: 'The tabs changed. Try again.' }, 409);
+      }
+      return json(await writeSheets(ns, store, order.map(id => sheets.find(s => s.id === id))));
+    }
+
     const sheet = parseSheet(body.sheet);
     if (!sheets.some(s => s.id === sheet)) return json({ error: 'No such sheet' }, 404);
 

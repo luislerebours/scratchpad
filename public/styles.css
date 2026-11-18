@@ -232,6 +232,9 @@ img[data-mark] { transform: translateY(-1px); }
 .sheet-bar { display: flex; align-items: center; gap: 4px; margin: 0 0 14px; }
 .tabs-scroller { position: relative; flex: 1 1 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-padding-inline: 24px; }
 .tabs-scroller::-webkit-scrollbar { display: none; }
+.sheet-tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.sheet-tabs.reordering .sheet-tab { cursor: grabbing; }
+.sheet-tab.dragging { z-index: 1; transform: scale(1.06); box-shadow: var(--shadow-menu); transition: transform .12s ease, box-shadow .12s ease; }
 .tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
@@ -604,6 +607,8 @@ body.dragging-files .files.drag-active
 .delete-account-body .rename-input { margin-top: 6px; }
 .delete-account-body .auth-error { min-height: 1.2em; margin: 8px 0 4px; }
 .delete-account-body .rename-input + .field-label { margin-top: 12px; }
+.delete-account-body > [data-email-step] { display: grid; gap: 4px; }
+.delete-account-body > [data-email-step][hidden] { display: none; }
 
 /* ---------- Sign-in ---------- */
 /* The sign-in page is also the front door: pitch, plans and the sign-in card.

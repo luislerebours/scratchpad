@@ -106,6 +106,21 @@ function fillThumbs(files) {
 
 // ---- Downloading: a file arrives in 4 MB pieces, a few at a time ----
 
+// Pieces stored in R2 come from the relay (a redirect). On a network that
+// blocks it, they come through Netlify instead (`via=netlify`).
+let viaNetlify = false;
+async function fetchPiece(url) {
+  if (viaNetlify) return fetch(`${url}&via=netlify`);
+  try {
+    return await fetch(url);
+  } catch (err) {
+    if (!navigator.onLine) throw err;
+    const r = await fetch(`${url}&via=netlify`);
+    viaNetlify = true;
+    return r;
+  }
+}
+
 async function fetchFile(file, onProgress) {
   const parts = new Array(file.chunks);
   let got = 0;
@@ -114,7 +129,7 @@ async function fetchFile(file, onProgress) {
   const worker = async () => {
     while (next < file.chunks) {
       const i = next++;
-      const r = await fetch(`${API}?t=${encodeURIComponent(token)}&file=${encodeURIComponent(file.id)}&chunk=${i}`);
+      const r = await fetchPiece(`${API}?t=${encodeURIComponent(token)}&file=${encodeURIComponent(file.id)}&chunk=${i}`);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The download stopped. Try again.');
       const piece = await r.arrayBuffer();
       parts[i] = key ? await vault.decryptBytes(key, piece) : piece;

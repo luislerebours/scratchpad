@@ -59,7 +59,13 @@ to what the app collects); `branding/play-store/` the listing kit.
     to the relay (`/files/up`) with a pass Netlify signs with the sync key;
     `finish` checks sizes through the relay; chunk GETs (owner and share
     links, still counted per piece) 302 to the relay's `/files/get`, so
-    downloads never pass through Netlify. Older files stay in Blobs. Deleting
+    downloads never pass through Netlify. Networks that block the relay
+    (a workplace filter): a piece whose redirect fails is asked for again
+    with `via=netlify` (Netlify fetches it from R2 and passes it on; the page
+    keeps doing so for 30 minutes, `fetchPiece()` in `app.js` and `share.js`);
+    uploads go to R2 only while live sync is connected (`relayUsable()`), else
+    to Netlify; and saves then send `notify: 1` so the server tells the other
+    devices. Older files stay in Blobs. Deleting
     a file for good, or wiping a sheet slot, clears its R2 objects. The relay
     never overwrites a stored piece.
   - `images.mjs`: images in the text (chunked original plus a display copy)

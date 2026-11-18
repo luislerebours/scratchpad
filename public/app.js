@@ -106,6 +106,13 @@ let retryCheckTimer = null;
 // Live connection to the relay; while it's healthy the 2-second check is off.
 let socket = null;
 let socketHealthy = false;
+// The relay (sync and R2 files) is blocked on some networks (a workplace
+// filter, say). Then file pieces come through Netlify instead, new files are
+// stored there, and the server tells other devices about this one's saves.
+let relayBlockedAt = 0;
+const RELAY_BLOCK_MEMORY_MS = 30 * 60_000;
+const relayBlocked = () => Date.now() - relayBlockedAt < RELAY_BLOCK_MEMORY_MS;
+const relayUsable = () => socketHealthy && !relayBlocked();
 let reconnectDelay = 1000;
 let reconnectTimer = null;
 let pingTimer = null;
@@ -896,6 +903,8 @@ async function saveState(sheet = activeSheet) {
         images: [...new Set([...htmlToSave.matchAll(/[?&;]id=([A-Za-z0-9-]{1,64})/g)].map(m => m[1]))]
       }
       : { text: textToSave, html: htmlToSave };
+    // Can't reach the relay: the server tells the other devices instead.
+    if (!relayUsable()) body.notify = 1;
     const payload = JSON.stringify(body);
     const r = await fetch(stateUrl(targetSheet), {
       method: 'POST',
@@ -2173,7 +2182,7 @@ async function backfillThumbs() {
     try {
       const parts = [];
       for (let i = 0; i < f.chunks; i++) {
-        const r = await fetch(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&chunk=${i}`));
+        const r = await fetchPiece(filesUrl(f.sheet, `id=${encodeURIComponent(f.id)}&chunk=${i}`));
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         parts.push(await r.arrayBuffer());
       }
@@ -2435,6 +2444,22 @@ sheetModal.addEventListener('click', e => { if (e.target === sheetModal) closeSh
 
 // ---- Downloads ----
 
+// A file piece. Pieces in R2 come from the relay (the server redirects there);
+// if that can't be reached while Netlify can, the same piece comes through
+// Netlify (`via=netlify`), and so do the rest for a while.
+const viaNetlify = url => `${url}${url.includes('?') ? '&' : '?'}via=netlify`;
+async function fetchPiece(url, init = {}) {
+  if (relayBlocked()) return fetch(viaNetlify(url), init);
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (init.signal?.aborted || !navigator.onLine || document.visibilityState !== 'visible') throw err;
+    const r = await fetch(viaNetlify(url), init); // fails too when truly offline
+    relayBlockedAt = Date.now();
+    return r;
+  }
+}
+
 // Fetches one chunk, reporting bytes as they stream in.
 async function fetchChunk(url, signal, onBytes) {
   const own = new AbortController();
@@ -2446,7 +2471,7 @@ async function fetchChunk(url, signal, onBytes) {
   const unwatch = restartIfStuck(() => busy, () => lastActivity, () => { restarted = true; own.abort(); });
   try {
     // Chunks never change, so the browser may keep them (opening again is free).
-    const r = await fetch(url, { signal: own.signal });
+    const r = await fetchPiece(url, { signal: own.signal });
     if (!r.ok) {
       const err = new Error(`HTTP ${r.status}`);
       err.status = r.status;
@@ -3512,9 +3537,12 @@ async function uploadFile(file, targetSheet, transfer, extra = {}) {
     // A new key for this file, locked with its sheet's key; the name, every
     // piece and the thumbnail are locked with it.
     const key = isLocked() ? await vault.newKey() : null;
+    // Straight to R2 through the relay only when this device can reach it
+    // (live sync connected); otherwise the file is stored on Netlify.
+    const direct = relayUsable() ? { direct: 1 } : {};
     const meta = key
-      ? { name: await vault.encryptText(key, file.name), type: await vault.encryptText(key, file.type || 'application/octet-stream'), size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), direct: 1, ...extra }
-      : { name: file.name, type: file.type, size: file.size, direct: 1 };
+      ? { name: await vault.encryptText(key, file.name), type: await vault.encryptText(key, file.type || 'application/octet-stream'), size: file.size, enc: 1, key: await vault.wrap(key, await keyForSheet(targetSheet)), ...direct, ...extra }
+      : { name: file.name, type: file.type, size: file.size, ...direct };
     const wait = why => transfer.waiting(why);
     const start = await withRetry(() => postJson(filesUrl(targetSheet, 'action=start'), meta), transfer.signal, wait);
     id = start.id;

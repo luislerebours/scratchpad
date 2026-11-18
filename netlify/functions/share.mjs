@@ -5,7 +5,7 @@ import { ended, readShareIndex as readIndex, readShares, sharesStore, writeShare
 import { readSheets } from '../lib/sheets.mjs';
 import { limitsFor, needsPro } from '../lib/plans.mjs';
 import { withErrors } from '../lib/errors.mjs';
-import { onR2, pieceUrl } from '../lib/r2.mjs';
+import { onR2, pieceBytes, pieceUrl } from '../lib/r2.mjs';
 
 // Share links: anyone with the link can view and download a file, or a sheet
 // with its text, images and files, until the link expires or is turned off.
@@ -201,6 +201,8 @@ async function visitor(req, url, token) {
     if (!(await underLimit(token, record.chunkSize || 4_000_000))) return publicJson({ error: 'This link is busy. Try again in an hour.' }, 429);
     // In R2: counted here, then downloaded from there.
     if (onR2(record)) {
+      // On a network that blocks the relay, the viewer asks for it through here.
+      if (url.searchParams.get('via') === 'netlify') return bytesResponse(await pieceBytes(share.ns, share.sheet, record, chunk), 'application/octet-stream');
       return new Response(null, { status: 302, headers: { Location: await pieceUrl(share.ns, share.sheet, record, chunk), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
     }
     const data = await fileStores(share.ns, share.sheet).chunks.get(`${record.id}-${chunk}`, { type: 'arrayBuffer' });

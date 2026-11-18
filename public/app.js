@@ -1845,7 +1845,10 @@ async function withRetry(fn, signal, onWait) {
     try {
       return await fn();
     } catch (err) {
-      if (signal?.aborted || err?.name === 'AbortError' || !retryable(err)) throw err;
+      // Only Cancel ends a transfer; an abort the browser made (app in the
+      // background) is waited out and tried again like any dropped connection.
+      if (signal?.aborted) throw abortError();
+      if (!retryable(err)) throw err;
       // No answer counts as offline (confirmed by one more check, as for saves).
       if (!err?.status && !viewOnly && appStarted) setConnection('offline');
       if (lastHiddenAt >= startedAt || !pageActive()) {
@@ -2437,9 +2440,10 @@ async function fetchChunk(url, signal, onBytes) {
     }
     return new Blob(parts);
   } catch (err) {
-    if (restarted && !signal?.aborted) throw networkError();
+    // Only Cancel cancels; anything else without an answer from the server
+    // (a phone cutting the download off in the background) is a dropped connection.
     if (signal?.aborted) throw abortError();
-    throw err?.name === 'TypeError' ? networkError() : err;
+    throw err?.status ? err : networkError();
   } finally {
     busy = false;
     unwatch();
@@ -3446,7 +3450,10 @@ function putChunk(url, blob, signal, onBytes, contentType = 'application/octet-s
     };
     xhr.onabort = () => {
       end();
-      reject(restarted ? networkError() : abortError());
+      // Only Cancel (our signal) cancels. Phones abort uploads themselves when
+      // the app goes to the background: that's a dropped connection, so the
+      // piece is sent again once ScrapSheet is back.
+      reject(signal?.aborted && !restarted ? abortError() : networkError());
     };
     xhr.send(blob);
   });

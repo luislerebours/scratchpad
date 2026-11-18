@@ -2816,6 +2816,7 @@ document.addEventListener('keydown', e => {
   else if (!trashModal.hidden) closeTrash();
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
+  else if (!historyModal.hidden) closeHistory();
   else if (!libraryModal.hidden) closeLibrary();
   else if (selecting) setSelecting(false);
 });
@@ -3877,7 +3878,7 @@ historyModal.addEventListener('click', e => {
   const show = e.target.closest('[data-history-show]');
   if (show) showVersion(show.closest('.history-row'), Number(show.dataset.historyShow));
 });
-historyModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeHistory(); });
+// Escape closes it through the page-wide handler (near the download code).
 
 // ---- Search: sheet names, their text and file names, across every sheet ----
 // Everything searched is already on this device (kept copies of each sheet

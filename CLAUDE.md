@@ -291,6 +291,15 @@ to what the app collects); `branding/play-store/` the listing kit.
   signal fired (phones abort transfers themselves on an app switch). Only a refusal from the server (4xx) or Cancel ends one.
   Upload rows say "Keep ScrapSheet open until uploads finish."; a page that is
   closed (or that the phone discards) still loses its upload.
+- Updates (`checkForUpdate()` / `reloadIfQuiet()` in `app.js`): a tab left open
+  notes the ETags of `/app.js` and `/` when it loads, checks again on return to
+  the page (at most every 10 minutes) and hourly, and when either changed it
+  reloads at a quiet moment: in the background, right on return, or after 2
+  minutes without use; never with unsaved edits, a transfer or pasted image
+  uploading, a delete waiting for Undo or a dialog open, and at most once every
+  10 minutes per tab (`sessionStorage`). Instant open makes the reload quick.
+  Server changes still have to work with pages from before them (an open tab
+  can be hours old): e.g. files go to R2 only when the page sends `direct: 1`.
 - Share to ScrapSheet (installed app on Android): `share_target` in the
   manifest posts to `/share-target`; `public/sw.js` (the only service worker
   job: it caches nothing and passes every other request through) keeps the

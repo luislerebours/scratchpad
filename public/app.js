@@ -6289,6 +6289,85 @@ async function whoAmI() {
   }
 }
 
+// ---- Updates: a tab left open picks up a new version of ScrapSheet ----
+// The page notes the version it loaded (the ETags of app.js and the page) and
+// checks again on return to the page (at most every 10 minutes) and hourly.
+// When a new one is out it reloads at a quiet moment: in the background, on
+// return to the page, or after 2 minutes without use. Never with unsaved
+// edits, a transfer running, an image uploading, a delete waiting for Undo or
+// a dialog open; and at most once every 10 minutes per tab.
+const UPDATE_CHECK_MS = 60 * 60_000;
+const UPDATE_RECHECK_MS = 10 * 60_000;
+const UPDATE_IDLE_MS = 2 * 60_000;
+const UPDATE_RELOAD_GAP_MS = 10 * 60_000;
+let loadedVersion = null;
+let lastVersionCheck = 0;
+let updateReady = false;
+let lastUseAt = Date.now();
+let returnedAt = 0; // when the page last came back to the front
+
+async function siteVersion() {
+  const tags = await Promise.all(['/app.js', '/'].map(url =>
+    fetch(url, { method: 'HEAD', cache: 'no-store' }).then(r => (r.ok ? r.headers.get('etag') : null))
+  ));
+  return tags.every(Boolean) ? tags.join(' ') : null;
+}
+
+async function checkForUpdate() {
+  if (updateReady || !navigator.onLine) return;
+  lastVersionCheck = Date.now();
+  const version = await siteVersion().catch(() => null);
+  if (!version) return;
+  if (!loadedVersion) loadedVersion = version;
+  else if (version !== loadedVersion) {
+    updateReady = true;
+    reloadIfQuiet();
+  }
+}
+
+function quietForUpdate() {
+  return !saveTimer && !saving && saveStateName !== 'unsaved' && saveStateName !== 'failed'
+    && !pendingImageUploads && !pendingDeletes.size
+    && !document.querySelector('.transfer-row .transfer-cancel')
+    && !document.querySelector('.modal-backdrop:not([hidden])');
+}
+
+function reloadIfQuiet() {
+  if (!updateReady || !quietForUpdate()) return;
+  const hidden = document.visibilityState === 'hidden';
+  // In front: only once it's been left alone a while (or just came back),
+  // and never in the middle of signing in.
+  const justBack = returnedAt && lastUseAt <= returnedAt && Date.now() - returnedAt < 10_000;
+  if (!hidden && (!authScreen.hidden || (!justBack && Date.now() - lastUseAt < UPDATE_IDLE_MS))) return;
+  let last = 0;
+  try { last = Number(sessionStorage.getItem('updateReloadAt')) || 0; } catch {}
+  if (Date.now() - last < UPDATE_RELOAD_GAP_MS) return;
+  try { sessionStorage.setItem('updateReloadAt', String(Date.now())); } catch {}
+  location.reload();
+}
+
+for (const type of ['pointerdown', 'keydown', 'input', 'wheel', 'touchstart']) {
+  document.addEventListener(type, () => { lastUseAt = Date.now(); }, { capture: true, passive: true });
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    // Gone to the background: reload once pending saves have gone out.
+    setTimeout(reloadIfQuiet, 3000);
+    return;
+  }
+  // Just back (and not touched yet): a waiting update, or one the check
+  // finds now, applies right away.
+  returnedAt = Date.now();
+  lastUseAt = returnedAt;
+  if (updateReady) reloadIfQuiet();
+  else if (Date.now() - lastVersionCheck > UPDATE_RECHECK_MS) checkForUpdate();
+});
+setInterval(() => {
+  if (updateReady) reloadIfQuiet();
+  else if (document.visibilityState === 'visible' && Date.now() - lastVersionCheck > UPDATE_CHECK_MS) checkForUpdate();
+}, 30_000);
+checkForUpdate();
+
 // Draw what this device kept from last time, then check who is signed in
 // (which also renews the one-year cookie) and carry on from there.
 const paintedEmail = await paintFromSnapshot();

@@ -22,6 +22,16 @@ body.legal-page { min-height: 100dvh; }
 .legal-doc li + li { margin-top: 6px; }
 .legal-doc a { color: var(--accent); }
 .legal-doc strong { font-weight: 600; }
+.help-toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 4px; }
+.help-toc a { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); font-size: .875rem; text-decoration: none; }
+@media (hover: hover) { .help-toc a:hover { border-color: var(--accent); color: var(--accent); } }
+.help-doc h2 { scroll-margin-top: 16px; }
+.help-doc details { border-bottom: 1px solid var(--line); }
+.help-doc summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 10px 0; font-weight: 600; cursor: pointer; list-style: none; }
+.help-doc summary::-webkit-details-marker { display: none; }
+.help-doc summary::after { content: '+'; flex: none; color: var(--muted); font-size: 1.25rem; font-weight: 400; }
+.help-doc details[open] summary::after { content: '−'; }
+.help-doc details > p, .help-doc details > ul { margin: 0 0 14px; }
 .legal-foot { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .875rem; }
 
 @media (max-width: 480px) {

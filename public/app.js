@@ -5499,6 +5499,7 @@ function profileHtml(view) {
   if (view === 'help') {
     return `<div class="pf-subhead"><button class="pf-back" type="button" data-pf="back" aria-label="Back">${icon('back')}</button><h2 id="pfTitle">Help &amp; support</h2></div>
       <div class="pf-scroll">
+        ${pfRow('help-center', 'help', 'Help center', { sub: 'Answers to common questions', external: true })}
         ${pfRow('support', 'mail', 'Contact support', { sub: 'support@sector809labs.com', external: true })}
         ${pfRow('privacy', 'shield', 'Privacy policy', { external: true })}
         ${pfRow('terms', 'lines', 'Terms of service', { external: true })}
@@ -5592,6 +5593,7 @@ const PROFILE_ACTIONS = {
   delete: () => fromProfile(openDeleteAccount),
   support: () => fromProfile(() => { location.href = 'mailto:support@sector809labs.com'; }),
   privacy: () => fromProfile(() => window.open('/privacy', '_blank', 'noopener')),
+  'help-center': () => fromProfile(() => window.open('/help', '_blank', 'noopener')),
   terms: () => fromProfile(() => window.open('/terms', '_blank', 'noopener'))
 };
 

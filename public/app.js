@@ -5411,7 +5411,7 @@ function profileHtml(view) {
         <h3 class="pf-group">Preferences</h3>
         <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
           <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
-        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('email', 'mail', 'Change email…', { sub: account?.email || '' })}${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
         <h3 class="pf-group">Your data</h3>
         ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
         <h3 class="pf-group">Sessions</h3>
@@ -5508,6 +5508,7 @@ const PROFILE_ACTIONS = {
   upgrade: () => fromProfile(() => showUpgrade('')),
   billing: () => fromProfile(manageBilling),
   password: () => fromProfile(openChangePassword),
+  email: () => fromProfile(openChangeEmail),
   recovery: () => fromProfile(confirmNewRecoveryKey),
   export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
@@ -5813,6 +5814,110 @@ passwordChangeForm.addEventListener('submit', async e => {
   } finally {
     submit.disabled = false;
     submit.textContent = 'Change password';
+  }
+});
+
+// ---- Change email ----
+// The email salts the password key, so the device makes the sign-in secret and
+// the master key's lock again from the new email and the same password (the
+// recovery key doesn't depend on the email). A code to the new address proves
+// it's yours. Other devices are signed out; the old address gets a notice.
+const emailModal = document.querySelector('#emailModal');
+const emailChangeForm = document.querySelector('#emailChangeForm');
+const emailChangeError = document.querySelector('#emailChangeError');
+const emailChangeSubmit = document.querySelector('#emailChangeSubmit');
+let emailChange = null; // { newEmail, old, master, password } between the two steps
+
+function setEmailStep(step) {
+  emailModal.querySelectorAll('[data-email-step]').forEach(el => { el.hidden = el.dataset.emailStep !== String(step); });
+  emailChangeSubmit.textContent = step === 1 ? 'Send code' : 'Change email';
+}
+
+function openChangeEmail() {
+  if (blockedOffline()) return;
+  rememberFocus('email');
+  emailChange = null;
+  emailModal.querySelector('#emailChangeUser').value = account?.email || '';
+  for (const id of ['#emailChangeNew', '#emailChangePassword', '#emailChangeCode']) emailModal.querySelector(id).value = '';
+  emailChangeError.textContent = '';
+  setEmailStep(1);
+  emailModal.hidden = false;
+  updateModalOpen();
+  emailModal.querySelector('#emailChangeNew').focus();
+}
+
+function closeChangeEmail() {
+  if (emailModal.hidden) return;
+  emailModal.hidden = true;
+  emailChange = null;
+  updateModalOpen();
+  restoreFocus('email');
+}
+
+emailModal.querySelectorAll('[data-close-email]').forEach(btn => btn.addEventListener('click', closeChangeEmail));
+emailModal.addEventListener('click', e => { if (e.target === emailModal) closeChangeEmail(); });
+emailModal.addEventListener('keydown', e => { if (e.key === 'Escape') closeChangeEmail(); });
+emailChangeForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  emailChangeError.textContent = '';
+  if (blockedOffline()) return;
+  const label = emailChangeSubmit.textContent;
+  emailChangeSubmit.disabled = true;
+  try {
+    if (!emailChange) {
+      const newEmail = emailModal.querySelector('#emailChangeNew').value.trim().toLowerCase();
+      const password = emailModal.querySelector('#emailChangePassword').value;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) throw new Error('Enter a valid email address.');
+      if (newEmail === account.email) throw new Error('That’s already your email.');
+      if (!password) throw new Error('Enter your password.');
+      emailChangeSubmit.textContent = 'Checking…';
+      const old = await vault.passwordKeys(account.email, password);
+      let master;
+      try {
+        master = await vault.openWithPassword(account.keyring, old.kek);
+      } catch {
+        throw new Error('Your password isn’t right.');
+      }
+      emailChangeSubmit.textContent = 'Sending…';
+      await postJson(`${API_AUTH}?action=email-code`, { auth: old.auth, newEmail });
+      emailChange = { newEmail, old, master, password };
+      emailModal.querySelector('#emailChangeTo').textContent = newEmail;
+      setEmailStep(2);
+      emailModal.querySelector('#emailChangeCode').focus();
+      return;
+    }
+    const code = emailModal.querySelector('#emailChangeCode').value.trim();
+    if (!code) throw new Error('Enter the code from the email.');
+    emailChangeSubmit.textContent = 'Changing…';
+    const { newEmail, old, master, password } = emailChange;
+    const fresh = await vault.passwordKeys(newEmail, password);
+    const byPassword = await vault.wrap(master, fresh.kek);
+    // As with a new password: this page waits for its own answer (and its new sign-in).
+    appStarted = false;
+    const r = await rawFetch(`${API_AUTH}?action=change-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auth: old.auth, newEmail, code, newAuth: fresh.auth, byPassword })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) signInRenewedAt = Date.now();
+    appStarted = true;
+    if (!r.ok) throw new Error(data.error || 'Couldn’t change the email. Try again.');
+    account.email = data.email;
+    if (data.keyring) account.keyring = data.keyring;
+    await vault.rememberMaster(data.email, master);
+    avatarEl.textContent = data.email.charAt(0).toUpperCase();
+    accountBtn.title = data.email;
+    accountBtn.setAttribute('aria-label', `Account: ${data.email}`);
+    saveSnapshot();
+    closeChangeEmail();
+    showToast(`Your email is now ${data.email}`);
+  } catch (err) {
+    appStarted = true;
+    emailChangeError.textContent = err.message;
+  } finally {
+    emailChangeSubmit.disabled = false;
+    if (emailChangeSubmit.textContent.endsWith('…')) emailChangeSubmit.textContent = label;
   }
 });
 

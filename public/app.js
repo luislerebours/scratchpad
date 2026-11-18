@@ -86,6 +86,10 @@ const imageHandle = document.querySelector('#imageHandle');
 let activeSheet = 1;
 let localUpdatedAt = 0;
 let saveTimer = null;
+// Version history: the next save asks the server to keep the text it replaces
+// as a version (clearing, restoring); so does one that drops most of the text.
+let nextSaveCheckpoint = false;
+const savedLength = new Map(); // sheet → length of its text as last saved or loaded
 let unsavedSince = 0; // when the first edit not yet sent was made
 let saving = false;
 let lastInputAt = 0;
@@ -906,6 +910,9 @@ async function saveState(sheet = activeSheet) {
       : { text: textToSave, html: htmlToSave };
     // Can't reach the relay: the server tells the other devices instead.
     if (!relayUsable()) body.notify = 1;
+    const before = savedLength.get(targetSheet);
+    if (nextSaveCheckpoint || (before > 40 && textToSave.length < before * 0.5)) body.checkpoint = 1;
+    nextSaveCheckpoint = false;
     const payload = JSON.stringify(body);
     const r = await fetch(stateUrl(targetSheet), {
       method: 'POST',
@@ -918,6 +925,7 @@ async function saveState(sheet = activeSheet) {
     const data = await r.json();
     tellOtherDevices(data.notice);
     cacheSheet(targetSheet, htmlToSave, Number(data.updatedAt || Date.now()));
+    savedLength.set(targetSheet, textToSave.length);
     if (data.rev) ownRevs.set(`text-${targetSheet}`, data.rev);
     if (targetSheet === activeSheet) {
       // Our own save: no need to fetch it back on the next check.
@@ -1000,9 +1008,16 @@ function confirmClearSheet() {
         label: 'Clear text',
         kind: 'danger-solid',
         run: () => {
+          const sheet = activeSheet;
+          const before = serializeEditor();
+          nextSaveCheckpoint = true;
           pad.replaceChildren();
           onEditorChanged();
-          showToast(`Cleared ${name}`);
+          showToast(`Cleared ${name}`, {
+            action: 'Undo',
+            duration: 6000,
+            run: () => { if (putTextBack(sheet, before)) showToast(`The text in ${name} is back`); }
+          });
         }
       }
     ]
@@ -1012,6 +1027,7 @@ function confirmClearSheet() {
 sheetMenuBtn.addEventListener('click', () => {
   openMenu(sheetMenuBtn, [
     { label: 'Rename sheet', icon: 'pencil', run: openRenameModal },
+    { label: 'Version history…', icon: 'restore', run: openHistory },
     { label: liveShareFor('sheet', activeSheet) ? 'Shared link…' : 'Share sheet…', icon: 'link', run: () => openShare({ kind: 'sheet', sheet: activeSheet, name: currentSheetName() }) },
     'separator',
     { label: 'Clear sheet text…', icon: 'eraser', run: confirmClearSheet },
@@ -1157,6 +1173,24 @@ function renderEditor(html) {
   if (caret !== null) placeCaret(caret);
   updateEmptyState();
   positionImageTools();
+  savedLength.set(activeSheet, pad.innerText.length);
+}
+
+// Puts earlier text back in the editor and saves it now, keeping what it
+// replaces as a version (so this can be undone too).
+function putTextBack(sheet, html) {
+  if (blockedOffline()) return false;
+  if (sheet !== activeSheet) {
+    showToast('Open that sheet again to undo');
+    return false;
+  }
+  renderEditor(html);
+  nextSaveCheckpoint = true;
+  onEditorChanged();
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  saveState(sheet);
+  return true;
 }
 
 function insertAtCaret(nodes) {
@@ -2783,6 +2817,7 @@ document.addEventListener('keydown', e => {
   else if (!previewModal.hidden) closePreview();
   else if (!renameModal.hidden) closeRenameModal();
   else if (!devicesModal.hidden) closeDevices();
+  else if (!historyModal.hidden) closeHistory();
   else if (!libraryModal.hidden) closeLibrary();
   else if (selecting) setSelecting(false);
 });
@@ -3732,6 +3767,119 @@ document.addEventListener('visibilitychange', async () => {
   const sheet = await fetchCurrentSheet();
   if (sheet && sheet !== activeSheet && !saveTimer && !saving) await switchSheet(sheet, { remember:false });
 });
+
+// ---- Version history: earlier versions of a sheet's text ----
+const historyModal = document.querySelector('#historyModal');
+const historyBody = document.querySelector('#historyBody');
+
+function whenLabel(at) {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = new Date(); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((day - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000);
+  if (diff === 0) return `Today, ${time}`;
+  if (diff === 1) return `Yesterday, ${time}`;
+  return `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+async function openHistory() {
+  const sheet = activeSheet;
+  const name = currentSheetName();
+  rememberFocus('history');
+  historyModal.querySelector('#historyTitle').textContent = `Version history · ${name}`;
+  historyBody.innerHTML = '<p class="trash-empty">Loading…</p>';
+  historyModal.hidden = false;
+  updateModalOpen();
+  historyModal.querySelector('[data-close-history]').focus();
+  try {
+    const r = await fetch(`${stateUrl(sheet)}&meta=versions`, { cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    const { versions } = await r.json();
+    if (!versions.length) {
+      historyBody.innerHTML = '<p class="trash-empty"><strong>No earlier versions yet</strong>ScrapSheet keeps one every 10 minutes while you edit, and always before a big change like clearing the sheet.</p>';
+      return;
+    }
+    historyBody.innerHTML = versions.map(v => `
+      <div class="history-row" data-at="${v.at}">
+        <div class="history-head">
+          <span><span class="history-when">${escapeHtml(whenLabel(v.at))}</span> <span class="history-size">· ${escapeHtml(bytes(v.size || 0))}</span></span>
+          <button class="link-btn" type="button" data-history-show="${v.at}">Show</button>
+        </div>
+      </div>`).join('');
+    historyBody.dataset.sheet = String(sheet);
+  } catch {
+    historyBody.innerHTML = '<p class="trash-empty">Couldn’t load the history. Check your connection and try again.</p>';
+  }
+}
+
+function closeHistory() {
+  if (historyModal.hidden) return;
+  historyModal.hidden = true;
+  updateModalOpen();
+  restoreFocus('history');
+}
+
+async function showVersion(row, at) {
+  const sheet = Number(historyBody.dataset.sheet);
+  const btn = row.querySelector('[data-history-show]');
+  if (row.querySelector('.history-preview')) {
+    row.querySelectorAll('.history-preview, .history-actions').forEach(el => el.remove());
+    btn.textContent = 'Show';
+    return;
+  }
+  btn.textContent = 'Loading…';
+  try {
+    const r = await fetch(`${stateUrl(sheet)}&meta=versions&at=${at}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Couldn’t open this version.');
+    const html = await sheetHtml(sheet, await r.json());
+    const view = cleanHtml(html);
+    const images = view.querySelectorAll('img').length;
+    view.querySelectorAll('img').forEach(img => img.remove());
+    // Measured off-screen so line breaks come through as they look.
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;white-space:pre-wrap';
+    probe.append(view);
+    document.body.append(probe);
+    const text = probe.innerText;
+    probe.remove();
+    const preview = document.createElement('div');
+    preview.className = 'history-preview';
+    const words = (text || '').trim();
+    preview.textContent = words ? words.slice(0, 1500) + (words.length > 1500 ? '…' : '') : 'No text';
+    if (!words) preview.classList.add('empty');
+    if (images) preview.textContent += `\n\n${images === 1 ? '1 image' : `${images} images`}`;
+    const actions = document.createElement('div');
+    actions.className = 'history-actions';
+    actions.innerHTML = '<button class="btn primary compact" type="button">Restore this version</button>';
+    actions.querySelector('button').addEventListener('click', () => restoreVersion(sheet, html, at));
+    row.append(preview, actions);
+    btn.textContent = 'Hide';
+  } catch (err) {
+    btn.textContent = 'Show';
+    showToast(err.message || 'Couldn’t open this version.');
+  }
+}
+
+function restoreVersion(sheet, html, at) {
+  if (blockedOffline()) return;
+  const before = serializeEditor();
+  const name = currentSheetName();
+  if (!putTextBack(sheet, html)) return;
+  closeHistory();
+  showToast(`Restored the version from ${whenLabel(at)}`, {
+    action: 'Undo',
+    duration: 6000,
+    run: () => { if (putTextBack(sheet, before)) showToast(`${name} is back as it was`); }
+  });
+}
+
+historyModal.querySelectorAll('[data-close-history]').forEach(btn => btn.addEventListener('click', closeHistory));
+historyModal.addEventListener('click', e => {
+  if (e.target === historyModal) return closeHistory();
+  const show = e.target.closest('[data-history-show]');
+  if (show) showVersion(show.closest('.history-row'), Number(show.dataset.historyShow));
+});
+// Escape closes it through the page-wide handler (near the download code).
 
 // ---- Search: sheet names, their text and file names, across every sheet ----
 // Everything searched is already on this device (kept copies of each sheet

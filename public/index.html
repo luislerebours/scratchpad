@@ -474,6 +474,35 @@
     </section>
   </div>
 
+  <div id="emailModal" class="modal-backdrop" hidden>
+    <section class="modal-card delete-modal" role="dialog" aria-modal="true" aria-labelledby="emailChangeTitle">
+      <div class="modal-header">
+        <h2 id="emailChangeTitle">Change email</h2>
+        <button class="modal-close" type="button" data-close-email aria-label="Close">×</button>
+      </div>
+      <form id="emailChangeForm" class="delete-account-body" novalidate>
+        <div data-email-step="1">
+          <p class="delete-account-text">You’ll sign in with the new email from now on. Your sheets, files, password and recovery key stay as they are. Every other device will be signed out.</p>
+          <input type="email" id="emailChangeUser" autocomplete="username" hidden />
+          <label class="field-label" for="emailChangeNew">New email</label>
+          <input id="emailChangeNew" class="rename-input" type="email" autocomplete="email" inputmode="email" required />
+          <label class="field-label" for="emailChangePassword">Your password</label>
+          <input id="emailChangePassword" class="rename-input" type="password" autocomplete="current-password" required />
+        </div>
+        <div data-email-step="2" hidden>
+          <p class="delete-account-text">We sent a code to <strong id="emailChangeTo"></strong>. Enter it to finish.</p>
+          <label class="field-label" for="emailChangeCode">Code</label>
+          <input id="emailChangeCode" class="rename-input" type="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" placeholder="otter4821" required />
+        </div>
+        <p class="auth-error" id="emailChangeError" role="alert"></p>
+        <div class="modal-actions">
+          <button class="btn secondary" type="button" data-close-email>Cancel</button>
+          <button class="btn primary" type="submit" id="emailChangeSubmit">Send code</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <div id="renameModal" class="modal-backdrop" hidden>
     <section class="modal-card rename-modal" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
       <div class="modal-header">

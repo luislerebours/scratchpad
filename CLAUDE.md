@@ -169,7 +169,8 @@ to what the app collects); `branding/play-store/` the listing kit.
   Sector 809 Labs". New emails pass content only (heading, intro, box, button,
   note), never their own HTML; a plain-text part is made from the same content.
 - Security notices (`securityNotice()` in `netlify/lib/notices.mjs`): one email when the
-  password changes (reset), the account is started over, a new recovery key is
+  password changes (reset or Change password), the email changes (to the old
+  address), the account is started over, a new recovery key is
   made, every device is signed out, or the account is deleted (says if Pro was
   cancelled). Box: time (UTC) and the kind of device from the browser
   ("Safari on iPhone"), never stored. A notice that can't be sent never stops
@@ -205,7 +206,7 @@ to what the app collects); `branding/play-store/` the listing kit.
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Change password, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
+  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data, Sign out, Sign out of all devices, Delete
   account in red at the bottom) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,
@@ -249,6 +250,16 @@ to what the app collects); `branding/play-store/` the listing kit.
   re-encrypted and the recovery key keeps working. The server checks the current
   sign-in secret, bumps `version` (every other device signed out; this one gets a
   new cookie) and sends the `password` security notice.
+- Change email (`openChangeEmail()` in `app.js`, `auth?action=email-code` then
+  `change-email`): new email + password, then a code sent to the new address.
+  The email salts the password key, so the device re-derives the sign-in secret
+  and `byPassword` from the new email and the same password (the recovery key
+  doesn't depend on the email). The server moves `users/<ek>` to the new email
+  key, leaves `email-moves/<old ek>` → new (erased with the account, via
+  `previousKeys`), points Stripe (`stripe-customers/…`, customer and
+  subscription metadata) and the Play token at the new key (`followEmail` in
+  `lib/moves.mjs`; Stripe/Play lookups go through `currentUserKey`), bumps
+  `version` and emails a notice to the old address (`email`, new address masked).
 - File rows: Download, Delete (trash, not red; asks first like the ••• menu)
   and •••.
 - Files can be swiped left to delete (touch only). The server delete waits

@@ -597,6 +597,8 @@ body.dragging-files .files.drag-active
 .delete-account-body .rename-input { margin-top: 6px; }
 .delete-account-body .auth-error { min-height: 1.2em; margin: 8px 0 4px; }
 .delete-account-body .rename-input + .field-label { margin-top: 12px; }
+.delete-account-body > [data-email-step] { display: grid; gap: 4px; }
+.delete-account-body > [data-email-step][hidden] { display: none; }
 
 /* ---------- Sign-in ---------- */
 /* The sign-in page is also the front door: pitch, plans and the sign-in card.

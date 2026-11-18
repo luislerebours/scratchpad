@@ -1,4 +1,4 @@
-import { MAX_SHEETS, bumpRev, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
+import { MAX_SHEETS, bumpRev, bumpRevForDevice, json, parseSheet, requireUser, userStore } from '../lib/auth.mjs';
 import {
   TRASH_DAYS, deleteFileForGood, publicRecord, readRecords, readSheetTrash, visibleFiles, wipeSheet, writeSheetTrash
 } from '../lib/files.mjs';
@@ -258,8 +258,8 @@ export default withErrors('state', async req => {
       next = { text: '', html, filled: Boolean(body.filled), images, updatedAt: next.updatedAt };
     }
     await store.setJSON(key, next);
-    const rev = await bumpRev(ns, `text-${sheet}`);
-    return json({ updatedAt: next.updatedAt, rev });
+    const { rev, notice } = await bumpRevForDevice(ns, `text-${sheet}`);
+    return json({ updatedAt: next.updatedAt, rev, ...(notice ? { notice } : {}) });
   }
 
   return json({ error: 'Method not allowed' }, 405);

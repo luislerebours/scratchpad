@@ -6,12 +6,13 @@ const API_IMAGES = '/.netlify/functions/images';
 const API_AUTH = '/.netlify/functions/auth';
 const API_SYNC = '/.netlify/functions/sync';
 const API_CHECK = '/api/check';
-const SAFETY_CHECK_MS = 60_000;
+const SAFETY_CHECK_MS = 5 * 60_000; // while live sync is connected (it brings changes at once)
 const OLD_FILE_DAYS = 30;
 const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 const PING_MS = 25_000;
 const POLL_MS = 2000;
-const SAVE_DELAY_MS = 450;
+const SAVE_DELAY_MS = 1500; // a save goes out this long after typing stops…
+const SAVE_MAX_WAIT_MS = 5000; // …and at least this often while typing goes on
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const PARALLEL_CHUNKS = 3;
 const CHUNK_RETRIES = 5;
@@ -85,6 +86,7 @@ const imageHandle = document.querySelector('#imageHandle');
 let activeSheet = 1;
 let localUpdatedAt = 0;
 let saveTimer = null;
+let unsavedSince = 0; // when the first edit not yet sent was made
 let saving = false;
 let lastInputAt = 0;
 let lastFileRefresh = 0;
@@ -879,6 +881,7 @@ async function saveState(sheet = activeSheet) {
   const targetSheet = validSheet(sheet);
   const textToSave = pad.innerText;
   const htmlToSave = serializeEditor();
+  if (targetSheet === activeSheet) unsavedSince = 0;
   const filled = !editorIsEmpty();
   saving = true;
   if (targetSheet === activeSheet) setSaveState('saving');
@@ -893,13 +896,17 @@ async function saveState(sheet = activeSheet) {
         images: [...new Set([...htmlToSave.matchAll(/[?&;]id=([A-Za-z0-9-]{1,64})/g)].map(m => m[1]))]
       }
       : { text: textToSave, html: htmlToSave };
+    const payload = JSON.stringify(body);
     const r = await fetch(stateUrl(targetSheet), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: payload,
+      // Small enough to finish even if the page is being closed.
+      keepalive: payload.length < 60_000
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
+    tellOtherDevices(data.notice);
     cacheSheet(targetSheet, htmlToSave, Number(data.updatedAt || Date.now()));
     if (data.rev) ownRevs.set(`text-${targetSheet}`, data.rev);
     if (targetSheet === activeSheet) {
@@ -929,7 +936,19 @@ function onEditorChanged() {
   clearTimeout(saveTimer);
   setSaveState('unsaved');
   const sheetAtInput = activeSheet;
-  saveTimer = setTimeout(() => { saveTimer = null; saveState(sheetAtInput); }, SAVE_DELAY_MS);
+  // Saved once typing pauses, and at least every few seconds during a long
+  // stretch of typing (each save is a server call, and other devices fetch it).
+  if (!unsavedSince) unsavedSince = Date.now();
+  const wait = Math.max(0, Math.min(SAVE_DELAY_MS, unsavedSince + SAVE_MAX_WAIT_MS - Date.now()));
+  saveTimer = setTimeout(() => { saveTimer = null; saveState(sheetAtInput); }, wait);
+}
+
+// After a save, this device passes the server's signed notice to the sync
+// relay, which tells the account's other devices (the server doesn't wait on
+// it). If it can't get through, they still find out on their own check.
+function tellOtherDevices(notice) {
+  if (!notice?.url || !notice?.token) return;
+  fetch(notice.url, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'Content-Type': 'text/plain' }, body: notice.token }).catch(() => {});
 }
 
 pad.addEventListener('input', onEditorChanged);
@@ -4882,10 +4901,11 @@ async function showPlayUpgrade(reason) {
   openSheet({
     title: 'Upgrade to Pro',
     text: `${reason ? `${reason} ` : ''}Pro gives you 10 sheets, 5 GB of storage, files up to 100 MB each, and share links. Billed through Google Play; cancel anytime in the Play Store.`,
+    // Yearly first: the better deal for people, and fewer charges to pay fees on.
     actions: [
-      ...(prices.month ? [{ label: `${prices.month.label} / month`, kind: 'primary', run: () => buyOnPlay('month') }] : []),
-      ...(prices.year ? [{ label: `${prices.year.label} / year${save > 0 ? ` · save ${save}%` : ''}`, kind: 'primary', run: () => buyOnPlay('year') }] : []),
-      { label: 'Not now', kind: 'secondary', full: true }
+      ...(prices.year ? [{ label: `${prices.year.label} / year${save > 0 ? ` · save ${save}%` : ''}`, kind: 'primary', full: true, run: () => buyOnPlay('year') }] : []),
+      ...(prices.month ? [{ label: `${prices.month.label} / month`, kind: prices.year ? 'secondary' : 'primary', full: !prices.year, run: () => buyOnPlay('month') }] : []),
+      { label: 'Not now', kind: 'secondary', full: !(prices.year && prices.month) }
     ]
   });
 }
@@ -4902,10 +4922,12 @@ function showUpgrade(reason) {
   openSheet({
     title: 'Upgrade to Pro',
     text: `${reason ? `${reason} ` : ''}Pro gives you 10 sheets, 5 GB of storage, files up to 100 MB each, and share links.`,
+    // Yearly first: the better deal for people, and one card charge a year
+    // instead of twelve (each charge carries a fixed fee).
     actions: [
-      { label: `${money(month)} / month`, kind: 'primary', run: () => startCheckout('month') },
-      { label: `${money(year)} / year · save ${save}%`, kind: 'primary', run: () => startCheckout('year') },
-      { label: 'Not now', kind: 'secondary', full: true }
+      { label: `${money(year)} / year · save ${save}%`, kind: 'primary', full: true, run: () => startCheckout('year') },
+      { label: `${money(month)} / month`, kind: 'secondary', run: () => startCheckout('month') },
+      { label: 'Not now', kind: 'secondary' }
     ]
   });
 }
@@ -5920,7 +5942,7 @@ async function startApp() {
   else if (masterKey && account.locked === 'on' && !account.typesSealed) sealOldTypes();
   connectSync();
   // Every 2 seconds while the relay is down or this device is offline (view
-  // only); once a minute as a safety net otherwise.
+  // only); every 5 minutes as a safety net while live sync is connected.
   setInterval(() => {
     if (!socketHealthy || viewOnly || Date.now() - lastCheckAt > SAFETY_CHECK_MS) checkForChanges();
   }, POLL_MS);

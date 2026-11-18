@@ -75,7 +75,9 @@ export default withErrors('files', async req => {
       if (full) return json({ error: full, quota: true }, 413);
     }
 
-    const toR2 = r2Enabled();
+    // R2 only for pages that send pieces to the relay (`direct: 1`). A tab
+    // opened before R2 (still running the old page) uploads to Netlify.
+    const toR2 = r2Enabled() && body?.direct === 1;
     const pieceBytes = toR2 ? R2_CHUNK_BYTES : CHUNK_BYTES;
     const record = {
       id: randomUUID(),

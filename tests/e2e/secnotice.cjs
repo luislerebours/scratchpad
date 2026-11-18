@@ -36,7 +36,7 @@ const E = 'notice' + Date.now() + '@example.com';
   ok('delete account: one notice', notices(E).at(-1) === 'deleted|Safari on iPhone' && notices(E).length === 2, notices(E).join());
 
   // What the emails look like
-  const { renderEmail } = await import(REPO + '/netlify/lib/email.mjs');
+  const { renderEmail } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/email.mjs').href);
   const shots = [];
   for (const [kind, c] of Object.entries({
     password: { heading: 'Your password was changed', intro: 'The password for your ScrapSheet account was just changed, and every other device was signed out.', box: { title: 'When and where', body: 'Nov 17, 2026, 7:42 PM UTC · Safari on iPhone' }, button: { label: 'Open ScrapSheet', url: '#' }, note: 'Wasn’t you? Reset your password right away (“Forgot password?” on the sign-in page) and email support@sector809labs.com.' },

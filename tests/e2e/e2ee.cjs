@@ -9,7 +9,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const EMAIL = 'enc' + Date.now() + '@example.com';
 let fails = 0; const ok = (name, cond, extra = '') => { if (!cond) fails++; console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' — ' + extra : ''}`); };
 (async () => {
-  const { getStore } = await import(REPO + '/node_modules/@netlify/blobs/dist/main.js');
+  const { getStore } = await import(require('url').pathToFileURL(REPO + '/node_modules/@netlify/blobs/dist/main.js').href);
   const store = name => getStore({ name, siteID: 'site', token: 'tok', apiURL: 'http://localhost:8971', consistency: 'strong' });
   const ek = crypto.createHash('sha256').update(EMAIL).digest('hex').slice(0, 32);
   const user = () => store('scratchpad-auth').get(`users/${ek}`, { type: 'json' });

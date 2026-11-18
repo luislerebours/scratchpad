@@ -66,7 +66,7 @@ const feature = () => `<!doctype html><meta charset="utf-8"><style>${font}
   await render(feature(), 1024, 500, OUT + 'feature-graphic-1024x500.png');
   await b.close();
   // Play wants opaque images: flatten to RGB. The icon: the approved app icon at 512.
-  execFileSync('python3', ['-c', `
+  execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', `
 import glob
 from PIL import Image
 for f in glob.glob('${OUT}*.png'):

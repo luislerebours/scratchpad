@@ -33,10 +33,10 @@ const call = (page, method, params, body) => page.evaluate(async ([API, method, 
 
 (async () => {
   // The lib's TOTP against RFC 6238's test vector (SHA-1, T=59s → step 1).
-  const lib = await import(REPO + '/netlify/lib/admin.mjs');
+  const lib = await import(require('url').pathToFileURL(REPO + '/netlify/lib/admin.mjs').href);
   ok('TOTP matches RFC 6238 vector', lib.totpAt(lib.base32(Buffer.from('12345678901234567890')), 1) === '287082');
 
-  const { getStore } = await import(REPO + '/node_modules/@netlify/blobs/dist/main.js');
+  const { getStore } = await import(require('url').pathToFileURL(REPO + '/node_modules/@netlify/blobs/dist/main.js').href);
   const store = name => getStore({ name, siteID: 'site', token: 'tok', apiURL: 'http://localhost:8971', consistency: 'strong' });
   const auth = store('scratchpad-auth'); const adm = store('scratchpad-admin');
   const ekOf = e => crypto.createHash('sha256').update(e).digest('hex').slice(0, 32);
@@ -196,7 +196,7 @@ const call = (page, method, params, body) => page.evaluate(async ([API, method, 
   await a.check('#signupsOpen'); await a.waitForSelector('#toast:has-text("open")');
 
   // ---- Errors ----
-  const { recordError, withErrors } = await import(REPO + '/netlify/lib/errors.mjs');
+  const { recordError, withErrors } = await import(require('url').pathToFileURL(REPO + '/netlify/lib/errors.mjs').href);
   process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
   const boom = withErrors('test-fn', async () => { throw new Error('kaboom'); });
   const res = await boom(new Request('http://localhost/.netlify/functions/test-fn?action=go&secret=x', { method: 'POST', body: '{"text":"private"}' }));

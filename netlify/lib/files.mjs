@@ -1,4 +1,5 @@
 import { userStore } from './auth.mjs';
+import { clearVersions } from './versions.mjs';
 import { deletePieces, filePrefix, onR2, purge, r2Enabled, sheetPrefix } from './r2.mjs';
 
 // Files and Recently Deleted, shared by files.mjs and state.mjs.
@@ -85,6 +86,7 @@ export async function wipeSheet(ns, sheet) {
   const records = await Promise.all(blobs.map(({ key }) => userStore(ns, 'files', sheet).get(key, { type: 'json' }).catch(() => null)));
   if (r2Enabled() || records.some(onR2)) await purge(sheetPrefix(ns, sheet));
   await userStore(ns, 'state').delete(`sheets/${sheet}`);
+  await clearVersions(ns, sheet);
   await Promise.all(FILE_KINDS.map(kind => emptyStore(userStore(ns, kind, sheet))));
 }
 

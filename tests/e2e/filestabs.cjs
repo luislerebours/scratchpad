@@ -43,6 +43,19 @@ const E = 'filestabs' + Date.now() + '@example.com';
   const recs = await recordsOf(1);
   ok('(one file in R2, one on Netlify)', recs.some(r => r.store === 'r2') && recs.some(r => !r.store));
 
+  // The Files heading carries the same paperclip as the tab's file count.
+  await A.waitForSelector('.sheet-tab .tab-files svg path');
+  const clip = await A.evaluate(() => {
+    const h = document.querySelector('#filesHeading'); const svg = h.querySelector('svg'); const s = svg.getBoundingClientRect();
+    const r = document.createRange(); r.selectNodeContents(h.lastChild); const t = r.getBoundingClientRect();
+    return { head: svg.querySelector('path').getAttribute('d'), tab: document.querySelector('.sheet-tab .tab-files svg path').getAttribute('d'),
+      text: h.textContent, hidden: svg.getAttribute('aria-hidden'), before: s.right <= t.left, gap: t.left - s.right,
+      level: Math.abs((s.top + s.bottom) / 2 - (t.top + t.bottom) / 2), size: s.width };
+  });
+  ok('Files heading shows the tabs’ paperclip', clip.head === clip.tab && clip.size > 16, `${Math.round(clip.size)}px`);
+  ok('the paperclip sits just left of “Files”, level with it', clip.before && clip.gap > 3 && clip.gap < 14 && clip.level < 3, `gap ${Math.round(clip.gap)}px, off ${clip.level.toFixed(1)}px`);
+  ok('the heading still reads “Files” (the icon is hidden from screen readers)', clip.text === 'Files' && clip.hidden === 'true');
+
   // A second device.
   const B = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, acceptDownloads: true })).newPage(); B.on('pageerror', e => errs.push('B ' + e.message));
   await B.goto(BASE); await B.fill('#signinEmail', E); await B.fill('#signinPassword', 'pass-12345'); await B.click('#signinForm .auth-submit');

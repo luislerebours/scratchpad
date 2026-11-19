@@ -339,7 +339,9 @@ to what the app collects); `branding/play-store/` the listing kit.
   `reorder`. Moving before the hold is a swipe that scrolls the row: a finger
   scrolls natively, a mouse or pen moves the row with it and it glides on after
   letting go (`swipeTabs()` / `endTabSwipe()`); a mouse wheel over the row
-  scrolls it sideways. A mouse held still and let go is a click (opens the tab).
+  scrolls it sideways. Tabs out of sight show a small round arrow on that edge, over the
+  fade (`#tabsMoreStart` / `#tabsMoreEnd`, the count only in its label), that scrolls
+  that way. A mouse held still and let go is a click (opens the tab).
   A tab list redrawn during the hold is fine (`beginTabDrag` finds the new tab). The picked-up tab rises off the row (up 7px, `scale: 1.07`,
   deeper shadow) while the others dim to half, and it follows the pointer along
   the row (`translate`). The row scrolls sideways, which clips above and below

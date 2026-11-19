@@ -803,7 +803,7 @@ function revealActiveTab(smooth = false) {
   updateTabFades();
 }
 
-// …and says how many tabs are out of sight on each side, on a pill that scrolls there.
+// …and shows an arrow on each side with tabs out of sight (its label says how many), which scrolls there.
 const tabsMoreStart = document.getElementById('tabsMoreStart');
 const tabsMoreEnd = document.getElementById('tabsMoreEnd');
 function updateTabFades() {
@@ -820,7 +820,6 @@ function updateTabFades() {
   }
   for (const [btn, n, way] of [[tabsMoreStart, before, 'before'], [tabsMoreEnd, after, 'after']]) {
     btn.hidden = !n;
-    btn.querySelector('.tabs-more-count').textContent = n ? String(n) : '';
     btn.setAttribute('aria-label', `${n} more ${n === 1 ? 'sheet' : 'sheets'} ${way === 'before' ? 'to the left' : 'to the right'}`);
     btn.title = btn.getAttribute('aria-label');
   }

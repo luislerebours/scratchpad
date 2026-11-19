@@ -27,6 +27,9 @@ Google's rules that decide the answers
 | Does your app collect or share any of the required user data types? | **Yes** |
 | Is all of the user data collected by your app encrypted in transit? | **Yes** (HTTPS everywhere; content is also end-to-end encrypted) |
 | Do you provide a way for users to request that their data is deleted? | **Yes**: in the app (Account & security → Delete account) and at https://scrap.sector809labs.com/delete-account |
+| Account creation methods | **Username, password, and other authentication** (email, password, and an emailed code) |
+| Delete account URL | https://scrap.sector809labs.com/delete-account |
+| Delete some data without deleting the account (optional) | Left blank: Play asks for a page with those steps, and there isn't one |
 
 ### Data types
 
@@ -55,7 +58,19 @@ Notes for the reviewer if asked:
 
 ## Content rating (IARC questionnaire)
 
-- **Category:** Utility, Productivity, Communication or Other.
+Entered Nov 2026 (category **All Other App Types**, contact support@sector809labs.com).
+Result: ESRB Everyone, PEGI 3, USK all ages, IARC 3+, ClassInd 14+ (Brazil
+rates "users interact" higher); all with "Users Interact, In-App Purchases".
+
+- Sharing follow-ups (asked after "users exchange content: Yes"): shared content
+  is not the primary content · no public sharing of nudity or graphic violence ·
+  no block, report or chat moderation · **interactions can be limited to invited
+  friends only: Yes** (a link reaches only whoever it's sent to, optionally with
+  a password).
+- Online content not in the download (catalogues, AI content, news): **No**.
+- Random-item purchases, cash rewards/NFTs, web browser or search engine, news
+  or education: **No**.
+- **Category:** All Other App Types.
 - Violence, fear, sexual content, nudity, profanity, drugs, alcohol, tobacco,
   gambling, simulated gambling, hate: **No** to all.
 - Does the app let users interact or exchange content with other users?
@@ -74,6 +89,7 @@ Notes for the reviewer if asked:
 | Target age groups | **13–15, 16–17, 18 and over** (decided: 13 and older; a TWA can't target under 13) |
 | Could the app unintentionally appeal to children? | No |
 | Ads | **No ads** |
+| Advertising ID | **No** (the built manifest has no AD_ID permission) |
 | App access | Sign-in required: provide a reviewer account (created on the live site at submission time; credentials go only in Play Console's app access notes, never in the repo) |
 | News app | No |
 | COVID-19 contact tracing / status | No |

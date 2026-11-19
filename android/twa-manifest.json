@@ -60,6 +60,18 @@
   "orientation": "default",
   "fingerprints": [
     {
+      "name": "play-app-signing",
+      "value": "54:3E:90:4D:F8:06:97:ED:CD:7F:5F:25:45:73:3A:80:11:77:61:06:AE:E1:8B:DF:A3:5D:D9:E4:FD:1F:2D:60"
+    },
+    {
+      "name": "play-app-signing-also-listed-1",
+      "value": "FB:EF:48:A9:F6:51:D4:41:23:77:9A:93:E8:01:9D:CD:27:D7:FC:47:0A:89:5F:37:29:BB:B4:73:EC:3D:6D:F5"
+    },
+    {
+      "name": "play-app-signing-also-listed-2",
+      "value": "43:95:27:04:E6:FF:AE:56:61:D8:BA:57:53:5D:9D:93:99:9C:2A:CE:BF:D9:15:B1:CA:01:CB:73:DB:E0:70:A0"
+    },
+    {
       "name": "upload",
       "value": "7E:B1:87:BE:32:3D:B6:D0:2E:EB:63:F9:F2:DB:0F:37:59:6C:A6:09:55:8B:02:E1:B6:09:1A:13:BE:78:65:91"
     }

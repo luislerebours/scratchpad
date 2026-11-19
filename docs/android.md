@@ -112,8 +112,10 @@ on; the site never asks for notification permission, so no prompt appears. `andr
 1. In `android/`: `bubblewrap update`, then `bubblewrap build` (it creates the
    upload key the first time: back it up, never commit it).
 2. Upload `app-release-bundle.aab` to an internal testing track.
-3. Copy the Play app signing and upload key SHA-256s from Play Console (App
-   integrity) into `public/.well-known/assetlinks.json`, deploy, and check with
+3. Copy the Play app signing and upload key SHA-256s from Play Console
+   (Protected with Play → Play Store distribution → Play app signing: every
+   app signing key listed, via "Copy all certificate fingerprints"; its Digital
+   Asset Links option names the one phones check, 54:3E…2D:60; done Nov 2026) into `public/.well-known/assetlinks.json`, deploy, and check with
    `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://scrap.sector809labs.com&relation=delegate_permission/common.handle_all_urls`.
 4. On a phone from the testing track: full screen (no browser bar), sign in,
    share a photo from Gallery into ScrapSheet, upload, offline, dark mode,

@@ -140,11 +140,25 @@ async function owner(req, url) {
     const found = await target({ ns, kind, sheet, file });
     if (!found) return json({ error: 'That is no longer here to share.' }, 404);
 
+    // The page may pick the link's token itself, so a phone can open its share
+    // menu with the link in the same tap (iOS refuses once anything has waited)
+    // while this saves it. The page retries until it gets an answer, so the
+    // same request can arrive twice: the link it already made is the answer.
+    const wanted = body.token;
+    if (wanted !== undefined && !(typeof wanted === 'string' && /^[A-Za-z0-9_-]{24}$/.test(wanted))) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
+    if (wanted) {
+      const taken = await store.get(`shares/${wanted}`, { type: 'json' });
+      if (taken) {
+        const same = taken.ns === ns && taken.kind === kind && taken.sheet === sheet && (taken.file || null) === file && !taken.revoked;
+        return same ? json({ share: ownerView(taken), origin: url.origin }) : json({ error: 'That link is already in use. Make a new one.' }, 409);
+      }
+    }
+
     // One link per file or sheet: a new one replaces the old.
     const tokens = await readIndex(ns);
     const existing = await readShares(ns);
     await Promise.all(existing
-      .filter(s => !ended(s) && s.kind === kind && s.sheet === sheet && (s.file || null) === file)
+      .filter(s => s.token !== wanted && !ended(s) && s.kind === kind && s.sheet === sheet && (s.file || null) === file)
       .map(s => store.setJSON(`shares/${s.token}`, { ...s, revoked: true, revokedAt: Date.now(), revokedReason: 'replaced' })));
 
     const pw = await passwordFor(body.password);
@@ -152,7 +166,7 @@ async function owner(req, url) {
     const now = Date.now();
     const share = {
       ...(pw ? { pw, linkFragment: body.linkFragment } : {}),
-      token: randomBytes(18).toString('base64url'),
+      token: wanted || randomBytes(18).toString('base64url'),
       ns,
       kind,
       sheet,
@@ -163,7 +177,7 @@ async function owner(req, url) {
       views: 0
     };
     await store.setJSON(`shares/${share.token}`, share);
-    await writeIndex(ns, [...tokens, share.token]);
+    await writeIndex(ns, [...new Set([...tokens, share.token])]);
     return json({ share: ownerView(share), origin: url.origin });
   }
 
@@ -282,7 +296,10 @@ async function visitor(req, url, token) {
   }
 
   // What's shared. Counted as a view.
-  await store.setJSON(`shares/${token}`, { ...share, views: (share.views || 0) + 1, viewedAt: Date.now() });
+  // Counted on the record as it is now, not as it was when this request began:
+  // a password or expiry changed meanwhile must not be written over.
+  const fresh = (await store.get(`shares/${token}`, { type: 'json' })) || share;
+  await store.setJSON(`shares/${token}`, { ...fresh, views: (fresh.views || 0) + 1, viewedAt: Date.now() });
   if (share.kind === 'file') {
     const { sheet: _, ...file } = publicRecord(found.record, share.sheet);
     return publicJson({ kind: 'file', name: share.name, expiresAt: share.expiresAt, file });

@@ -4710,12 +4710,67 @@ async function openShareLinks(list) {
 // What a link's password needs: the proof for the server, and the link's key
 // part ("p.<salt>.<the item's key locked with the password>") locked with the
 // sheet's key for the owner's devices.
-async function linkPassword(target, password) {
+async function linkPasswordParts(target, password) {
   const key = target.kind === 'sheet' ? await keyForSheet(target.sheet) : await fileKeyFor(knownFiles.get(target.file), target.sheet);
   const salt = vault.newLinkSalt();
   const { proof, kek } = await vault.linkPasswordKeys(password, salt);
   const fragment = `p.${salt}.${await vault.wrap(key, kek)}`;
-  return { password: { salt, proof }, linkFragment: await vault.encryptText(await keyForSheet(target.sheet), fragment) };
+  // `body` is what the server gets; `fragment` goes only into the link.
+  return { fragment, body: { password: { salt, proof }, linkFragment: await vault.encryptText(await keyForSheet(target.sheet), fragment) } };
+}
+const linkPassword = async (target, password) => (await linkPasswordParts(target, password)).body;
+
+// ---- A new link, ready before the tap (phones) ----
+// iOS opens its share menu only straight from a tap: nothing may wait in
+// between. So while the "Create link" view is open the page gets a new link
+// ready (its token picked here, its key part worked out, and for a password
+// the slow key work done as it's typed). The tap then opens the share menu
+// with the finished link at once and saves it to the server meanwhile.
+let sharePrep = null;
+let sharePwTimer = 0;
+
+async function prepareShare() {
+  sharePrep = null;
+  clearTimeout(sharePwTimer);
+  const target = shareTarget;
+  if (!target || !masterKey || !phoneShare()) return;
+  try {
+    const key = target.kind === 'sheet' ? await keyForSheet(target.sheet) : await fileKeyFor(knownFiles.get(target.file), target.sheet);
+    const prep = { target, token: vault.toB64(crypto.getRandomValues(new Uint8Array(18))), plain: await vault.exportKey(key), pw: null };
+    if (shareTarget === target && !shareLink) sharePrep = prep;
+  } catch {
+    // Not ready: Create link works the slower way (the link, then Share…).
+  }
+}
+
+function prepareSharePassword(password) {
+  clearTimeout(sharePwTimer);
+  const prep = sharePrep;
+  if (!prep) return;
+  prep.pw = null;
+  if (password.length < 4) return;
+  sharePwTimer = setTimeout(async () => {
+    try {
+      const parts = await linkPasswordParts(prep.target, password);
+      if (sharePrep === prep && shareBody.querySelector('#sharePwNew')?.value === password) prep.pw = { password, ...parts };
+    } catch {
+      // As above.
+    }
+  }, 300);
+}
+
+// Saves a link the share menu may already be showing, so it keeps trying
+// through a dropped connection; only the server refusing it gives up.
+async function saveNewLink(body) {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await sharePost(body, { keepalive: true });
+    } catch (err) {
+      if (!retryable(err) || tries >= 6) throw err;
+      await pause(Math.min(800 * 2 ** tries, 8000));
+      await whenActive();
+    }
+  }
 }
 
 const passwordFieldHtml = (id, label) => `
@@ -4751,12 +4806,12 @@ function untilText(at) {
 
 const viewsText = n => n ? `Opened ${n} time${n === 1 ? '' : 's'}` : 'Not opened yet';
 
-async function sharePost(body) {
-  const r = await fetch(API_SHARE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function sharePost(body, options = {}) {
+  const r = await fetch(API_SHARE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), ...options });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
     if (data.upgrade) showUpgrade(data.error);
-    throw new Error(data.error || 'Something went wrong. Try again.');
+    throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: r.status });
   }
   return data;
 }
@@ -4818,8 +4873,10 @@ function renderShare(focus) {
       <p class="seg-label" id="shareDaysLabel">Link expires after</p>
       ${segHtml(7)}
       ${masterKey ? `<details class="share-pw-box"><summary>Add a password (optional)</summary>${passwordFieldHtml('sharePwNew', 'Password')}<p class="share-explain">They’ll need it to open the link. Send it separately (say, in a text). We can’t recover it for you.</p></details>` : ''}
+      <p class="share-warn" id="shareNotSaved" role="alert" hidden></p>
       <button class="btn full" type="button" data-share-create>${icon('link')}Create link</button>`;
     if (focus) shareBody.querySelector('[data-share-create]').focus({ preventScroll: true });
+    prepareShare();
     return;
   }
   const canShare = typeof navigator.share === 'function';
@@ -4906,6 +4963,34 @@ shareBody.addEventListener('click', async e => {
     const password = shareBody.querySelector('#sharePwNew')?.value || '';
     if (password && password.length < 4) return showToast('Use at least 4 characters for the password');
     btn.disabled = true;
+    // A phone with the link ready: the share menu opens in this very tap,
+    // before anything waits, and the link is saved while it's showing.
+    const prep = sharePrep?.target === shareTarget && (!password || sharePrep.pw?.password === password) ? sharePrep : null;
+    if (prep) {
+      const target = shareTarget;
+      const sharing = shareNatively(`${location.origin}/s/${prep.token}#${password ? prep.pw.fragment : prep.plain}`, target.name);
+      try {
+        const { share: made } = await saveNewLink({ action: 'create', kind: target.kind, sheet: target.sheet, file: target.file, days, token: prep.token, ...(password ? prep.pw.body : {}) });
+        const [share] = await openShareLinks([made]);
+        noteShare(share);
+        if (shareTarget === target && !shareModal.hidden) {
+          shareLink = share;
+          renderShare(true);
+          if (!(await sharing)) showToast('Link ready: tap Share… to send it');
+        }
+      } catch (err) {
+        // The link in the share menu was never saved: say so plainly, where it can't be missed.
+        await sharing;
+        if (shareTarget === target && !shareModal.hidden) {
+          renderShare(true);
+          const warn = shareBody.querySelector('#shareNotSaved');
+          warn.textContent = `That link wasn’t saved, so it won’t open. If you already sent it, make a new one and send that.`;
+          warn.hidden = false;
+        }
+        showToast('The link wasn’t saved: it won’t open');
+      }
+      return;
+    }
     try {
       const extra = password ? await linkPassword(shareTarget, password) : {};
       const { share: made } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days, ...extra });
@@ -4974,6 +5059,7 @@ shareBody.addEventListener('input', e => {
   if (e.target.id !== 'sharePwNew') return;
   const who = shareBody.querySelector('[data-share-who]');
   if (who) who.textContent = shareWhoText(who.dataset.shareWho, e.target.value.length > 0);
+  prepareSharePassword(e.target.value);
 });
 
 // Arrow keys move between the expiry choices.

@@ -574,6 +574,7 @@ body.dragging-files .files.drag-active
 .share-body { display: grid; gap: 16px; padding: 18px 20px 20px; }
 .share-body > * { min-width: 0; }
 .share-explain { color: var(--muted); font-size: .9375rem; line-height: 1.5; }
+.share-warn { padding: 10px 12px; border-radius: 10px; background: var(--danger-soft); color: var(--danger); font-size: .9375rem; line-height: 1.5; }
 .seg-label { color: var(--muted); font-size: .8125rem; margin-bottom: -8px; }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
 .seg button { appearance: none; min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-size: .9375rem; font-weight: 600; cursor: pointer; }

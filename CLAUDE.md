@@ -99,6 +99,19 @@ to what the app collects); `branding/play-store/` the listing kit.
     proof (`action=unlock`, limited per link and IP) for a 12-hour pass (`p`)
     sent with every request; without it the link serves nothing (401 with the
     salt). Changing or removing the password changes the link and ends old passes.
+    A link sent before its password was removed still asks for that password
+    (checked on the device by whether it opens the key in the link).
+    New link on a phone (`prepareShare()`, `saveNewLink()` in `app.js`): iOS
+    opens its share menu only straight from a tap, so while the Create link view
+    is open the page picks the link's token (24 chars; `create` takes `token`)
+    and works out its key part (a password's slow key work as it's typed). The
+    tap opens the share menu with the finished link at once and saves it
+    meanwhile: retried until the server answers, and a repeat of the same
+    `create` returns the link already made (a token in use for anything else:
+    409). A refusal shows "That link wasn’t saved" in the box. The viewer asks
+    again for a few seconds for a link not found yet. Not ready at the tap (a
+    password just typed): the old way, link first, then Share….
+    Share records are rewritten whole: the view count is added to a fresh read.
 - Storage: `netlify/lib/usage.mjs` sums an account's text, files and images.
   Default limit 5 GB per account (`quotaBytes` on the account: -1 = none),
   enforced when an upload starts; an admin can change it from the admin

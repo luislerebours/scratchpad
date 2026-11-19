@@ -803,10 +803,33 @@ function revealActiveTab(smooth = false) {
   updateTabFades();
 }
 
+// …and says how many tabs are out of sight on each side, on a pill that scrolls there.
+const tabsMoreStart = document.getElementById('tabsMoreStart');
+const tabsMoreEnd = document.getElementById('tabsMoreEnd');
 function updateTabFades() {
   const max = tabsScroller.scrollWidth - tabsScroller.clientWidth;
-  tabsScroller.classList.toggle('fade-start', tabsScroller.scrollLeft > 2);
-  tabsScroller.classList.toggle('fade-end', tabsScroller.scrollLeft < max - 2);
+  const left = tabsScroller.scrollLeft;
+  tabsScroller.classList.toggle('fade-start', left > 2);
+  tabsScroller.classList.toggle('fade-end', left < max - 2);
+  let before = 0, after = 0;
+  if (max > 2) {
+    for (const tab of sheetTabsEl.children) {
+      if (tab.offsetLeft < left - 1) before++;
+      else if (tab.offsetLeft + tab.offsetWidth > left + tabsScroller.clientWidth + 1) after++;
+    }
+  }
+  for (const [btn, n, way] of [[tabsMoreStart, before, 'before'], [tabsMoreEnd, after, 'after']]) {
+    btn.hidden = !n;
+    btn.querySelector('.tabs-more-count').textContent = n ? String(n) : '';
+    btn.setAttribute('aria-label', `${n} more ${n === 1 ? 'sheet' : 'sheets'} ${way === 'before' ? 'to the left' : 'to the right'}`);
+    btn.title = btn.getAttribute('aria-label');
+  }
+}
+for (const [btn, dir] of [[tabsMoreStart, -1], [tabsMoreEnd, 1]]) {
+  btn.addEventListener('click', () => {
+    stopTabGlide();
+    tabsScroller.scrollBy({ left: dir * Math.max(120, tabsScroller.clientWidth * 0.7), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  });
 }
 
 tabsScroller.addEventListener('scroll', updateTabFades, { passive:true });

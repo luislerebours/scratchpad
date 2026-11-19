@@ -147,7 +147,23 @@ const E = 'filestabs' + Date.now() + '@example.com';
   while (width > 360 && await A.$eval('#tabsScroller', el => el.scrollWidth <= el.clientWidth + 140)) { width -= 40; await A.setViewportSize({ width, height: 900 }); await sleep(200); }
   const strip0 = await A.$eval('#tabsScroller', el => ({ room: el.scrollWidth - el.clientWidth, left: el.scrollLeft }));
   ok('(the tabs overflow the row for the swipe test)', strip0.room > 140, JSON.stringify(strip0));
-  await A.$eval('#tabsScroller', el => { el.scrollLeft = 0; });
+  // Tabs out of sight: a pill on that edge says how many, and scrolls there.
+  await A.$eval('#tabsScroller', el => { el.scrollLeft = 0; }); await sleep(200);
+  const pills = () => A.evaluate(() => {
+    const sc = document.querySelector('#tabsScroller');
+    const hidden = [...document.querySelectorAll('.sheet-tab')].filter(t => t.offsetLeft + t.offsetWidth > sc.scrollLeft + sc.clientWidth + 1).length;
+    const st = document.querySelector('#tabsMoreStart'), en = document.querySelector('#tabsMoreEnd');
+    return { hidden, start: st.hidden ? null : st.textContent, end: en.hidden ? null : en.textContent, label: en.getAttribute('aria-label'), left: sc.scrollLeft };
+  });
+  const p0 = await pills();
+  ok('more tabs to the right: a pill there says how many', p0.start === null && p0.end === String(p0.hidden) && p0.hidden > 0 && /more sheets? to the right/.test(p0.label), JSON.stringify(p0));
+  await A.screenshot({ path: OUT + 'tabs-more.png', clip: { x: 0, y: 40, width: width, height: 110 } });
+  await A.click('#tabsMoreEnd'); await sleep(700);
+  const p1 = await pills();
+  ok('…tapping it scrolls the tabs that way, and a pill shows on the other side', p1.left > 60 && p1.start !== null, JSON.stringify(p1));
+  await A.$eval('#tabsScroller', el => { el.scrollLeft = el.scrollWidth; }); await sleep(200);
+  ok('…at the end, only the left pill shows', (await pills()).end === null);
+  await A.$eval('#tabsScroller', el => { el.scrollLeft = 0; }); await sleep(200);
   const order0 = await tabsOrder(A), active0 = await A.$eval('.sheet-tab.active .sheet-label', e => e.textContent);
   const s0 = await A.$eval('.sheet-tab:nth-child(3)', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await A.mouse.move(s0.x, s0.y); await A.mouse.down();
@@ -184,6 +200,7 @@ const E = 'filestabs' + Date.now() + '@example.com';
   for (let i = 1; i <= 6; i++) { await touch('touchMove', s.x + (d.right + 6 - s.x) * i / 6, s.y); await sleep(15); }
   await touch('touchEnd'); await sleep(800);
   ok('a quick swipe on the tabs doesn’t reorder them', (await tabsOrder(B)).join() === phoneBefore.join());
+  await B.$eval('#tabsScroller', el => { el.scrollLeft = 0; }); await sleep(300);
   s = await center(1); d = await center(2);
   const layout = () => B.evaluate(() => ({ tab2: document.querySelector('.sheet-tab:nth-child(2)').getBoundingClientRect().top, card: document.querySelector('.pad-card').getBoundingClientRect().top, add: document.querySelector('#addSheetBtn').getBoundingClientRect().top }));
   const restLayout = await layout();
@@ -214,6 +231,7 @@ const E = 'filestabs' + Date.now() + '@example.com';
   ok('touch and hold, then drag, moves a tab on a phone', phoneAfter.join() === [phoneBefore[1], phoneBefore[0], ...phoneBefore.slice(2)].join(), `${phoneBefore} → ${phoneAfter}`);
 
   // Holding a dragged tab near the strip's edge scrolls the tabs along.
+  await B.$eval('#tabsScroller', el => { el.scrollLeft = 0; }); await sleep(300);
   const strip = await B.$eval('#tabsScroller', el => { const r = el.getBoundingClientRect(); return { right: r.right, scroll: el.scrollLeft, max: el.scrollWidth - el.clientWidth }; });
   if (strip.max > 0) {
     s = await center(1);

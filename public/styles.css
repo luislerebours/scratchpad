@@ -230,6 +230,7 @@ img[data-mark] { transform: translateY(-1px); }
 
 /* ---------- Sheet tabs ---------- */
 .sheet-bar { display: flex; align-items: center; gap: 4px; margin: 0 0 14px; }
+.tabs-wrap { position: relative; display: flex; flex: 1 1 auto; min-width: 0; }
 .tabs-scroller { position: relative; flex: 1 1 auto; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-padding-inline: 24px; }
 .tabs-scroller::-webkit-scrollbar { display: none; }
 .sheet-tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -248,9 +249,19 @@ img[data-mark] { transform: translateY(-1px); }
    and sits above the card so the shadow falls on it. Only then: the rest of the
    time that extra space would catch taps meant for the buttons above and the card. */
 .tabs-scroller:has(.dragging, .settling) { z-index: 2; padding-block: 26px 38px; margin-block: -26px -38px; }
-.tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
-.tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
-.tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+.tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); }
+.tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 64px); mask-image: linear-gradient(to right, transparent, #000 64px); }
+.tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 64px, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to right, transparent, #000 64px, #000 calc(100% - 64px), transparent); }
+/* More tabs out of sight: a small pill on that edge with how many, which scrolls
+   that way when tapped. Hidden while a tab is being moved (the edges scroll then). */
+.tabs-more { appearance: none; position: absolute; top: 50%; z-index: 3; display: inline-flex; align-items: center; gap: 1px; height: 28px; min-width: 28px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text); box-shadow: 0 2px 8px rgba(0, 0, 0, .14); font: inherit; font-size: .8125rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; cursor: pointer; translate: 0 -50%; -webkit-tap-highlight-color: transparent; }
+.tabs-more[hidden] { display: none; }
+.tabs-more::before { content: ''; position: absolute; inset: -8px -6px; }
+.tabs-more .i { width: 15px; height: 15px; stroke-width: 2.2; }
+.tabs-more-start { left: 0; padding-right: 8px; }
+.tabs-more-end { right: 0; padding-left: 8px; }
+.tabs-wrap:has(.reordering, .settling) .tabs-more { display: none; }
+@media (hover: hover) { .tabs-more:hover { background: var(--raised); } }
 .sheet-tabs { display: flex; gap: 10px; width: max-content; padding: 2px; }
 .sheet-tab { appearance: none; position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 44px; min-width: 84px; max-width: 200px; padding: 2px 20px; border: 1px solid var(--tab-line); border-radius: 12px; background: var(--tab-bg); color: var(--tab-text); font-size: 1rem; font-weight: 600; letter-spacing: -.005em; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, color .15s ease, border-color .15s ease, opacity .2s ease; }
 .sheet-tab::after { content: ''; position: absolute; inset: -2px 0; }

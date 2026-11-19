@@ -29,6 +29,17 @@ async function passwordFor(given) {
   if (!b64ish(given.salt, 40) || !b64ish(given.proof, 60)) return undefined;
   return { kdfSalt: given.salt, ...(await hashPassword(given.proof)) };
 }
+// A link never changes once made. One made with a password carries its item's
+// key locked with that password ("p.<salt>.<locked key>" after "#"). When that
+// password is later changed or removed, the owner's device locks the key again
+// with the new password (or none) together with that whole link part, which
+// never reaches us, and we keep the result here (`rekey`): useless without the
+// link, and all the link's holder needs besides the current password.
+function rekeyFor(given) {
+  if (given === undefined || given === null) return null;
+  if (!b64ish(given.salt, 40) || !b64ish(given.wrapped, 120)) return undefined;
+  return { salt: given.salt, wrapped: given.wrapped };
+}
 const KEEP_ENDED_MS = 30 * DAY; // ended links stay in the owner's list this long
 // Per link: about 2.4 GB of downloads an hour, counted by piece size (pieces
 // are 4 MB on Netlify, 1 MB in R2).
@@ -198,9 +209,25 @@ async function owner(req, url) {
   if (body.action === 'password') {
     if (share.revoked) return json({ error: 'This link is turned off. Make a new one.' }, 409);
     const pw = await passwordFor(body.password);
-    if (pw === undefined || (pw && !isSealed(body.linkFragment))) return json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
-    const { pw: _, linkFragment: __, ...rest } = share;
-    const next = pw ? { ...rest, pw, linkFragment: body.linkFragment } : rest;
+    const rekey = rekeyFor(body.rekey);
+    const outdated = json({ error: 'Update ScrapSheet (reload the page) and try again.' }, 400);
+    if (pw === undefined || rekey === undefined) return outdated;
+    const { pw: _, linkFragment: kept, rekey: __, ...rest } = share;
+    let next;
+    if (rekey) {
+      // A link made with a password: the same link, its key locked again.
+      if (!kept || (pw && pw.kdfSalt !== rekey.salt)) return outdated;
+      next = { ...rest, ...(pw ? { pw } : {}), rekey, linkFragment: kept };
+    } else if (pw && isSealed(body.linkFragment)) {
+      // A page from before links stopped changing: it made a new link part.
+      next = { ...rest, pw, linkFragment: body.linkFragment };
+    } else if (pw) {
+      // A link made without a password carries the key itself: we just ask for the password.
+      if (kept) return outdated;
+      next = { ...rest, pw };
+    } else {
+      next = rest;
+    }
     await store.setJSON(`shares/${token}`, next);
     return json({ share: ownerView(next), origin: url.origin });
   }
@@ -237,12 +264,12 @@ async function visitor(req, url, token) {
     const body = await req.json().catch(() => ({}));
     if (!b64ish(body.proof, 60) || !(await checkPassword(body.proof, share.pw))) return publicJson({ error: 'That password isn’t right.' }, 400);
     const pass = await sign({ t: 'sp', tok: token, k: share.pw.kdfSalt, exp: Date.now() + PASS_MS });
-    return publicJson({ pass });
+    return publicJson({ pass, ...(share.rekey ? { wrapped: share.rekey.wrapped } : {}) });
   }
   if (share.pw) {
     const pass = await verify(url.searchParams.get('p') || '');
     if (!pass || pass.t !== 'sp' || pass.tok !== token || pass.k !== share.pw.kdfSalt) {
-      return publicJson({ error: 'This link needs a password.', reason: 'password', salt: share.pw.kdfSalt, kind: share.kind }, 401);
+      return publicJson({ error: 'This link needs a password.', reason: 'password', salt: share.pw.kdfSalt, kind: share.kind, bound: Boolean(share.rekey) }, 401);
     }
   }
 
@@ -300,9 +327,11 @@ async function visitor(req, url, token) {
   // a password or expiry changed meanwhile must not be written over.
   const fresh = (await store.get(`shares/${token}`, { type: 'json' })) || share;
   await store.setJSON(`shares/${token}`, { ...fresh, views: (fresh.views || 0) + 1, viewedAt: Date.now() });
+  // Password removed from a link made with one: its key, locked with the link part alone.
+  const rekeyOut = share.rekey && !share.pw ? { rekey: share.rekey } : {};
   if (share.kind === 'file') {
     const { sheet: _, ...file } = publicRecord(found.record, share.sheet);
-    return publicJson({ kind: 'file', name: share.name, expiresAt: share.expiresAt, file });
+    return publicJson({ kind: 'file', name: share.name, expiresAt: share.expiresAt, file, ...rekeyOut });
   }
   const doc = await found.state.get(`sheets/${share.sheet}`, { type: 'json' });
   const files = (await sheetFiles(found.files, share.sheet)).map(({ sheet: _, ...f }) => f);
@@ -312,7 +341,8 @@ async function visitor(req, url, token) {
     expiresAt: share.expiresAt,
     html: typeof doc?.html === 'string' ? doc.html : null,
     text: typeof doc?.html === 'string' ? null : String(doc?.text || ''),
-    files
+    files,
+    ...rekeyOut
   });
 }
 

@@ -98,9 +98,18 @@ to what the app collects); `branding/play-store/` the listing kit.
     locked with the sheet key, for the owner's devices). The viewer posts the
     proof (`action=unlock`, limited per link and IP) for a 12-hour pass (`p`)
     sent with every request; without it the link serves nothing (401 with the
-    salt). Changing or removing the password changes the link and ends old passes.
-    A link sent before its password was removed still asks for that password
-    (checked on the device by whether it opens the key in the link).
+    salt). A link never changes once made: only Turn off link (or expiry, or
+    deleting what it shares) ends one. Adding, changing or removing the password
+    later (`linkPasswordChange()`) keeps the link and ends old passes. A link made
+    without a password carries the key itself, so the server just asks for the
+    proof (or stops). A link made with one carries the key locked with that first
+    password, so the device locks the key again with PBKDF2 of the new password
+    (or none) + "\n" + the whole part after `#`, and the share keeps that as
+    `rekey` { salt, wrapped }: no use without the link, which never reaches the
+    server. The viewer gets `wrapped` with its pass (401 says `bound`), or
+    `rekey` in the open answer when no password is left. Links whose password an
+    older version of the app removed (no `rekey`) ask for that password and
+    check it on the device.
     New link on a phone (`prepareShare()`, `saveNewLink()` in `app.js`): iOS
     opens its share menu only straight from a tap, so while the Create link view
     is open the page picks the link's token (24 chars; `create` takes `token`)

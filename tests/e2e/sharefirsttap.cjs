@@ -142,17 +142,45 @@ const CREATE = /functions\/share$/;
   ok('an address already used for something else is refused', (await post({ action: 'create', kind: 'sheet', sheet: 1, days: 7, token: token1 })) === 409);
   ok('…and that link still opens', (await receive(url1)).title === 'one.pdf');
 
-  // ---- Viewer: the password was removed after the link was sent ----
-  await openBox('two.pdf').catch(() => {});
-  await A.waitForSelector('[data-share-pw="remove"]'); await A.click('[data-share-pw="remove"]'); await sleep(1500);
-  const plain2 = await A.inputValue('#shareUrlInput');
-  ok('(removing the password changes the link)', plain2 !== url2 && !plain2.includes('#p.'));
-  const old = await receive(url2, ['wrong-one', 'blue-river']);
-  ok('the link sent earlier still asks for its password instead of “missing its key”', old.asked && old.wrong.includes('isn’t right') && old.title === 'two.pdf', JSON.stringify(old));
+  // ---- A link made without a password: one added later, same link ----
+  const toast = text => A.waitForFunction(t => document.querySelector('#toast')?.textContent.includes(t), text, { timeout: 20000 });
+  const boxFor = async name => {
+    await A.keyboard.press('Escape'); await sleep(200);
+    await A.click(`#fileList .file-row:has-text("${name}") [data-file-menu]`); await A.click('.menu-item:has-text("link")');
+    await A.waitForSelector('#shareUrlInput'); await sleep(300);
+  };
+  await boxFor('one.pdf');
+  await A.click('[data-share-pw="set"]'); await A.fill('#sharePwEdit', 'later-pass'); await A.click('[data-share-pw="save"]');
+  await toast('Password saved'); await sleep(300);
+  ok('adding a password later keeps the same link', (await A.inputValue('#shareUrlInput')) === url1);
+  const late = await receive(url1, ['nope-nope', 'later-pass']);
+  ok('…the link sent before now asks for it, and opens', late.asked && late.wrong.includes('isn’t right') && late.title === 'one.pdf', JSON.stringify(late));
+  await A.click('[data-share-pw="remove"]'); await toast('Password removed'); await sleep(300);
+  const freed = await receive(url1);
+  ok('…and removing it again: same link, no password', (await A.inputValue('#shareUrlInput')) === url1 && !freed.asked && freed.title === 'one.pdf', JSON.stringify(freed));
+
+  // ---- A link made with a password: changed, then removed, same link ----
+  await boxFor('two.pdf');
+  await A.click('[data-share-pw="set"]'); await A.fill('#sharePwEdit', 'red-canyon'); await A.click('[data-share-pw="save"]');
+  await toast('Password saved'); await sleep(300);
+  const changed = await receive(url2, ['blue-river', 'red-canyon']);
+  ok('changing the password: the link sent before opens with the new one, not the old', (await A.inputValue('#shareUrlInput')) === url2 && changed.wrong.includes('isn’t right') && changed.title === 'two.pdf', JSON.stringify(changed));
+  await A.click('[data-share-pw="remove"]'); await toast('Password removed'); await sleep(300);
+  const open2 = await receive(url2);
+  ok('removing it: the link sent before opens without one', (await A.inputValue('#shareUrlInput')) === url2 && !open2.asked && open2.title === 'two.pdf', JSON.stringify(open2));
+
+  // ---- Viewer: a password removed by a version of the app from before links stopped changing ----
+  await boxFor('three.pdf');
+  await post({ action: 'password', token: url3.split('/s/')[1].split('#')[0], password: null });
+  const old = await receive(url3, ['wrong-one', 'quick-tap-1']);
+  ok('a link whose password an older app removed still asks for it instead of “missing its key”', old.asked && old.wrong.includes('isn’t right') && old.title === 'three.pdf', JSON.stringify(old));
 
   // ---- Viewer: a password link that lost the part after # ----
-  const bare = await receive(url3.split('#')[0], 'quick-tap-1');
-  ok('a password link without its key part says so before asking for a password', !bare.asked && bare.title === 'This link is missing its key.', JSON.stringify(bare));
+  const bare = await receive(url4.split('#')[0].replace(url4.split('/s/')[1].split('#')[0], url5.split('/s/')[1].split('#')[0]), 'x');
+  await boxFor('five.pdf'); await A.click('[data-share-pw="set"]'); await A.fill('#sharePwEdit', 'five-pass'); await A.click('[data-share-pw="save"]'); await toast('Password saved');
+  const bare2 = await receive(url5.split('#')[0], 'five-pass');
+  ok('a link without its key part says so', bare.title === 'This link is missing its key.', JSON.stringify(bare));
+  ok('…and with a password on it, says so before asking for the password', !bare2.asked && bare2.title === 'This link is missing its key.', JSON.stringify(bare2));
 
   ok('no page errors', errs.length === 0, errs.join(' | '));
   await b.close();

@@ -70,27 +70,46 @@ const E = 'sharepw' + Date.now() + '@example.com';
   await A.waitForSelector('#shareUrlInput');
   ok('the owner sees the same protected link later', (await A.inputValue('#shareUrlInput')) === link);
 
-  // ---- Change the password: the link changes; old link and old pass stop working ----
+  // ---- Change the password: the link stays the same; the old password and old pass stop working ----
+  const saved = text => A.waitForFunction(t => document.querySelector('#toast')?.textContent.includes(t), text, { timeout: 20000 });
   await A.click('[data-share-pw="set"]'); await A.fill('#sharePwEdit', 'green-hill'); await A.click('[data-share-pw="save"]');
-  await A.waitForFunction(old => document.querySelector('#shareUrlInput')?.value && document.querySelector('#shareUrlInput').value !== old, link, { timeout: 20000 });
-  const link2 = await A.inputValue('#shareUrlInput');
-  ok('changing the password gives a new link', link2 !== link && new URL(link2).hash.startsWith('#p.'));
+  await saved('Password saved'); await sleep(300);
+  ok('changing the password keeps the very same link', (await A.inputValue('#shareUrlInput')) === link);
+  const rec2 = await sharesStore().get(`shares/${token}`, { type: 'json' });
+  ok('…the server keeps the key locked again (no password, no link part in the clear)', rec2.rekey?.wrapped && rec2.pw?.kdfSalt === rec2.rekey.salt && !JSON.stringify(rec2).includes('green-hill') && !JSON.stringify(rec2).includes(new URL(link).hash.slice(3, 40)));
   await V.reload(); await V.waitForSelector('#sharePwForm', { timeout: 15000 })
     .then(() => ok('the old pass no longer works (asks again)', true), () => ok('the old pass no longer works (asks again)', false));
-  await V.fill('#sharePw', 'green-hill'); await V.click('#sharePwForm button');
+  await V.fill('#sharePw', 'blue-river'); await V.click('#sharePwForm button');
   await V.waitForFunction(() => document.querySelector('#sharePwError').textContent, null, { timeout: 20000 });
-  ok('the old link with the new password says it’s out of date', (await V.textContent('#sharePwError')).includes('out of date'));
-  await V.goto(link2); await V.waitForSelector('#sharePwForm'); await V.fill('#sharePw', 'green-hill'); await V.click('#sharePwForm button');
+  ok('the old password is refused', (await V.textContent('#sharePwError')).includes('isn’t right'));
+  await V.fill('#sharePw', 'green-hill'); await V.click('#sharePwForm button');
   await V.waitForSelector('.share-title:has-text("contract.pdf")', { timeout: 20000 })
-    .then(() => ok('the new link with the new password opens', true), () => ok('the new link with the new password opens', false));
+    .then(() => ok('the link sent earlier opens with the new password', true), () => ok('the link sent earlier opens with the new password', false));
+  const dl2 = V.waitForEvent('download', { timeout: 30000 });
+  await V.tap('[data-download], .share-download, button:has-text("Download")');
+  ok('…and the file still downloads whole', Buffer.compare(fs.readFileSync(await (await dl2).path()), data) === 0);
 
-  // ---- Remove the password ----
+  // ---- Remove the password: still the same link, now without asking ----
   await A.click('[data-share-pw="remove"]');
   await A.waitForFunction(() => document.querySelector('#shareBody').textContent.includes('No password'), null, { timeout: 15000 });
-  const link3 = await A.inputValue('#shareUrlInput');
-  const P = await (await b.newContext()).newPage();
-  await P.goto(link3); await P.waitForSelector('.share-title:has-text("contract.pdf")', { timeout: 20000 })
-    .then(() => ok('removing the password: the plain link opens without one', true), () => ok('removing the password: the plain link opens without one', false));
+  ok('removing the password keeps the very same link', (await A.inputValue('#shareUrlInput')) === link);
+  const P = await (await b.newContext()).newPage(); P.on('pageerror', e => errs.push('P ' + e.message));
+  await P.goto(link); await P.waitForSelector('.share-title:has-text("contract.pdf")', { timeout: 20000 })
+    .then(() => ok('…and it opens without a password', true), () => ok('…and it opens without a password', false));
+  const noKey = await (await b.newContext()).newPage();
+  await noKey.goto(link.split('#')[0] + '#p.AAAAAAAAAAAAAAAAAAAAAA.' + 'B'.repeat(80)); await sleep(2500);
+  ok('…but only with the real link: a made-up key part opens nothing', (await noKey.textContent('.share-title')).includes('missing its key'));
+
+  // ---- Add one again, after a reload: same link once more ----
+  await A.reload(); await A.waitForSelector('.app-shell', { state: 'visible' }); await sleep(1500);
+  await A.click('#fileList .file-row [data-file-menu]'); await A.click('.menu-item:has-text("link")');
+  await A.waitForSelector('#shareUrlInput');
+  await A.click('[data-share-pw="set"]'); await A.fill('#sharePwEdit', 'third-pass'); await A.click('[data-share-pw="save"]');
+  await saved('Password saved'); await sleep(300);
+  ok('adding a password again keeps the same link', (await A.inputValue('#shareUrlInput')) === link && (await A.textContent('#shareBody')).includes('Password protected'));
+  await P.reload(); await P.waitForSelector('#sharePwForm', { timeout: 15000 }); await P.fill('#sharePw', 'third-pass'); await P.click('#sharePwForm button');
+  await P.waitForSelector('.share-title:has-text("contract.pdf")', { timeout: 20000 })
+    .then(() => ok('…and it opens with that password', true), () => ok('…and it opens with that password', false));
   await A.keyboard.press('Escape');
 
   // ---- A sheet link with a password shows its text ----

@@ -148,6 +148,36 @@ const call = (page, method, params, body) => page.evaluate(async ([API, method, 
   await a.evaluate(() => { document.querySelector('#toast').textContent = ''; }); await a.fill('#quotaInput', ''); await a.click('#quotaSave'); await a.waitForSelector('#toast:has-text("Storage limit saved")');
   await a.selectOption('#planSelect', 'free'); await a.click('#planSave'); await a.waitForFunction(() => document.querySelector('#toast').textContent === 'Plan changed');
   ok('back to Free with plan limit', (await auth.get(`users/${ekOf(FREE)}`, { type: 'json' })).plan === 'free' && (await auth.get(`users/${ekOf(FREE)}`, { type: 'json' })).quotaBytes === undefined);
+
+  // ---- Complimentary Pro: free Pro from an admin, shown as such ----
+  const planOfFree = () => free.evaluate(async () => (await (await fetch('/.netlify/functions/auth', { cache: 'no-store' })).json()).plan);
+  ok('the plan box offers it and explains it', (await a.textContent('#planHint')).includes('free Pro that stays'));
+  await a.evaluate(() => { document.querySelector('#toast').textContent = ''; });
+  await a.selectOption('#planSelect', 'comp'); await a.click('#planSave'); await a.waitForSelector('#toast:has-text("Plan changed")');
+  const comped = await auth.get(`users/${ekOf(FREE)}`, { type: 'json' });
+  ok('Complimentary Pro saved: Pro, with when and by whom', comped.plan === 'pro' && comped.comp?.at > Date.now() - 60000 && comped.comp.by === 'ada@sector.test', JSON.stringify(comped.comp));
+  ok('…the account’s facts say so', (await a.textContent('#accountFacts')).includes('Complimentary Pro (since') && (await a.inputValue('#planSelect')) === 'comp' && (await a.textContent('#planHint')).includes('stays until you change it'));
+  await a.screenshot({ path: OUT + 'admin-comp.png' });
+  await a.keyboard.press('Escape');
+  ok('…and so does the list', (await a.textContent('#accountsTable tbody tr')).includes('Complimentary Pro') && /Complimentary since/.test(await a.textContent('#accountsTable tbody tr')));
+  await a.fill('#accountSearch', ''); await a.selectOption('#accountFilter', 'comp');
+  ok('the Complimentary Pro filter shows just that account', (await a.locator('#accountsTable tbody tr').count()) === 1 && (await a.textContent('#accountsTable tbody tr')).includes(FREE));
+  await a.selectOption('#accountFilter', 'all');
+  const mine = await planOfFree();
+  ok('the account itself is Pro and told it’s complimentary', mine.plan === 'pro' && mine.complimentary === true && mine.share === true && mine.billing === null, JSON.stringify(mine));
+  await free.reload(); await free.waitForSelector('.app-shell', { state: 'visible' }); await sleep(1500);
+  await free.click('#accountBtn'); await free.waitForSelector('.pf-badge');
+  ok('its account menu shows Pro · Complimentary, with nothing to buy or manage', (await free.textContent('.pf-badge')) === 'Pro' && (await free.textContent('.pf-plan-detail')) === 'Complimentary' && !(await free.$('[data-pf="upgrade"], [data-pf="billing"]')));
+  await free.screenshot({ path: OUT + 'comp-profile.png' });
+  await free.keyboard.press('Escape');
+  const bad = await call(a, 'POST', { action: 'account' }, { id: ekOf(FREE), op: 'plan', plan: 'gift' });
+  ok('an unknown plan is refused', bad.status === 400);
+  // Back to Free ends it.
+  await a.fill('#accountSearch', FREE); await a.click('#accountsTable tbody tr button'); await a.waitForSelector('#accountDialog[open]');
+  await a.evaluate(() => { document.querySelector('#toast').textContent = ''; });
+  await a.selectOption('#planSelect', 'free'); await a.click('#planSave'); await a.waitForSelector('#toast:has-text("Plan changed")');
+  const uncomped = await auth.get(`users/${ekOf(FREE)}`, { type: 'json' });
+  ok('changing the plan to Free ends Complimentary Pro', uncomped.plan === 'free' && !uncomped.comp && (await planOfFree()).complimentary === false);
   await a.keyboard.press('Escape');
 
   // ---- Deactivate the Pro account: data kept, sessions and links end ----

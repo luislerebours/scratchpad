@@ -352,7 +352,10 @@ async function unlock(data) {
   }
 }
 
-function renderPassword(salt) {
+// `local`: the server no longer asks for a password (it was removed after this
+// link was sent), but this link's key is still locked with it, so the password
+// is checked here by whether it opens the key.
+function renderPassword(salt, local = false) {
   document.title = 'ScrapSheet';
   const foot = document.querySelector('#shareFootText');
   if (foot) foot.textContent = 'Anyone with this link and its password can view and download what’s here until it expires.';
@@ -378,6 +381,15 @@ function renderPassword(salt) {
     button.textContent = 'Checking…';
     try {
       const { proof, kek } = await vault.linkPasswordKeys(input.value, salt);
+      if (local) {
+        try {
+          itemKey = await vault.unwrap(fragment.split('.')[2], kek, false);
+        } catch {
+          throw new Error('That password isn’t right.');
+        }
+        start();
+        return;
+      }
       const r = await fetch(`${API}?t=${encodeURIComponent(token)}&action=unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proof }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'That password isn’t right.');
@@ -402,6 +414,12 @@ function renderPassword(salt) {
   });
 }
 
+// A phone sends a new link the moment it's made, while it's still being saved,
+// so a link not found yet is asked for again for a few seconds.
+const NOT_YET_TRIES = 5;
+const NOT_YET_WAIT_MS = 1500;
+let notYet = 0;
+
 async function start() {
   if (!token) {
     renderProblem('missing', 'This link doesn’t work.');
@@ -410,12 +428,28 @@ async function start() {
   try {
     const r = await fetch(`${shareApi()}`, { cache: 'no-store' });
     const data = await r.json().catch(() => ({}));
+    if (r.status === 404 && data.reason === 'missing' && ++notYet < NOT_YET_TRIES) {
+      setTimeout(start, NOT_YET_WAIT_MS);
+      return;
+    }
     if (r.status === 401 && data.reason === 'password') {
+      // Its key comes after "#": without that part the password couldn't
+      // open anything, so say so before asking for it.
+      if (!fragment) {
+        renderProblem('key', 'This link is missing its key.');
+        return;
+      }
       renderPassword(data.salt);
       return;
     }
     if (!r.ok) {
       renderProblem(data.reason, data.error || 'This link doesn’t work.');
+      return;
+    }
+    // A link made with a password, whose password was since removed.
+    const [kind, salt, locked] = fragment.split('.');
+    if (kind === 'p' && salt && locked && !itemKey) {
+      renderPassword(salt, true);
       return;
     }
     if (!(await unlock(data))) {

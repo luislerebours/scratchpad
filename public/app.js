@@ -5713,7 +5713,7 @@ function profileHtml(view) {
   }
   const plan = myPlan();
   const pro = plan.plan !== 'free';
-  const detail = pro && plan.billing ? planLine().replace(/^Pro · /, '') : pro ? '' : '1 sheet · 1 file · 10 MB';
+  const detail = plan.complimentary ? 'Complimentary' : pro && plan.billing ? planLine().replace(/^Pro · /, '') : pro ? '' : '1 sheet · 1 file · 10 MB';
   const planAction = !pro ? `<button class="pf-plan-btn" type="button" data-pf="upgrade">Upgrade to Pro</button>`
     : plan.billing ? `<button class="pf-plan-link" type="button" data-pf="billing">Manage billing</button>` : '';
   const email = account?.email || '';

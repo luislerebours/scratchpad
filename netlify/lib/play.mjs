@@ -1,6 +1,6 @@
 import { createHash, createSign, timingSafeEqual } from 'node:crypto';
 import { authStore, env } from './auth.mjs';
-import { playKeepsPro, stripeKeepsPro } from './plans.mjs';
+import { compKeepsPro, playKeepsPro, stripeKeepsPro } from './plans.mjs';
 
 // Google Play Billing, for Pro bought inside the Android app (a Trusted Web
 // Activity: the page buys through Chrome's Digital Goods API, then sends the
@@ -119,7 +119,7 @@ export async function applyPlay(ekGiven, token, sub) {
     test: Boolean(sub.testPurchase),
     updatedAt: Date.now()
   };
-  const updated = { ...user, plan: playKeepsPro(playState) || stripeKeepsPro(user.stripe) ? 'pro' : 'free', play: playState };
+  const updated = { ...user, plan: playKeepsPro(playState) || stripeKeepsPro(user.stripe) || compKeepsPro(user) ? 'pro' : 'free', play: playState };
   await store.setJSON(`users/${ek}`, updated);
   await store.set(tokenKey(token), ek);
   return updated;

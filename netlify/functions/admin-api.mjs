@@ -9,7 +9,7 @@ import {
   otpauthUri, readAudit, readSettings, requireAdmin, setupConfigured, setupTokenOk, writeSettings
 } from '../lib/admin.mjs';
 import { clearErrors, readErrors, withErrors } from '../lib/errors.mjs';
-import { planOf, playKeepsPro } from '../lib/plans.mjs';
+import { compKeepsPro, planOf, playKeepsPro } from '../lib/plans.mjs';
 import { readShares, sharesStore, ended } from '../lib/shares.mjs';
 import { applySubscription, stripe, stripeReady } from '../lib/stripe.mjs';
 import { applyPlay, getSubscription, playReady } from '../lib/play.mjs';
@@ -69,6 +69,10 @@ async function accountView(user) {
     activeDays30: user.visitDays ? user.visitDays.filter(day => day > since).length : null,
     plan: planOf(user),
     planSet: user.plan || null,
+    // Complimentary Pro: given by an admin, kept whatever billing says.
+    complimentary: planOf(user) === 'pro' && compKeepsPro(user),
+    compAt: user.comp?.at || null,
+    compBy: user.comp?.by || null,
     quota: quotaFor(user),
     quotaCustom: user.quotaBytes ?? null,
     encrypted: Boolean(user.keyring),
@@ -117,9 +121,12 @@ async function accountAction(req, admin, body) {
 
   switch (body.op) {
     case 'plan': {
-      if (!['free', 'pro'].includes(body.plan)) return json({ error: 'Choose Free or Pro' }, 400);
-      updated = { ...user, plan: body.plan };
-      details = { from: planOf(user), to: body.plan };
+      // 'comp' is Complimentary Pro: Pro that stays whatever billing says. Free or Pro ends it.
+      if (!['free', 'pro', 'comp'].includes(body.plan)) return json({ error: 'Choose Free, Pro or Complimentary Pro' }, 400);
+      const { comp: _, ...rest } = user;
+      updated = body.plan === 'comp' ? { ...rest, plan: 'pro', comp: { at: Date.now(), by: admin.email } } : { ...rest, plan: body.plan };
+      const label = (plan, comp) => comp ? 'complimentary pro' : plan;
+      details = { from: label(planOf(user), planOf(user) === 'pro' && compKeepsPro(user)), to: label(body.plan, body.plan === 'comp') };
       break;
     }
     case 'quota': {

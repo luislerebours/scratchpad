@@ -132,6 +132,13 @@ to what the app collects); `branding/play-store/` the listing kit.
   `plan` and stay Pro. Every account follows its plan. Limits apply to adding
   things (`needsPro` → 403 `{ upgrade: true }`, the page shows its upgrade
   card). Admins can switch an account's plan from the admin dashboard.
+  Complimentary Pro (the plan box's third choice; `user.comp` { at, by },
+  `compKeepsPro` in plans.mjs) is free Pro that stays whatever billing says
+  (a Stripe or Play subscription ending doesn't end it) until an admin picks
+  Free or Pro. `planInfo().complimentary` (true only while nothing pays) makes
+  the account menu read "Complimentary"; the dashboard labels and filters them.
+  It's the way to give Pro away (friends, family): it works in the web and
+  store apps alike. Never add a redeem-a-code box to the apps (store rules).
 - Billing is Stripe with Managed Payments (Stripe is merchant of record: tax,
   fraud, disputes). Sandbox account "Sector 809 Labs LLC sandbox"
   (acct_1UcXIzE4JMAT8oxx); never touch the FinestIQ account. Product

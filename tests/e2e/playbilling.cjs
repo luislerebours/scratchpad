@@ -77,7 +77,7 @@ const toast = p => p.textContent('#toast');
   const text = await p.textContent('#sheetText');
   ok('the offer says Google Play', text.includes('Billed through Google Play'), text);
   const labels = await p.$$eval('#sheetActions button', bs => bs.map(x => x.textContent));
-  ok('…with Google’s prices', JSON.stringify(labels) === JSON.stringify(['$0.99 / month', '$9.99 / year · save 16%', 'Not now']), JSON.stringify(labels));
+  ok('…with Google’s prices', JSON.stringify(labels) === JSON.stringify(['$9.99 / year · save 16%', '$0.99 / month', 'Not now']), JSON.stringify(labels));
   await p.screenshot({ path: OUT + 'play-upgrade.png' });
   // Closing Google's sheet changes nothing
   await p.evaluate(() => { window.__userCancels = true; });
@@ -126,6 +126,18 @@ const toast = p => p.textContent('#toast');
   await mock('/__set', { token, subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE', expiresInDays: 30 });
   await rtdn(subNote(token, 1));
   ok('recovered: Pro again', (await me(web)).plan === 'pro');
+  // ---- Complimentary Pro (given by an admin) outlasts a subscription ----
+  const { getStore } = await import(require('url').pathToFileURL(require('path').resolve(__dirname, '../../node_modules/@netlify/blobs/dist/main.js')).href);
+  const users = getStore({ name: 'scratchpad-auth', siteID: 'site', token: 'tok', apiURL: 'http://localhost:8971', consistency: 'strong' });
+  const keyA = 'users/' + require('crypto').createHash('sha256').update(A).digest('hex').slice(0, 32);
+  await users.setJSON(keyA, { ...(await users.get(keyA, { type: 'json' })), comp: { at: Date.now(), by: 'admin@example.com' } });
+  ok('while Google Play pays, the account isn’t called complimentary', (await me(web)).complimentary === false && (await me(web)).billing.source === 'play');
+  await mock('/__set', { token, subscriptionState: 'SUBSCRIPTION_STATE_EXPIRED', autoRenew: false, expiresInDays: -1 });
+  r = await (await rtdn(subNote(token, 13))).json();
+  plan = await me(web);
+  ok('Complimentary Pro: the subscription expiring leaves the account on Pro', r.plan === 'pro' && plan.plan === 'pro' && plan.complimentary === true, JSON.stringify(plan));
+  const { comp: _c, ...plain } = await users.get(keyA, { type: 'json' });
+  await users.setJSON(keyA, plain);
   await mock('/__set', { token, subscriptionState: 'SUBSCRIPTION_STATE_EXPIRED', autoRenew: false, expiresInDays: -1 });
   await rtdn({ voidedPurchaseNotification: { purchaseToken: token, orderId: 'GPA.1', productType: 1, refundType: 1 } });
   ok('refunded / expired: Free', (await me(web)).plan === 'free');

@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { authStore, emailKey, env } from './auth.mjs';
-import { playKeepsPro } from './plans.mjs';
+import { compKeepsPro, playKeepsPro } from './plans.mjs';
 
 // Stripe, through its REST API (no SDK). Keys live in Netlify's environment:
 //   STRIPE_SECRET_KEY      sk_test_… or sk_live_…
@@ -101,8 +101,8 @@ export async function applySubscription(sub) {
   const periodEnd = sub.current_period_end || item?.current_period_end;
   const updated = {
     ...user,
-    // A Google Play subscription that still pays keeps Pro, whatever Stripe says.
-    plan: KEEPS_PRO.has(sub.status) || playKeepsPro(user.play) ? 'pro' : 'free',
+    // A Google Play subscription that still pays, or complimentary Pro, keeps Pro whatever Stripe says.
+    plan: KEEPS_PRO.has(sub.status) || playKeepsPro(user.play) || compKeepsPro(user) ? 'pro' : 'free',
     stripe: {
       ...(user.stripe || {}),
       customer: customer || user.stripe?.customer,

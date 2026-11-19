@@ -308,7 +308,7 @@ async function loadOverview() {
     const active = list.filter(a => !a.disabledAt);
     $('stats').replaceChildren(
       stat('Accounts', active.length, list.length - active.length ? `${list.length - active.length} deactivated` : null),
-      stat('Pro', active.filter(a => a.plan === 'pro').length, `${active.filter(a => a.paying).length} paying`),
+      stat('Pro', active.filter(a => a.plan === 'pro').length, `${active.filter(a => a.paying).length} paying${active.some(a => a.complimentary) ? ` · ${active.filter(a => a.complimentary).length} complimentary` : ''}`),
       stat('Free', active.filter(a => a.plan === 'free').length),
       stat('Active this week', active.filter(a => (a.lastSeenAt || 0) > week).length),
       stat('Storage used', size(list.reduce((s, a) => s + a.bytes, 0))),
@@ -332,6 +332,7 @@ function billingText(a) {
     if (p.test) parts.push('test purchase');
     return parts.join(' · ');
   }
+  if (a.complimentary && !a.paying) return `Complimentary${a.compAt ? ` since ${fmtDate(a.compAt)}` : ''}`;
   if (!a.stripe) return a.plan === 'pro' && !a.planSet ? 'Pro from before plans' : '—';
   const s = a.stripe;
   if (!s.status) return 'Customer, no subscription';
@@ -341,6 +342,8 @@ function billingText(a) {
   return parts.join(' · ');
 }
 
+const planName = a => a.complimentary ? 'Complimentary Pro' : a.plan === 'pro' ? 'Pro' : 'Free';
+
 function accountRow(a) {
   const tags = [
     a.disabledAt ? h('span', { class: 'ad-tag ad-tag-danger', text: 'Deactivated' }) : null,
@@ -348,7 +351,7 @@ function accountRow(a) {
   ];
   return h('tr', { class: a.disabledAt ? 'ad-row-off' : null },
     h('td', {}, h('div', { class: 'ad-email', text: a.email }), h('div', { class: 'ad-tags' }, tags), h('div', { class: 'ad-hint', text: `Joined ${fmtDate(a.createdAt)}` })),
-    h('td', {}, h('span', { class: `ad-plan ad-plan-${a.plan}`, text: a.plan === 'pro' ? 'Pro' : 'Free' })),
+    h('td', {}, h('span', { class: `ad-plan ad-plan-${a.plan}`, text: planName(a) })),
     h('td', { class: 'ad-small', text: billingText(a) }),
     h('td', { class: 'ad-small' }, `${size(a.bytes)} of ${a.quota === null ? 'no limit' : size(a.quota)}`, h('div', { class: 'ad-hint', text: `${plural(a.files, 'file')} · ${plural(a.images, 'image')}` })),
     h('td', { class: 'ad-small' }, `Seen ${ago(a.lastSeenAt)}`, h('div', { class: 'ad-hint', text: `${a.loginCount === null ? '—' : plural(a.loginCount, 'sign-in')} · ${a.activeDays30 === null ? '—' : plural(a.activeDays30, 'day')} active in 30 d` })),
@@ -360,7 +363,7 @@ function renderAccounts() {
   const q = $('accountSearch').value.trim().toLowerCase();
   const f = $('accountFilter').value;
   const list = accounts.filter(a => (!q || a.email.includes(q)) && (
-    f === 'all' || (f === 'disabled' ? a.disabledAt : !a.disabledAt && (f === 'paying' ? a.paying : a.plan === f))
+    f === 'all' || (f === 'disabled' ? a.disabledAt : !a.disabledAt && (f === 'paying' ? a.paying : f === 'comp' ? a.complimentary : a.plan === f))
   ));
   if (!list.length) return emptyRow('accountsTable', accounts.length ? 'No accounts match.' : 'No accounts yet.', 6);
   $('accountsTable').querySelector('tbody').replaceChildren(...list.map(accountRow));
@@ -391,7 +394,7 @@ function fillAccount(a) {
   $('accountTitle').textContent = a.email;
   $('accountFacts').replaceChildren(
     ...fact('Status', a.disabledAt ? `Deactivated ${fmtTime(a.disabledAt)}${a.disabledBy ? ` by ${a.disabledBy}` : ''}` : 'Active'),
-    ...fact('Plan', `${a.plan === 'pro' ? 'Pro' : 'Free'}${a.planSet ? '' : ' (from before plans)'}`),
+    ...fact('Plan', `${planName(a)}${a.complimentary && a.compAt ? ` (since ${fmtDate(a.compAt)}${a.compBy ? `, by ${a.compBy}` : ''})` : a.planSet ? '' : ' (from before plans)'}`),
     ...fact('Billing', billingText(a)),
     ...fact('Storage', `${size(a.bytes)} of ${a.quota === null ? 'no limit' : size(a.quota)}${a.quotaCustom !== null ? ' (custom)' : ''}`),
     ...fact('Items', `${plural(a.files, 'file')} · ${plural(a.images, 'image')}`),
@@ -402,8 +405,10 @@ function fillAccount(a) {
     ...fact('Sign-ins', String(a.loginCount ?? '—')),
     ...(a.originalData ? fact('Data', 'Holds the original data from before accounts') : [])
   );
-  $('planSelect').value = a.plan;
-  $('planHint').textContent = a.paying ? `This account pays through ${a.payingVia}: its next update sets the plan again.` : '';
+  $('planSelect').value = a.complimentary ? 'comp' : a.plan;
+  $('planHint').textContent = a.complimentary ? 'Complimentary Pro stays until you change it here, whatever billing says.'
+    : a.paying ? `This account pays through ${a.payingVia}: its next update sets the plan again.`
+      : 'Complimentary Pro is free Pro that stays, even if a subscription on the account ends.';
   $('quotaInput').value = a.quotaCustom === null ? '' : a.quotaCustom === -1 ? '0' : String(+(a.quotaCustom / 1024 ** 3).toFixed(3));
   $('resyncBtn').disabled = !a.stripe && !a.play;
   $('resyncBtn').textContent = a.play && !a.stripe ? 'Refresh from Google Play' : 'Refresh from Stripe';

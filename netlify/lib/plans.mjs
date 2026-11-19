@@ -28,6 +28,10 @@ export function playKeepsPro(play) {
   return play.state === 'SUBSCRIPTION_STATE_CANCELED' && Number(play.expiresAt) > Date.now();
 }
 
+// Complimentary Pro: an admin gave this account Pro (`user.comp` { at, by }).
+// It keeps Pro whatever billing says, until an admin changes the plan.
+export const compKeepsPro = user => Boolean(user?.comp);
+
 export function planOf(user) {
   return user?.plan === 'free' ? 'free' : 'pro';
 }
@@ -57,7 +61,9 @@ export function planInfo(user) {
     renewsAt: user.stripe.periodEnd || null,
     cancelsAtEnd: Boolean(user.stripe.cancelAtEnd)
   } : null;
-  return { plan, name, sheets, files: Number.isFinite(files) ? files : null, fileBytes, quotaBytes, share, billing, prices: PRICES };
+  // Pro that nothing pays for: given by an admin.
+  const complimentary = plan === 'pro' && compKeepsPro(user) && !stripeKeepsPro(user.stripe) && !playKeepsPro(user.play);
+  return { plan, name, sheets, files: Number.isFinite(files) ? files : null, fileBytes, quotaBytes, share, billing, complimentary, prices: PRICES };
 }
 
 // A Pro feature or limit was hit: the page shows its upgrade card.

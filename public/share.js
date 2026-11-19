@@ -352,10 +352,12 @@ async function unlock(data) {
   }
 }
 
-// `local`: the server no longer asks for a password (it was removed after this
-// link was sent), but this link's key is still locked with it, so the password
-// is checked here by whether it opens the key.
-function renderPassword(salt, local = false) {
+// `local`: the server no longer asks for a password (it was removed, by an older
+// version of the app, after this link was sent), but this link's key is still
+// locked with it, so the password is checked here by whether it opens the key.
+// `bound`: the password was changed after the link was made; the key comes from
+// the server, locked with the new password and this link's part after "#".
+function renderPassword(salt, local = false, bound = false) {
   document.title = 'ScrapSheet';
   const foot = document.querySelector('#shareFootText');
   if (foot) foot.textContent = 'Anyone with this link and its password can view and download what’s here until it expires.';
@@ -380,7 +382,7 @@ function renderPassword(salt, local = false) {
     button.disabled = true;
     button.textContent = 'Checking…';
     try {
-      const { proof, kek } = await vault.linkPasswordKeys(input.value, salt);
+      const { proof, kek } = await vault.linkPasswordKeys(bound ? `${input.value}\n${fragment}` : input.value, salt);
       if (local) {
         try {
           itemKey = await vault.unwrap(fragment.split('.')[2], kek, false);
@@ -394,6 +396,16 @@ function renderPassword(salt, local = false) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'That password isn’t right.');
       pass = data.pass;
+      if (bound) {
+        try {
+          itemKey = await vault.unwrap(data.wrapped, kek, false);
+        } catch {
+          pass = '';
+          throw new Error('This link doesn’t match its password. Check that the whole link was copied.');
+        }
+        start();
+        return;
+      }
       // The key in the link is locked with the password.
       const [kind, , locked] = fragment.split('.');
       if (kind === 'p') {
@@ -439,7 +451,7 @@ async function start() {
         renderProblem('key', 'This link is missing its key.');
         return;
       }
-      renderPassword(data.salt);
+      renderPassword(data.salt, false, Boolean(data.bound) && fragment.startsWith('p.'));
       return;
     }
     if (!r.ok) {
@@ -448,7 +460,16 @@ async function start() {
     }
     // A link made with a password, whose password was since removed.
     const [kind, salt, locked] = fragment.split('.');
-    if (kind === 'p' && salt && locked && !itemKey) {
+    if (kind === 'p' && salt && locked && !itemKey && data.rekey) {
+      // Removed: the key is kept locked with this link's part alone.
+      try {
+        const { kek } = await vault.linkPasswordKeys(`\n${fragment}`, data.rekey.salt);
+        itemKey = await vault.unwrap(data.rekey.wrapped, kek, false);
+      } catch {
+        renderProblem('key', 'This link is missing its key.');
+        return;
+      }
+    } else if (kind === 'p' && salt && locked && !itemKey) {
       renderPassword(salt, true);
       return;
     }

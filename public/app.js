@@ -4718,7 +4718,23 @@ async function linkPasswordParts(target, password) {
   // `body` is what the server gets; `fragment` goes only into the link.
   return { fragment, body: { password: { salt, proof }, linkFragment: await vault.encryptText(await keyForSheet(target.sheet), fragment) } };
 }
-const linkPassword = async (target, password) => (await linkPasswordParts(target, password)).body;
+
+// A link never changes once made, so a password added, changed or removed later
+// has to work with the link people already have. A link made without a password
+// carries the key itself: the server just asks for the password (or stops asking).
+// A link made with one carries the key locked with that first password: the key
+// is locked again with the new password (or none) together with the whole link
+// part, and the server keeps that (`rekey`). It's no use without the link.
+async function linkPasswordChange(share, target, password) {
+  const fragment = shareFragments.get(share.token) || '';
+  const salt = vault.newLinkSalt();
+  if (!fragment.startsWith('p.')) {
+    return password ? { password: { salt, proof: (await vault.linkPasswordKeys(password, salt)).proof } } : { password: null };
+  }
+  const key = target.kind === 'sheet' ? await keyForSheet(target.sheet) : await fileKeyFor(knownFiles.get(target.file), target.sheet);
+  const { proof, kek } = await vault.linkPasswordKeys(`${password}\n${fragment}`, salt);
+  return { password: password ? { salt, proof } : null, rekey: { salt, wrapped: await vault.wrap(key, kek) } };
+}
 
 // ---- A new link, ready before the tap (phones) ----
 // iOS opens its share menu only straight from a tap: nothing may wait in
@@ -4902,7 +4918,7 @@ function renderShare(focus) {
       </span>
     </div>
     <div class="share-pw-edit" hidden>${passwordFieldHtml('sharePwEdit', shareLink.protected ? 'New password' : 'Password')}
-      <p class="share-explain">The link changes: send the new one, and the password separately.</p>
+      <p class="share-explain">The link stays the same, also for people who already have it: they’ll need this password. Send it separately.</p>
       <div class="share-pw-actions"><button class="btn secondary compact" type="button" data-share-pw="cancel">Cancel</button><button class="btn compact" type="button" data-share-pw="save">Save password</button></div>
     </div>` : ''}
     <div class="share-actions">
@@ -4992,7 +5008,7 @@ shareBody.addEventListener('click', async e => {
       return;
     }
     try {
-      const extra = password ? await linkPassword(shareTarget, password) : {};
+      const extra = password ? (await linkPasswordParts(shareTarget, password)).body : {};
       const { share: made } = await sharePost({ action: 'create', kind: shareTarget.kind, sheet: shareTarget.sheet, file: shareTarget.file, days, ...extra });
       const [share] = await openShareLinks([made]);
       shareLink = share;
@@ -5021,18 +5037,15 @@ shareBody.addEventListener('click', async e => {
     }
     if (blockedOffline()) return;
     try {
-      let body = { password: null };
-      if (which === 'save') {
-        const password = edit.querySelector('input').value;
-        if (password.length < 4) return showToast('Use at least 4 characters for the password');
-        btn.disabled = true;
-        body = await linkPassword(shareTarget, password);
-      }
+      const password = which === 'save' ? edit.querySelector('input').value : '';
+      if (which === 'save' && password.length < 4) return showToast('Use at least 4 characters for the password');
+      btn.disabled = true;
+      const body = await linkPasswordChange(shareLink, shareTarget, password);
       const { share } = await sharePost({ action: 'password', token: shareLink.token, ...body });
       shareLink = (await openShareLinks([share]))[0];
       noteShare(share);
       renderShare();
-      showToast(which === 'remove' ? 'Password removed: the link changed' : 'Password saved: send the new link');
+      showToast(which === 'remove' ? 'Password removed: the same link now opens without one' : 'Password saved: the same link now needs it');
     } catch (err) {
       btn.disabled = false;
       showToast(err.message);

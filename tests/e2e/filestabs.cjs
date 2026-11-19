@@ -1,5 +1,5 @@
 // Rename a file, move a file to another sheet (stored in R2 or on Netlify), and
-// reorder sheet tabs by dragging (mouse; touch and hold on a phone).
+// reorder sheet tabs by press and hold, then drag (mouse and phone); a quick swipe scrolls them.
 const REPO = require('path').resolve(__dirname, '../..');
 const OUT = require('path').join(__dirname, 'out') + '/'; require('fs').mkdirSync(OUT + 'store/raw', { recursive: true });
 const { chromium } = require('playwright'); const fs = require('fs'); const crypto = require('crypto');
@@ -111,7 +111,7 @@ const E = 'filestabs' + Date.now() + '@example.com';
   const before = await tabsOrder(A);
   const t0 = await A.$eval('.sheet-tab >> nth=0', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   const t2 = await A.$eval('.sheet-tab:nth-child(3)', el => { const r = el.getBoundingClientRect(); return { x: r.right - 5, y: r.y + r.height / 2 }; });
-  await A.mouse.move(t0.x, t0.y); await A.mouse.down();
+  await A.mouse.move(t0.x, t0.y); await A.mouse.down(); await sleep(320);
   // While dragging: the tab stays under the pointer, and the tabs it passes slide over (not jump).
   let worst = 0, slid = false;
   for (let i = 1; i <= 12; i++) {
@@ -139,6 +139,40 @@ const E = 'filestabs' + Date.now() + '@example.com';
     .then(() => ok('…and the other device gets the new order', true), () => ok('…and the other device gets the new order', false));
   await A.reload(); await A.waitForSelector('.app-shell', { state: 'visible' }); await sleep(1500);
   ok('…which stays after a reload', (await tabsOrder(A)).join() === after.join());
+
+  // ---- Mouse: a quick swipe scrolls the tabs (it doesn't pick one up); the wheel scrolls them too ----
+  const wide = A.viewportSize();
+  let width = 900;
+  await A.setViewportSize({ width, height: 900 }); await sleep(300);
+  while (width > 360 && await A.$eval('#tabsScroller', el => el.scrollWidth <= el.clientWidth + 140)) { width -= 40; await A.setViewportSize({ width, height: 900 }); await sleep(200); }
+  const strip0 = await A.$eval('#tabsScroller', el => ({ room: el.scrollWidth - el.clientWidth, left: el.scrollLeft }));
+  ok('(the tabs overflow the row for the swipe test)', strip0.room > 140, JSON.stringify(strip0));
+  await A.$eval('#tabsScroller', el => { el.scrollLeft = 0; });
+  const order0 = await tabsOrder(A), active0 = await A.$eval('.sheet-tab.active .sheet-label', e => e.textContent);
+  const s0 = await A.$eval('.sheet-tab:nth-child(3)', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await A.mouse.move(s0.x, s0.y); await A.mouse.down();
+  let grabbed = false;
+  for (let i = 1; i <= 4; i++) { await A.mouse.move(s0.x - 15 * i, s0.y); grabbed ||= await A.$('.sheet-tab.dragging') !== null; await sleep(12); }
+  const during = await A.$eval('#tabsScroller', el => el.scrollLeft);
+  await A.mouse.up();
+  await sleep(80); const atUp = await A.$eval('#tabsScroller', el => el.scrollLeft);
+  await sleep(900); const settled = await A.$eval('#tabsScroller', el => el.scrollLeft);
+  ok('a quick mouse swipe scrolls the tabs along with it', during > 30, `scrolled ${during}`);
+  ok('…without picking a tab up', !grabbed && !(await A.$('.sheet-tab.dragging, .sheet-tab.settling')));
+  ok('…and glides on a little after letting go', settled > atUp, `${atUp} → ${settled}`);
+  ok('…no tab moved and none opened', (await tabsOrder(A)).join() === order0.join() && await A.$eval('.sheet-tab.active .sheet-label', e => e.textContent) === active0);
+  await A.$eval('#tabsScroller', el => { el.scrollLeft = 0; });
+  await A.mouse.move(s0.x, s0.y); await A.mouse.wheel(0, 120); await sleep(300);
+  ok('a mouse wheel over the tabs scrolls them sideways', await A.$eval('#tabsScroller', el => el.scrollLeft) > 40);
+  await A.$eval('#tabsScroller', el => { el.scrollLeft = 0; }); await sleep(100);
+  // Pressing and holding still, then letting go: a slow click, which opens the tab.
+  const other = await A.$eval('.sheet-tab:not(.active)', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, name: el.querySelector('.sheet-label').textContent }; });
+  await A.mouse.move(other.x, other.y); await A.mouse.down(); await sleep(400);
+  const lifted = await A.$('.sheet-tab.dragging') !== null;
+  await A.mouse.up(); await sleep(1200);
+  ok('holding a tab with the mouse picks it up', lifted);
+  ok('…and letting go without moving opens it, like a click', await A.$eval('.sheet-tab.active .sheet-label', e => e.textContent) === other.name && (await tabsOrder(A)).join() === order0.join());
+  await A.setViewportSize(wide); await sleep(300);
 
   // ---- Reorder on a phone: touch and hold, then drag; a quick swipe doesn't ----
   const cdp = await B.context().newCDPSession(B);
@@ -196,7 +230,7 @@ const E = 'filestabs' + Date.now() + '@example.com';
   await A.emulateMedia({ reducedMotion: 'reduce' });
   const m0 = await A.$eval('.sheet-tab:nth-child(1)', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, right: r.right }; });
   const m1 = await A.$eval('.sheet-tab:nth-child(2)', el => el.getBoundingClientRect().right);
-  await A.mouse.move(m0.x, m0.y); await A.mouse.down();
+  await A.mouse.move(m0.x, m0.y); await A.mouse.down(); await sleep(320);
   let anySlide = false;
   for (let i = 1; i <= 8; i++) {
     await A.mouse.move(m0.x + (m1 - m0.right + 4) * i / 8, m0.y, { steps: 2 });
@@ -212,7 +246,7 @@ const E = 'filestabs' + Date.now() + '@example.com';
   const dragOneSlot = async n => {
     const from = await A.$eval(`.sheet-tab:nth-child(${n})`, el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, right: r.right }; });
     const toRight = await A.$eval(`.sheet-tab:nth-child(${n + 1})`, el => el.getBoundingClientRect().right);
-    await A.mouse.move(from.x, from.y); await A.mouse.down();
+    await A.mouse.move(from.x, from.y); await A.mouse.down(); await sleep(320);
     for (let i = 1; i <= 6; i++) await A.mouse.move(from.x + (toRight - from.right + 4) * i / 6, from.y, { steps: 2 });
     await A.mouse.up();
   };

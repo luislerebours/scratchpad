@@ -1720,12 +1720,15 @@ sheetTabsEl.addEventListener('click', e => {
   if (tab) switchSheet(Number(tab.dataset.sheet));
 });
 
-// ---- Reordering tabs: drag one with a mouse, or touch and hold one, then drag ----
+// ---- Reordering tabs: press and hold one (mouse or finger), then drag ----
 // The picked-up tab follows the pointer along the row. The others slide out of
 // its way as it passes their middles (each move is measured before and after,
 // then animated from where they were: "FLIP"). Letting go, it glides into its
-// slot and the order is saved for every device. A quick swipe on a phone still
-// scrolls the tabs. With reduced motion everything jumps instead of sliding.
+// slot and the order is saved for every device. A quick swipe scrolls the tabs
+// instead, the same with a mouse as with a finger (a mouse has no scrolling of
+// its own, so the row follows it and glides on after letting go; a mouse wheel
+// over the row scrolls it sideways). With reduced motion everything jumps
+// instead of sliding.
 const TAB_MOVE_MS = 200;
 const TAB_EASE = 'cubic-bezier(.2, .8, .2, 1)';
 const TAB_HOLD_MS = 260; // touch and hold this long to pick a tab up
@@ -1745,6 +1748,12 @@ function beginTabDrag() {
   }
   // A tab still gliding home lands at once; a waiting redraw waits for this drag too.
   finishTabSettle({ render: false });
+  // The tabs were drawn again during the hold (a save or another device): hold the new one.
+  if (!tabDrag.tab.isConnected) tabDrag.tab = sheetTabsEl.querySelector(`.sheet-tab[data-sheet="${tabDrag.tab.dataset.sheet}"]`);
+  if (!tabDrag.tab) {
+    tabDrag = null;
+    return;
+  }
   const { tab } = tabDrag;
   tabDrag.active = true;
   tabDrag.before = [...sheetTabsEl.children].map(t => t.dataset.sheet).join();
@@ -1844,6 +1853,7 @@ async function endTabDrag(cancelled = false) {
   tabDrag = null;
   if (!drag) return;
   clearTimeout(drag.hold);
+  if (drag.swipe) return endTabSwipe(drag.swipe);
   if (!drag.active) return;
   cancelAnimationFrame(drag.scroll);
   const { tab } = drag;
@@ -1855,9 +1865,12 @@ async function endTabDrag(cancelled = false) {
   tab.classList.remove('dragging');
   tab.style.translate = '0px 0';
   tabSettling = setTimeout(finishTabSettle, glide + 60);
-  // The click that ends a drag doesn't open the tab.
-  suppressTabClick = true;
-  setTimeout(() => { suppressTabClick = false; }, 0);
+  // The click that ends a drag doesn't open the tab. A mouse held still and
+  // let go is just a slow click: it opens the tab.
+  if (drag.touch || drag.moved) {
+    suppressTabClick = true;
+    setTimeout(() => { suppressTabClick = false; }, 0);
+  }
   const order = [...sheetTabsEl.children].map(t => Number(t.dataset.sheet));
   if (cancelled || order.join() === drag.before) {
     if (cancelled) {
@@ -1875,27 +1888,84 @@ async function endTabDrag(cancelled = false) {
   }
 }
 
+// A mouse (or pen) swiping the row: it follows the pointer, then glides on.
+let tabGlide = 0;
+function stopTabGlide() {
+  cancelAnimationFrame(tabGlide);
+  tabGlide = 0;
+}
+function swipeTabs(e) {
+  const s = tabDrag.swipe;
+  tabsScroller.scrollLeft = s.left - (e.clientX - tabDrag.x);
+  const now = performance.now();
+  s.points = [...s.points.filter(p => now - p.t < 100), { t: now, x: e.clientX }];
+}
+function endTabSwipe(swipe) {
+  // The click that ends a swipe doesn't open the tab under it.
+  suppressTabClick = true;
+  setTimeout(() => { suppressTabClick = false; }, 0);
+  const now = performance.now();
+  const points = swipe.points.filter(p => now - p.t < 100);
+  if (prefersReducedMotion() || points.length < 2) return;
+  const first = points[0], last = points[points.length - 1];
+  let speed = (first.x - last.x) / Math.max(1, last.t - first.t); // px per ms, in scroll direction
+  if (Math.abs(speed) < 0.2) return;
+  let then = now;
+  const step = t => {
+    const dt = Math.min(32, t - then);
+    then = t;
+    const was = tabsScroller.scrollLeft;
+    tabsScroller.scrollLeft += speed * dt;
+    speed *= Math.pow(0.95, dt / 16);
+    tabGlide = Math.abs(speed) > 0.02 && tabsScroller.scrollLeft !== was ? requestAnimationFrame(step) : 0;
+  };
+  tabGlide = requestAnimationFrame(step);
+}
+
 sheetTabsEl.addEventListener('pointerdown', e => {
+  stopTabGlide();
   const tab = e.target.closest('.sheet-tab');
   if (!tab || e.button > 0 || sheets.length < 2) return;
-  tabDrag = { tab, id: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', active: false };
-  if (!tabDrag.mouse) tabDrag.hold = setTimeout(beginTabDrag, TAB_HOLD_MS);
+  tabDrag = { tab, id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', active: false };
+  tabDrag.hold = setTimeout(beginTabDrag, TAB_HOLD_MS);
 });
 window.addEventListener('pointermove', e => {
   if (!tabDrag || e.pointerId !== tabDrag.id) return;
   tabDrag.lastX = e.clientX;
+  if (tabDrag.swipe) {
+    e.preventDefault();
+    swipeTabs(e);
+    return;
+  }
+  const moved = Math.hypot(e.clientX - tabDrag.x, e.clientY - tabDrag.y);
+  if (moved > 6) tabDrag.moved = true;
   if (!tabDrag.active) {
-    const moved = Math.hypot(e.clientX - tabDrag.x, e.clientY - tabDrag.y);
-    // A mouse drags after a few pixels; a finger that moves before the hold is scrolling.
-    if (tabDrag.mouse && moved > 6) beginTabDrag();
-    else if (!tabDrag.mouse && moved > 8) return endTabDrag();
-    if (!tabDrag?.active) return;
+    // Moving before the hold is over is scrolling: a finger scrolls by itself,
+    // a mouse moves the row along with it.
+    if (moved <= 8) return;
+    if (tabDrag.touch) return endTabDrag();
+    clearTimeout(tabDrag.hold);
+    tabDrag.swipe = { left: tabsScroller.scrollLeft, points: [{ t: performance.now(), x: tabDrag.x }] };
+    try { sheetTabsEl.setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+    swipeTabs(e);
+    return;
   }
   e.preventDefault();
   placeDraggedTab();
 });
 window.addEventListener('pointerup', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(); });
 window.addEventListener('pointercancel', e => { if (tabDrag && e.pointerId === tabDrag.id) endTabDrag(tabDrag.active); });
+// A mouse wheel over the tabs scrolls them sideways (when they don't all fit).
+tabsScroller.addEventListener('wheel', e => {
+  if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+  const room = tabsScroller.scrollWidth - tabsScroller.clientWidth;
+  const left = tabsScroller.scrollLeft;
+  if (room < 1 || (e.deltaY < 0 && left <= 0) || (e.deltaY > 0 && left >= room - 1)) return;
+  e.preventDefault();
+  stopTabGlide();
+  tabsScroller.scrollLeft += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+}, { passive: false });
 // While dragging on a touch screen, the page doesn't scroll instead.
 document.addEventListener('touchmove', e => { if (tabDrag?.active) e.preventDefault(); }, { passive: false });
 sheetTabsEl.addEventListener('contextmenu', e => { if (e.target.closest('.sheet-tab') && tabDrag) e.preventDefault(); });

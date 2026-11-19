@@ -252,14 +252,14 @@ img[data-mark] { transform: translateY(-1px); }
 .tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent); }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 64px); mask-image: linear-gradient(to right, transparent, #000 64px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 64px, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to right, transparent, #000 64px, #000 calc(100% - 64px), transparent); }
-/* More tabs out of sight: a small pill on that edge with how many, which scrolls
-   that way when tapped. Hidden while a tab is being moved (the edges scroll then). */
-.tabs-more { appearance: none; position: absolute; top: 50%; z-index: 3; display: inline-flex; align-items: center; gap: 1px; height: 28px; min-width: 28px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text); box-shadow: 0 2px 8px rgba(0, 0, 0, .14); font: inherit; font-size: .8125rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; cursor: pointer; translate: 0 -50%; -webkit-tap-highlight-color: transparent; }
+/* More tabs out of sight: a small round arrow on that edge, over the fade (clear of
+   the tab text), which scrolls that way when tapped. Hidden while a tab is being moved (the edges scroll then). */
+.tabs-more { appearance: none; position: absolute; top: 50%; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text); box-shadow: 0 2px 8px rgba(0, 0, 0, .14); cursor: pointer; translate: 0 -50%; -webkit-tap-highlight-color: transparent; }
 .tabs-more[hidden] { display: none; }
-.tabs-more::before { content: ''; position: absolute; inset: -8px -6px; }
-.tabs-more .i { width: 15px; height: 15px; stroke-width: 2.2; }
-.tabs-more-start { left: 0; padding-right: 8px; }
-.tabs-more-end { right: 0; padding-left: 8px; }
+.tabs-more::before { content: ''; position: absolute; inset: -10px -8px; }
+.tabs-more .i { width: 14px; height: 14px; stroke-width: 2.4; }
+.tabs-more-start { left: 2px; }
+.tabs-more-end { right: 2px; }
 .tabs-wrap:has(.reordering, .settling) .tabs-more { display: none; }
 @media (hover: hover) { .tabs-more:hover { background: var(--raised); } }
 .sheet-tabs { display: flex; gap: 10px; width: max-content; padding: 2px; }

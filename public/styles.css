@@ -317,6 +317,9 @@ img[data-mark] { transform: translateY(-1px); }
 .files-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .files-titles { min-width: 0; }
 .files-title { display: flex; align-items: center; gap: 8px; font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+/* Focusable only so the "N attachments" link can move focus here: no tap flash,
+   since tapping it does nothing. */
+.files-title { -webkit-tap-highlight-color: transparent; }
 .files-title:focus { outline: none; }
 /* The paperclip from the tabs (the `clip` icon in app.js), beside the heading. */
 .files-title .i { flex: none; width: .8em; height: .8em; color: var(--muted); stroke-width: 2; }

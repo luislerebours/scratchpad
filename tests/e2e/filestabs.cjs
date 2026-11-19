@@ -55,6 +55,8 @@ const E = 'filestabs' + Date.now() + '@example.com';
   ok('Files heading shows the tabs’ paperclip', clip.head === clip.tab && clip.size > 16, `${Math.round(clip.size)}px`);
   ok('the paperclip sits just left of “Files”, level with it', clip.before && clip.gap > 3 && clip.gap < 14 && clip.level < 3, `gap ${Math.round(clip.gap)}px, off ${clip.level.toFixed(1)}px`);
   ok('the heading still reads “Files” (the icon is hidden from screen readers)', clip.text === 'Files' && clip.hidden === 'true');
+  const tapFlash = await A.$eval('#filesHeading', h => getComputedStyle(h).webkitTapHighlightColor);
+  ok('tapping the heading doesn’t flash (it isn’t a button)', /rgba\(0, 0, 0, 0\)|transparent/.test(tapFlash), tapFlash);
 
   // A second device.
   const B = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, acceptDownloads: true })).newPage(); B.on('pageerror', e => errs.push('B ' + e.message));

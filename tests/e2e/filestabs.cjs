@@ -151,6 +151,8 @@ const E = 'filestabs' + Date.now() + '@example.com';
   await touch('touchEnd'); await sleep(800);
   ok('a quick swipe on the tabs doesn’t reorder them', (await tabsOrder(B)).join() === phoneBefore.join());
   s = await center(1); d = await center(2);
+  const layout = () => B.evaluate(() => ({ tab2: document.querySelector('.sheet-tab:nth-child(2)').getBoundingClientRect().top, card: document.querySelector('.pad-card').getBoundingClientRect().top, add: document.querySelector('#addSheetBtn').getBoundingClientRect().top }));
+  const restLayout = await layout();
   await touch('touchStart', s.x, s.y); await sleep(300);
   ok('holding a tab for 300 ms picks it up (the hold is 260 ms)', await B.$('.sheet-tab.dragging') !== null);
   await sleep(250);
@@ -160,12 +162,21 @@ const E = 'filestabs' + Date.now() + '@example.com';
     return { lift: others[0].getBoundingClientRect().top - dragged.getBoundingClientRect().top, dim: Math.max(...others.map(t => Number(getComputedStyle(t).opacity))) };
   });
   ok('…it rises off the row while the other tabs dim', held && held.lift > 5 && held.dim < 0.6, JSON.stringify(held));
+  // The row clips what sticks out of it: while held, it reaches far enough for the rise and the shadow.
+  const room = await B.evaluate(() => {
+    const t = document.querySelector('.sheet-tab.dragging').getBoundingClientRect(); const r = document.querySelector('#tabsScroller').getBoundingClientRect();
+    return { above: Math.round(t.top - r.top), below: Math.round(r.bottom - t.bottom) };
+  });
+  ok('…with nothing cut off: room above and below the held tab for it and its shadow', room.above >= 18 && room.below >= 34, JSON.stringify(room));
+  const heldLayout = await layout();
+  ok('…and making that room moves nothing else', JSON.stringify(heldLayout) === JSON.stringify(restLayout), `${JSON.stringify(restLayout)} → ${JSON.stringify(heldLayout)}`);
   // One slot along: the finger moves as far as the next tab's right edge is from this one's.
   for (let i = 1; i <= 8; i++) { await touch('touchMove', s.x + (d.right - s.right + 4) * i / 8, s.y); await sleep(30); }
   await B.screenshot({ path: OUT + 'tab-drag.png', clip: { x: 0, y: 40, width: 390, height: 120 } });
   await touch('touchEnd'); await sleep(1200);
   const phoneAfter = await tabsOrder(B);
   ok('…and after letting go the tabs are bright and level again', await B.evaluate(() => [...document.querySelectorAll('.sheet-tab')].every(t => Number(getComputedStyle(t).opacity) === 1 && getComputedStyle(t).transform === 'none')));
+  ok('…and the row gives back the extra room (it would catch taps meant for the buttons above)', await B.evaluate(() => { const c = getComputedStyle(document.querySelector('#tabsScroller')); return c.paddingTop === '0px' && c.paddingBottom === '0px'; }));
   ok('touch and hold, then drag, moves a tab on a phone', phoneAfter.join() === [phoneBefore[1], phoneBefore[0], ...phoneBefore.slice(2)].join(), `${phoneBefore} → ${phoneAfter}`);
 
   // Holding a dragged tab near the strip's edge scrolls the tabs along.

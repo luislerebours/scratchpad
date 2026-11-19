@@ -309,7 +309,9 @@ to what the app collects); `branding/play-store/` the listing kit.
   phone, `TAB_HOLD_MS`, a quick swipe still scrolls): `meta=sheets` action
   `reorder`. The picked-up tab rises off the row (up 7px, `scale: 1.07`,
   deeper shadow) while the others dim to half, and it follows the pointer along
-  the row (`translate`); the
+  the row (`translate`). The row scrolls sideways, which clips above and below
+  too, so only while a tab is held or settling it reaches up and down (padding
+  with matching negative margins, nothing moves) to show the rise and shadow. The
   others slide aside in 200 ms when its edge passes their middle (FLIP in
   `slideTabs()`); letting go it glides into its slot. Holding near an edge
   scrolls the row. Reduced motion: no sliding. A tab list that arrives

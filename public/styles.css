@@ -242,6 +242,12 @@ img[data-mark] { transform: translateY(-1px); }
 .sheet-tabs .sheet-tab.dragging { z-index: 1; scale: 1.07; transform: translateY(-7px); box-shadow: var(--shadow-menu); transition: scale .2s cubic-bezier(.2, .8, .2, 1), transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s cubic-bezier(.2, .8, .2, 1); will-change: translate; }
 .sheet-tabs.reordering .sheet-tab:not(.dragging) { opacity: .5; }
 .sheet-tab.settling { z-index: 1; }
+/* The row scrolls sideways, which also cuts off anything above or below it, so
+   while a tab is held or gliding home the row reaches up and down far enough for
+   the rise and the shadow (the negative margins keep everything where it was),
+   and sits above the card so the shadow falls on it. Only then: the rest of the
+   time that extra space would catch taps meant for the buttons above and the card. */
+.tabs-scroller:has(.dragging, .settling) { z-index: 2; padding-block: 26px 38px; margin-block: -26px -38px; }
 .tabs-scroller.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs-scroller.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .tabs-scroller.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }

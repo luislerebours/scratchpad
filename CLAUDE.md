@@ -41,6 +41,29 @@ to what the app collects); `branding/play-store/` the listing kit.
   does not carry over to the next.
 - Work on a branch, test, push the branch, then ask.
 
+## Subdomains of sector809labs.com: catch-all redirect
+
+Cloudflare (zone `sector809labs.com`) sends every subdomain it doesn't know to a
+"this address doesn't exist" page, https://sector809labs.com/unknown-subdomain, which
+then goes on to the home page:
+
+- DNS: `AAAA *` → `100::`, proxied.
+- Rules › Redirect Rules › **Unknown subdomains**: a 302 for every host that is *not*
+  in its list. The list today: `sector809labs.com`, `www`, `scrap`, `sync`, `rsend` and
+  `send` (each `.sector809labs.com`).
+
+**Adding a subdomain of sector809labs.com** (a DNS record, a Worker custom domain or
+route, a Pages or R2 custom domain, a Netlify site, anything): add its full hostname to
+that list as well (Cloudflare › sector809labs.com › Rules › Redirect Rules › Unknown
+subdomains › Edit, then Deploy). A proxied (orange-cloud) name that isn't on the list is
+redirected to the "doesn't exist" page instead of reaching its app, and Worker and Pages
+custom domains are always proxied. DNS-only names aren't affected, but list them anyway
+so the list stays complete. Check afterwards: `curl -sI https://NAME.sector809labs.com`
+must not answer `302` to `/unknown-subdomain`. When removing a subdomain, take it off the
+list too.
+
+Full write-up: the `sector809labs-website` repo's README, section "Unknown subdomains".
+
 ## Testing and handoff
 
 - `tests/e2e/` has the browser tests and a local copy of every service (site,

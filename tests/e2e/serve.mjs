@@ -7,8 +7,18 @@ import { fileURLToPath } from 'node:url';
 const { BlobsServer } = await import(REPO + '/node_modules/@netlify/blobs/dist/server.js');
 const blobs = new BlobsServer({ directory: path.resolve('blobdata'), port: 8971, token: 'tok' });
 await blobs.start();
+// The local Blobs server answers "list every store" only at /<site>, not at the API path the client uses (real
+// Netlify does): send that one request where it works (the nightly backup lists stores).
+const realFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => realFetch(typeof input === 'string' || input instanceof URL ? String(input).replace(/^(http:\/\/localhost:\d+)\/api\/v1\/blobs\/(site)(\?|$)/, '$1/$2$3') : input, init);
 process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ apiURL: 'http://localhost:8971', siteID: 'site', token: 'tok' })).toString('base64');
-const fns = { state: (await import(REPO + '/netlify/functions/state.mjs')).default, files: (await import(REPO + '/netlify/functions/files.mjs')).default, images: (await import(REPO + '/netlify/functions/images.mjs')).default, auth: (await import(REPO + '/netlify/functions/auth.mjs')).default, ...((await fs.stat(REPO + '/netlify/functions/admin.mjs').catch(() => null)) ? { admin: (await import(REPO + '/netlify/functions/admin.mjs')).default } : {}), sync: (await import(REPO + '/netlify/functions/sync.mjs')).default, share: (await import(REPO + '/netlify/functions/share.mjs')).default, billing: (await import(REPO + '/netlify/functions/billing.mjs')).default, 'stripe-webhook': (await import(REPO + '/netlify/functions/stripe-webhook.mjs')).default, 'admin-api': (await import(REPO + '/netlify/functions/admin-api.mjs')).default, play: (await import(REPO + '/netlify/functions/play.mjs')).default };
+const fns = { state: (await import(REPO + '/netlify/functions/state.mjs')).default, files: (await import(REPO + '/netlify/functions/files.mjs')).default, images: (await import(REPO + '/netlify/functions/images.mjs')).default, auth: (await import(REPO + '/netlify/functions/auth.mjs')).default, ...((await fs.stat(REPO + '/netlify/functions/admin.mjs').catch(() => null)) ? { admin: (await import(REPO + '/netlify/functions/admin.mjs')).default } : {}), sync: (await import(REPO + '/netlify/functions/sync.mjs')).default, share: (await import(REPO + '/netlify/functions/share.mjs')).default, billing: (await import(REPO + '/netlify/functions/billing.mjs')).default, 'stripe-webhook': (await import(REPO + '/netlify/functions/stripe-webhook.mjs')).default, 'admin-api': (await import(REPO + '/netlify/functions/admin-api.mjs')).default, play: (await import(REPO + '/netlify/functions/play.mjs')).default, backup: (await import(REPO + '/netlify/functions/backup.mjs')).default };
+// The nightly backup signs in with a token GitHub signs: here a local key stands in for GitHub's (backup.cjs reads it).
+const oidc = (await import('node:crypto')).generateKeyPairSync('rsa', { modulusLength: 2048 });
+const oidcJwks = JSON.stringify({ keys: [{ ...oidc.publicKey.export({ format: 'jwk' }), kid: 'test-key', alg: 'RS256', use: 'sig' }] });
+await fs.mkdir(new URL('./out/', import.meta.url), { recursive: true });
+await fs.writeFile(new URL('./out/oidc-test-key.pem', import.meta.url), oidc.privateKey.export({ format: 'pem', type: 'pkcs8' }));
+(await import(REPO + '/netlify/lib/github-oidc.mjs')).useKeysForTests('http://localhost:8970/__test/jwks');
 const edgeCheck = (await import(REPO + '/netlify/edge-functions/check.js')).default;
 const types = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.png':'image/png', '.webmanifest':'application/manifest+json', '.woff2':'font/woff2', '.ico':'image/x-icon', '.svg':'image/svg+xml' };
 http.createServer(async (req, res) => {
@@ -17,6 +27,7 @@ http.createServer(async (req, res) => {
     const r = await edgeCheck(new Request(url, { headers: req.headers }));
     res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(Buffer.from(await r.arrayBuffer())); return;
   }
+  if (url.pathname === '/__test/jwks') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(oidcJwks); return; }
   if (process.env.LOG_REQ) console.log('REQ', req.method, url.pathname + url.search);
   const m = url.pathname.match(/^\/\.netlify\/functions\/([\w-]+)$/);
   try {

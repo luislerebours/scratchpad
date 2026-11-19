@@ -1,0 +1,93 @@
+# Every night at about 3:37 am New York time, everything needed to bring ScrapSheet back goes to Google Drive
+# ("ScrapSheet backups"): the code (a zip, and a git bundle with all its history and branches), the recovery guide
+# (docs/RECOVERY.md, as "READ ME FIRST" on top), every Netlify Blobs record and every file piece in Cloudflare R2,
+# those last two locked with BACKUP_PASSPHRASE. tools/backup/nightly.sh does the work; docs/RECOVERY.md explains
+# what's where, how to set it up again and how to restore. Same design as FinestIQ's morning copy.
+# The site checks GitHub's signed token for this workflow on main (netlify/lib/github-oidc.mjs): no site password.
+# This repository is public, so the log shows counts only, and nothing is kept as a GitHub artifact.
+# GitHub emails you when a run fails.
+name: Nightly backup
+on:
+  schedule:
+    # GitHub's clock is UTC: 07:37 is 3:37 am in New York in summer (EDT), 08:37 in winter (EST). Only the one
+    # matching New York's clock that day goes on (the "when" job).
+    - cron: '37 7 * * *'
+    - cron: '37 8 * * *'
+  workflow_dispatch:
+    inputs:
+      allow_big_delete:
+        description: 'Allow big delete (only when many accounts or files were really deleted)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  id-token: write
+concurrency: backup
+jobs:
+  when:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      go: ${{ steps.clock.outputs.go }}
+    steps:
+      - id: clock
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          WANT='37 8 * * *'; [ "$(TZ=America/New_York date +%z)" = "-0400" ] && WANT='37 7 * * *'
+          if [ "$GITHUB_EVENT_NAME" != schedule ] || [ "$SCHEDULE" = "$WANT" ]; then echo go=yes >> "$GITHUB_OUTPUT"
+          else echo go=no >> "$GITHUB_OUTPUT"; echo "Not New York's 3:37 am today; the other scheduled run copies."; fi
+  backup:
+    needs: when
+    if: needs.when.outputs.go == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the bundle carries the whole history
+      - name: Fetch every branch
+        run: git fetch --quiet origin '+refs/heads/*:refs/heads/*' --update-head-ok
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: |
+          npm ci --omit=dev --no-audit --no-fund
+          curl -fsSL -o rclone.zip https://downloads.rclone.org/v1.76.0/rclone-v1.76.0-linux-amd64.zip
+          unzip -q -j rclone.zip '*/rclone' -d "$HOME/bin" && rm rclone.zip
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Back up to Google Drive
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          RCLONE_CONFIG_TEXT: ${{ secrets.RCLONE_CONFIG }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          ALLOW_BIG_DELETE: ${{ inputs.allow_big_delete && '1' || '' }}
+          # After moving the site, set the repository variable SITE_URL to the new address.
+          SITE: ${{ vars.SITE_URL || 'https://scrapsheet.netlify.app' }}
+        run: |
+          set -euo pipefail
+          [ -n "$BACKUP_PASSPHRASE" ] || { echo "::error::Add the repository secret BACKUP_PASSPHRASE (docs/RECOVERY.md › Setting up the nightly backup)."; exit 1; }
+          [ -n "$RCLONE_CONFIG_TEXT" ] || { echo "::error::Add the repository secret RCLONE_CONFIG (docs/RECOVERY.md › Setting up the nightly backup)."; exit 1; }
+          umask 077; printf '%s\n' "$RCLONE_CONFIG_TEXT" > "$RUNNER_TEMP/rclone.conf"
+          export RCLONE_CONFIG="$RUNNER_TEMP/rclone.conf"
+          TOKEN=$(curl -sSf "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=scrapsheet-backup" -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" | jq -r .value)
+          echo "::add-mask::$TOKEN"
+          export TOKEN
+          bash tools/backup/nightly.sh
+      - name: Forget the Drive sign-in
+        if: always()
+        run: rm -f "$RUNNER_TEMP/rclone.conf"
+      - name: Phone alert - the backup failed
+        if: failure()
+        env:
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$PUSHOVER_TOKEN" ] && [ -n "$PUSHOVER_USER" ] || { echo "No Pushover secrets: GitHub's email only."; exit 0; }
+          curl -sS -o /dev/null -w 'Pushover: %{http_code}\n' --form-string "token=$PUSHOVER_TOKEN" --form-string "user=$PUSHOVER_USER" \
+            --form-string "title=ScrapSheet: the nightly backup failed" --form-string "message=Last night's backup to Google Drive didn't finish. Open this run to see which step failed (docs/RECOVERY.md has the fixes)." \
+            --form-string "url=$RUN_URL" --form-string "url_title=This run" https://api.pushover.net/1/messages.json || true

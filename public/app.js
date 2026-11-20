@@ -5852,9 +5852,29 @@ function placeProfile() {
   profilePanel.style.right = `${Math.max(8, Math.round(document.documentElement.clientWidth - r.right))}px`;
 }
 
+// An ⓘ button can't sit inside its row (a button in a button), so it lies
+// over the row, just after the end of the title's last line.
+function placeInfoButtons() {
+  for (const wrap of profilePanel.querySelectorAll('.pf-row-with-info')) {
+    const title = wrap.querySelector('.pf-label > span');
+    const info = wrap.querySelector('.pf-info');
+    if (!title || !info) continue;
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    const rects = range.getClientRects();
+    const line = rects[rects.length - 1];
+    if (!line) continue;
+    const box = wrap.getBoundingClientRect();
+    const size = info.offsetWidth;
+    info.style.left = `${Math.round(line.right - box.left + 2)}px`;
+    info.style.top = `${Math.round(line.top - box.top + line.height / 2 - size / 2)}px`;
+  }
+}
+
 function renderProfile(view, { focusRow = null } = {}) {
   profileView = view;
   profilePanel.innerHTML = profileHtml(view);
+  placeInfoButtons();
   profilePanel.setAttribute('aria-labelledby', 'pfTitle');
   profilePanel.removeAttribute('aria-label');
   const target = (focusRow && profilePanel.querySelector(`[data-pf="${focusRow}"]`))
@@ -5962,7 +5982,7 @@ profilePanel.addEventListener('keydown', e => {
 profileModal.addEventListener('pointerdown', e => {
   if (e.target === profileModal) closeProfile();
 });
-window.addEventListener('resize', placeProfile);
+window.addEventListener('resize', () => { placeProfile(); placeInfoButtons(); });
 
 accountBtn.setAttribute('aria-haspopup', 'dialog');
 accountBtn.setAttribute('aria-expanded', 'false');

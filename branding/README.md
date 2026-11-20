@@ -2,11 +2,13 @@
 
 ## App icon
 
-`app-icon.png` (1254 × 1254) is **the** ScrapSheet app icon, as approved: a soft
-teal spiral notepad with two text lines on a mint page, on a cream tile. Every
-installed or store icon comes from it:
+`app-icon.png` (1254 × 1254) is **the** ScrapSheet app icon, as approved: a flat
+teal (#247F82) spiral notepad with two text lines on a mint (#DDF5EE) page, on a
+white tile. It is the outline of the earlier 3D icon (Nov 2026), traced from it
+and redrawn in flat brand colours, so the shape stays the same. Every installed
+or store icon comes from it:
 
-- `app-icon-full-bleed-1024.png`: the same art on a full-bleed cream square at
+- `app-icon-full-bleed-1024.png`: the same art on a full-bleed white square at
   a tighter margin than the original, notepad ~79% of the icon (platforms
   round the corners themselves). Source of
   the web app's home-screen/taskbar icons (`public/assets/apple-touch-icon.png`,
@@ -18,7 +20,7 @@ installed or store icon comes from it:
 Don't add rounded corners or shadows to store artwork: iOS, Android and Windows
 apply their own shape.
 
-**Only for the installed app's icon.** The 3D icon and its versions are used
+**Only for the installed app's icon.** The app icon and its versions are used
 only where the app itself appears as an icon: home screens, taskbars, app
 launchers and the App Store / Play Store. Never inside the website or app, in
 emails, or on link-preview cards; those use the kit's flat marks and logos.

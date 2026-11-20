@@ -584,6 +584,7 @@ const ICON_PATHS = {
   logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/>',
   folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2.2h8.6A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5Z"/>',
   user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7M12 17.2h.01"/>',
   mail: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>',
   chevron: '<path d="m9.5 6 6 6-6 6"/>',
@@ -2829,7 +2830,21 @@ function openSheet({ title, text, files = [], actions }) {
   rememberFocus('sheet');
   sheetModal.hidden = false;
   document.body.classList.add('modal-open');
-  sheetActions.querySelector('.btn.secondary')?.focus({ preventScroll:true });
+  // A lone button (an explanation's "Got it") takes focus too.
+  (sheetActions.querySelector('.btn.secondary') || (actions.length === 1 ? sheetActions.firstChild : null))?.focus({ preventScroll:true });
+}
+
+// The ⓘ beside "Generate new recovery key…": what a recovery key is, in
+// plain words. Opens over the account menu, which stays open underneath.
+function explainRecoveryKey() {
+  openSheet({
+    title: 'What’s a recovery key?',
+    text: 'Everything in ScrapSheet is locked so only you can open it. Not even we can. Your password is what unlocks it.\n\n' +
+      'Your recovery key is a spare key. If you ever forget your password, it lets you set a new one and keep all your sheets and files.\n\n' +
+      'Without it, a forgotten password means starting over with an empty account. We can’t get your things back for you.\n\n' +
+      'Keep it somewhere safe, like a password manager or on paper. Making a new one stops the old one from working.',
+    actions: [{ label: 'Got it', kind: 'primary', full: true }]
+  });
 }
 
 function closeSheet() {
@@ -5783,7 +5798,7 @@ function profileHtml(view) {
         <h3 class="pf-group">Preferences</h3>
         <div class="pf-field"><span class="pf-field-label" id="pfAppearance">${icon('theme')}<span>Appearance</span></span>
           <div class="pf-seg" role="radiogroup" aria-labelledby="pfAppearance">${seg}</div></div>
-        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('email', 'mail', 'Change email…', { sub: account?.email || '' })}${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
+        ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('email', 'mail', 'Change email…', { sub: account?.email || '' })}${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}<div class="pf-row-with-info">${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}<button class="pf-info" type="button" data-pf="recovery-info" aria-label="What’s a recovery key?" title="What’s a recovery key?">${icon('info')}</button></div>` : ''}
         <h3 class="pf-group">Your data</h3>
         ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
         ${pfRow('delete', 'trash', 'Delete account…')}
@@ -5884,6 +5899,7 @@ const PROFILE_ACTIONS = {
   password: () => fromProfile(openChangePassword),
   email: () => fromProfile(openChangeEmail),
   recovery: () => fromProfile(confirmNewRecoveryKey),
+  'recovery-info': explainRecoveryKey,
   export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
   'signout-all': () => fromProfile(confirmSignOutEverywhere),

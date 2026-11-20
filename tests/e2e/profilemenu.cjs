@@ -55,6 +55,16 @@ const pfText = p => p.textContent('#profilePanel');
   ok('delete is plain, under Download my data', await p.$eval('[data-pf="delete"]', el => !el.classList.contains('danger') && el.previousElementSibling?.dataset.pf === 'export'));
   ok('sign out is last, in the accent color, after a divider', await p.$eval('[data-pf="signout"]', el => el.classList.contains('accent') && !el.nextElementSibling && el.previousElementSibling.classList.contains('pf-sep')));
   await p.screenshot({ path: OUT + 'pm-desktop-security.png' });
+  // ⓘ beside Generate new recovery key: a plain-words explanation over the menu.
+  ok('recovery key has an ⓘ button beside it', await p.$eval('[data-pf="recovery-info"]', el => el.previousElementSibling?.dataset.pf === 'recovery' && /recovery key/i.test(el.getAttribute('aria-label'))));
+  await p.click('[data-pf="recovery-info"]');
+  await p.waitForSelector('#sheetModal:not([hidden])');
+  const why = await p.textContent('#sheetModal');
+  ok('ⓘ explains recovery keys in plain words', /What’s a recovery key?/.test(why) && /forget your password/.test(why) && /starting over/.test(why), why);
+  ok('…with Got it focused, menu still open underneath', await p.evaluate(() => document.activeElement.textContent === 'Got it' && !document.querySelector('#profileModal').hidden));
+  await p.screenshot({ path: OUT + 'pm-recovery-info.png' });
+  await p.keyboard.press('Escape');
+  ok('Escape closes it, back on the ⓘ in the menu', await p.evaluate(() => document.querySelector('#sheetModal').hidden && !document.querySelector('#profileModal').hidden && document.activeElement.dataset.pf === 'recovery-info'));
   // Appearance selector
   await p.click('[data-theme-pick="dark"]');
   ok('Appearance: Dark applies and stays checked', (await p.evaluate(() => document.documentElement.dataset.theme)) === 'dark' && (await p.getAttribute('[data-theme-pick="dark"]', 'aria-checked')) === 'true');

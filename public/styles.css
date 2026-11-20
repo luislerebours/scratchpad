@@ -982,6 +982,12 @@ body.signed-out { background: var(--auth-bg); }
 .pf-seg { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); }
 .pf-seg-btn { appearance: none; min-height: 32px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: .8125rem; font-weight: 500; cursor: pointer; }
 .pf-seg-btn[aria-checked="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-card); }
+.pf-row-with-info { display: flex; align-items: center; gap: 2px; }
+.pf-row-with-info > .pf-row { flex: 1; min-width: 0; }
+.pf-info { appearance: none; display: grid; place-items: center; flex: none; width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; }
+.pf-info .i { width: 20px; height: 20px; }
+@media (hover: hover) { .pf-info:hover { background: var(--hover); color: var(--accent); } }
+.pf-info:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .pf-sep { height: 1px; margin: 8px 6px; background: var(--line); }
 @media (max-width: 699px) {
   .pf-row { min-height: 52px; }

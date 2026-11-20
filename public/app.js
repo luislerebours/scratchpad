@@ -5770,8 +5770,8 @@ function displayName(email = '') {
 }
 
 const chevron = () => `<span class="pf-chevron" aria-hidden="true">${icon('chevron')}</span>`;
-const pfRow = (action, iconName, label, { sub = '', more = false, danger = false, external = false } = {}) =>
-  `<button class="pf-row${danger ? ' danger' : ''}" type="button" data-pf="${action}">${icon(iconName)}<span class="pf-label"><span>${escapeHtml(label)}</span>${sub ? `<span class="pf-row-sub">${escapeHtml(sub)}</span>` : ''}</span>${more ? chevron() : external ? `<span class="pf-chevron" aria-hidden="true">${icon('open')}</span>` : ''}</button>`;
+const pfRow = (action, iconName, label, { sub = '', more = false, danger = false, accent = false, external = false } = {}) =>
+  `<button class="pf-row${danger ? ' danger' : ''}${accent ? ' accent' : ''}" type="button" data-pf="${action}">${icon(iconName)}<span class="pf-label"><span>${escapeHtml(label)}</span>${sub ? `<span class="pf-row-sub">${escapeHtml(sub)}</span>` : ''}</span>${more ? chevron() : external ? `<span class="pf-chevron" aria-hidden="true">${icon('open')}</span>` : ''}</button>`;
 
 function profileHtml(view) {
   if (view === 'security') {
@@ -5786,12 +5786,12 @@ function profileHtml(view) {
         ${account?.keyring ? `<h3 class="pf-group">Security</h3>${pfRow('email', 'mail', 'Change email…', { sub: account?.email || '' })}${pfRow('password', 'lock', 'Change password…', { sub: 'Signs out your other devices' })}${pfRow('recovery', 'key', 'Generate new recovery key…', { sub: 'Replaces the key that resets your password' })}` : ''}
         <h3 class="pf-group">Your data</h3>
         ${pfRow('export', 'download', 'Download my data…', { sub: 'Every sheet, image and file in one .zip' })}
+        ${pfRow('delete', 'trash', 'Delete account…')}
         <h3 class="pf-group">Sessions</h3>
         ${pfRow('devices', 'devices', 'Signed-in devices…', { sub: 'See where you’re signed in, sign one out' })}
-        ${pfRow('signout', 'logout', 'Sign out')}
         ${pfRow('signout-all', 'devices', 'Sign out of all devices…')}
         <div class="pf-sep"></div>
-        ${pfRow('delete', 'trash', 'Delete account…', { danger: true })}
+        ${pfRow('signout', 'logout', 'Sign out', { accent: true })}
       </div>`;
   }
   if (view === 'help') {

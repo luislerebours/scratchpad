@@ -969,6 +969,8 @@ body.signed-out { background: var(--auth-bg); }
 .pf-chevron .i { width: 18px; height: 18px; }
 .pf-row.danger, .pf-row.danger > .i { color: var(--danger); }
 @media (hover: hover) { .pf-row.danger:hover { background: var(--danger-soft); } }
+.pf-row.accent, .pf-row.accent > .i { color: var(--accent); }
+@media (hover: hover) { .pf-row.accent:hover { background: var(--accent-soft); } }
 .pf-subhead { display: flex; align-items: center; gap: 4px; padding: 8px 12px 8px 6px; }
 .pf-subhead h2 { font-size: 1rem; font-weight: 600; }
 .pf-back { appearance: none; display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--text); cursor: pointer; }

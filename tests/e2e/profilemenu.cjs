@@ -51,8 +51,9 @@ const pfText = p => p.textContent('#profilePanel');
   await p.keyboard.press('ArrowDown'); await p.keyboard.press('Enter'); await p.waitForSelector('.pf-subhead');
   ok('Account & security opens with title and Back', (await p.textContent('#pfTitle')) === 'Account & security' && await p.evaluate(() => document.activeElement.dataset.pf === 'back'));
   const sec = await pfText(p);
-  ok('groups: Preferences, Security, Sessions; delete last', /Preferences[\s\S]*Appearance[\s\S]*Security[\s\S]*Generate new recovery key[\s\S]*Sessions[\s\S]*Sign out[\s\S]*Sign out of all devices[\s\S]*Delete account/.test(sec), sec);
-  ok('delete is red and separated', await p.$eval('[data-pf="delete"]', el => el.classList.contains('danger') && el.previousElementSibling.classList.contains('pf-sep')));
+  ok('groups: Preferences, Security, Your data, Sessions', /Preferences[\s\S]*Appearance[\s\S]*Security[\s\S]*Generate new recovery key[\s\S]*Download my data[\s\S]*Delete account[\s\S]*Sessions[\s\S]*Signed-in devices[\s\S]*Sign out of all devices/.test(sec), sec);
+  ok('delete is plain, under Download my data', await p.$eval('[data-pf="delete"]', el => !el.classList.contains('danger') && el.previousElementSibling?.dataset.pf === 'export'));
+  ok('sign out is last, in the accent color, after a divider', await p.$eval('[data-pf="signout"]', el => el.classList.contains('accent') && !el.nextElementSibling && el.previousElementSibling.classList.contains('pf-sep')));
   await p.screenshot({ path: OUT + 'pm-desktop-security.png' });
   // Appearance selector
   await p.click('[data-theme-pick="dark"]');

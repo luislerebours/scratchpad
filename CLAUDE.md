@@ -299,8 +299,9 @@ Full write-up: the `sector809labs-website` repo's README, section "Unknown subdo
   desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
   have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
-  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data, Signed-in devices, Sign out, Sign out of all devices, Delete
-  account in red at the bottom) and Help & support (support, privacy, terms).
+  System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data,
+  Delete account (plain text, still confirms), Signed-in devices, Sign out of
+  all devices, then a divider and Sign out last in the accent color) and Help & support (support, privacy, terms).
   Sub-views open in place with Back; Escape goes back, then closes.
 - Files & share links (`#libraryModal`, `openLibrary()`): full screen on phones,
   a large dialog on desktop. Files tab: storage used vs the limit

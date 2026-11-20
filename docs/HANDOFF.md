@@ -1,41 +1,25 @@
-# Handoff: where ScrapSheet stands (November 18, 2026)
+# Handoff: where ScrapSheet stands (November 19, 2026)
 
 For the next Claude session (or person) picking this up. **Read `CLAUDE.md`
 first**: it describes how the app works and its rules. This file adds what
 isn't there: what's in flight, why things are the way they are, the live
 setup, how the owner likes to work, and what's left.
 
-## 1. In flight: six pull requests, ready to merge
+## 1. In flight: the nightly backup to Google Drive
 
-All built and tested on their own branches. Merge **one at a time, in this
-order**, and only after the owner says to (each merge needs its own "yes",
-see CLAUDE.md). Before each merge: bring the branch up to date with `main`,
-resolve conflicts, rerun its test, then merge.
+Everything up to PR #92 is merged and live (version history, file rename and
+move, change email, signed-in devices, share link passwords, the Help page,
+complimentary Pro, tab swipes, the Play signing keys).
 
-| Order | PR | What | Test |
-|---|---|---|---|
-| 1 | #70 `text-history` | Version history per sheet (20 versions, 30 days, encrypted copies) and Undo after Clear | `history` |
-| 2 | #71 `files-tabs` | Rename and Move to… for files; drag tabs to reorder | `filestabs` |
-| 3 | #72 `change-email` | Change email (code to the new address; keys re-derived on the device) | `emailchange` |
-| 4 | #73 `devices-list` | Signed-in devices list, sign out one device | `devices` |
-| 5 | #75 `share-password` | Optional password on share links | `sharepw` |
-| 6 | #74 `help-page` | Help page at /help (25 Q&As) | (visual) |
-
-Known follow-ups while merging:
-
-- **#72 and #73 both change `netlify/functions/auth.mjs`.** After both are in,
-  the `change-email` action must call `signedIn({ ...moved, sessions: [] }, {}, req)`
-  so the device that changed its email gets a fresh entry in the devices list
-  (every other device was signed out). Rerun `emailchange` and `devices`.
-- **#70 and #73 each add a dialog.** The page-wide Escape handler in
-  `public/app.js` (`document.addEventListener('keydown'…)`, near the download
-  code) should close `historyModal` too, like it does `devicesModal`.
-- **#74 (Help) before merging:** add a sentence about share link passwords to
-  "How do share links work?", and check every answer is still true. Also add
-  the new settings (Change email, Signed-in devices) to CLAUDE.md's profile menu
-  line if a merge dropped them.
-- CLAUDE.md is edited by every PR: resolve its conflicts by keeping all the
-  new paragraphs.
+Branch `nightly-backup`: every night, the code, every Netlify Blobs record and
+every R2 file piece go to Google Drive (same account as FinestIQ's backups),
+plus the recovery guide `docs/RECOVERY.md`. Tested locally (`backup`). It does
+nothing until merged **and** the owner adds the GitHub secrets (RECOVERY.md
+section 7): `RCLONE_CONFIG`, `BACKUP_PASSPHRASE`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, variable `R2_ACCOUNT_ID` (optional `PUSHOVER_*`). Then
+run it once by hand (Actions › Nightly backup › Run workflow) and check Drive.
+The first run copies everything (Netlify bandwidth for files kept there, once);
+after that only changes.
 
 ## 2. The live setup
 

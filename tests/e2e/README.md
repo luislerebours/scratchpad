@@ -80,6 +80,7 @@ Fixing these is fine: update the expectation, not the app.
 | `aestip` | The AES-256 note and its info popup on the sign-in page |
 | `attachbtn` | The attach button and uploads |
 | `autoupdate` | Open tabs reloading for a new version, only at quiet moments |
+| `backup` | The nightly backup whole (local folders as Drive and R2; needs rclone): who may call it, encryption, only changes fetched, old versions kept, the stop on mass deletes, 45-day clean-up, and a restore that matches byte for byte |
 | `blockedrelay` | A network that blocks the relay: files through Netlify, edits still reach other devices |
 | `costtrims` | Save cadence, device-sent sync notices, 5-minute safety check, yearly first |
 | `delacctB` | Deleting an account |

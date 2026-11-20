@@ -72,6 +72,23 @@ Full write-up: the `sector809labs-website` repo's README, section "Unknown subdo
   Add a test there for every new feature.
 - `docs/HANDOFF.md`: what's in flight, the live setup, past decisions and
   costs, how the owner works, and what's left.
+- `docs/RECOVERY.md`: the owner's recovery guide (rebuild in about an hour if
+  Netlify, GitHub or Cloudflare is lost), copied to Google Drive every night as
+  "READ ME FIRST". A change that adds or removes an env var, a GitHub secret,
+  an outside service or a kind of stored data updates it in the same PR. Names
+  only, never values.
+- Nightly backup (`.github/workflows/backup.yml`, `tools/backup/`, about 3:37 am
+  New York): to Google Drive "ScrapSheet backups", the same Google account as
+  FinestIQ's. The code (zip + git bundle of every branch), and, locked with
+  `BACKUP_PASSPHRASE` (rclone crypt, names too), every Netlify Blobs record and
+  every R2 file piece, mirrored: only what changed is fetched; the earlier copy
+  of anything changed or deleted goes to `old/<day>` (45 days). It stops instead
+  of emptying the mirror when much of the site's data is gone. The workflow
+  reads Blobs through `netlify/functions/backup.mjs` (read-only), which only
+  accepts GitHub's signed token for that workflow on main
+  (`netlify/lib/github-oidc.mjs`); R2 with a read-only R2 key. The repo is
+  public: the log shows counts only, no GitHub artifacts. Restore:
+  `tools/backup/restore-blobs.mjs`. Test: `backup`.
 
 ## Layout
 

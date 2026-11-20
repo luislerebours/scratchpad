@@ -13,8 +13,8 @@
   "backgroundColor": "#F5F1EB",
   "enableNotifications": true,
   "startUrl": "/?source=twa",
-  "iconUrl": "https://scrap.sector809labs.com/assets/icon-512.png?v=3",
-  "maskableIconUrl": "https://scrap.sector809labs.com/assets/icon-maskable-512.png?v=3",
+  "iconUrl": "https://scrap.sector809labs.com/assets/icon-512.png?v=4",
+  "maskableIconUrl": "https://scrap.sector809labs.com/assets/icon-maskable-512.png?v=4",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
     "path": "./scrapsheet-upload.keystore",

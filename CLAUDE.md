@@ -338,7 +338,7 @@ Full write-up: the `sector809labs-website` repo's README, section "Unknown subdo
   `mark-primary.svg` cropped tight to the drawing (256 px, transparent); also the
   email logo. `img[data-mark]` / `.brand-icon` nudge it up so its middle sits on
   the middle of the "ScrapSheet" capitals.
-  The 3D app icon (`app-icon*.png`, `public/assets/apple-touch-icon.png`,
+  The app icon (flat teal notepad on white, `app-icon*.png`, `public/assets/apple-touch-icon.png`,
   `icon-192/512`, `icon-maskable-512`, `icon-source`) is ONLY the installed
   app's icon (home screen, taskbar, app stores): never use it inside the site,
   app, emails or link cards; those use the kit's flat marks and logos.

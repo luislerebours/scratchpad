@@ -58,7 +58,8 @@ const pfText = p => p.textContent('#profilePanel');
   // ⓘ beside Generate new recovery key: a plain-words explanation over the menu.
   ok('recovery key has an ⓘ button beside it', await p.$eval('[data-pf="recovery-info"]', el => el.previousElementSibling?.dataset.pf === 'recovery' && /recovery key/i.test(el.getAttribute('aria-label'))));
   ok('…right after the title, on its line', await p.evaluate(() => {
-    const t = document.querySelector('[data-pf="recovery"] .pf-label > span').getBoundingClientRect();
+    const r = document.createRange(); r.selectNodeContents(document.querySelector('[data-pf="recovery"] .pf-label > span'));
+    const t = [...r.getClientRects()].pop();
     const i = document.querySelector('[data-pf="recovery-info"]').getBoundingClientRect();
     const gap = i.left - t.right;
     return gap >= 0 && gap < 12 && Math.abs((i.top + i.height / 2) - (t.top + t.height / 2)) < 3;

@@ -54,7 +54,8 @@ code's notes are in the code.
 
 | Account | What it does for ScrapSheet | If it's lost |
 |---|---|---|
-| **Google** (your Gmail) | Google Drive (the backups), Google Play Console (the Android app), Google Cloud (the Play service account; the project "ScrapSheet backups" with the "rclone" Drive client) | The most important login. Keep its recovery codes and phone current |
+| **Google** (your Gmail) | Google Drive (the backups), Google Cloud project "ScrapSheet backups" (the "rclone" Drive client) | The most important login. Keep its recovery codes and phone current |
+| **Google** (the Sector 809 Labs company account, not your Gmail) | Google Play Console (organization account "Sector 809 Labs": the Android app, the Pro subscriptions, the payments profile); Google Cloud project **ScrapSheet Play** (`scrapsheet-play`): the service account `scrapsheet-server@scrapsheet-play.iam.gserviceaccount.com` that reads purchases, and the Pub/Sub topic `scrapsheet-play` with push subscription `scrapsheet-play-push` for Google's notices | Keep its recovery codes and phone current too. Without it, nobody can buy Pro in the Android app |
 | **GitHub** (user `luislerebours`, repo `scratchpad`, public) | The code; pushes to `main` deploy the site; runs the nightly backup | Code: from the Drive bundle (section 6, "If GitHub is lost") |
 | **Netlify** (site `scrapsheet`) | Runs the site and its functions; stores the data (Blobs) and some files | Section 6, "If Netlify is lost" |
 | **Cloudflare** (the account with sector809labs.com) | DNS for scrap.sector809labs.com and sync.sector809labs.com (DNS only); the sync relay Worker `scratchpad-sync`; R2 bucket `scrapsheet-files` (files uploaded since Nov 18, 2026) | Section 6, "If Cloudflare is lost" |
@@ -78,8 +79,8 @@ code's notes are in the code.
 | `FILES_R2` | `1`: new uploads go to R2 (not secret) | — |
 | `ADMIN_SETUP_TOKEN` | Enrolls the first admin once | Make up a long random string |
 | `PLAY_PACKAGE_NAME` | `com.sector809labs.scrapsheet` (not secret) | — |
-| `PLAY_SERVICE_ACCOUNT` | Reads Play purchases (a JSON key) | Google Cloud › the service account › Keys |
-| `PLAY_RTDN_SECRET` | Checks Google Play's notices | Make up a long random string; the same in the Pub/Sub push address |
+| `PLAY_SERVICE_ACCOUNT` | Reads Play purchases (a JSON key; secret). Bitwarden: "ScrapSheet Play service account key" | Google Cloud (company account) › ScrapSheet Play › Service accounts › scrapsheet-server › Keys › Add key › JSON |
+| `PLAY_RTDN_SECRET` | Checks Google Play's notices (secret). Bitwarden: "ScrapSheet Play notices secret" | A long random string; the same one ends the push address of `scrapsheet-play-push` (`…/play?action=rtdn&key=<secret>`). A new one means editing that address too |
 
 Tests only (never on the live site): `NEW_ACCOUNT_PLAN`, `SCRATCHPAD_DEV_MAIL`, `PLAY_API_BASE`, `PLAY_TOKEN_URL`.
 No longer used: `OWNER_EMAIL`.

@@ -150,7 +150,15 @@ How it works:
 - The admin dashboard shows Play billing (never the purchase token) and can
   refresh it from Google.
 
-Setup (once the app exists in Play Console):
+Setup (once the app exists in Play Console). **Done Nov 20, 2026** on the
+Sector 809 Labs company Google account: both subscriptions active (base plans
+`monthly` and `yearly`, prices converted by Google for other countries),
+Cloud project `scrapsheet-play` with service account
+`scrapsheet-server@scrapsheet-play.iam.gserviceaccount.com` (ScrapSheet app
+only, never FinestIQ), topic `scrapsheet-play`, push subscription
+`scrapsheet-play-push` set to never expire (the default deletes it after 31
+quiet days), all three `PLAY_*` variables set, and Google's test notice
+delivered and acknowledged. Left: license testers and a test purchase.
 
 1. **Products:** Play Console → Monetize → Products → Subscriptions. Create
    `scrapsheet_pro_month` (one auto-renewing monthly base plan, US $0.99) and

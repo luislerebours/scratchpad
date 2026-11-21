@@ -64,6 +64,16 @@ list too.
 
 Full write-up: the `sector809labs-website` repo's README, section "Unknown subdomains".
 
+## App store developer accounts
+
+- **Google Play (Play Console):** the company's own Google account (the Sector 809 Labs Gmail), not the owner's
+  personal Gmail.
+- **Apple Developer / App Store Connect:** the company's organization account for Sector 809 Labs LLC (approved
+  2026-11-20), signed in with a sector809labs.com address, not a personal Apple ID.
+
+This repo is public, so the sign-in addresses aren't written here: ask the owner if you need them. Use these accounts
+for all store work, and never create a second developer account on either store.
+
 ## Testing and handoff
 
 - `tests/e2e/` has the browser tests and a local copy of every service (site,

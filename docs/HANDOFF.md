@@ -43,6 +43,8 @@ after that only changes.
 - **Stripe**: sandbox "Sector 809 Labs LLC sandbox" works end to end. The live
   account isn't connected to Claude yet (see section 6). **Never touch the
   FinestIQ account** (the owner's other app).
+- **Apple Developer** account: signed in as developer@sector809labs.com (for the
+  iOS app, after the Android launch).
 - **Never touch the `ojpad` Netlify site** (a coworker's copy).
 - Netlify logs: the Netlify connector's observability "get-request-logs"
   (filter `FunctionName`) was the fastest way to debug live problems.

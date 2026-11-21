@@ -39,12 +39,13 @@ ephemerally: no**.
 | Type | What it is | Required or optional | Purposes |
 |---|---|---|---|
 | Personal info → **Email address** | The account's email: signs in, sign-in codes, security notices | Required | App functionality, Account management |
+| Personal info → **Name** | The name people may choose for themselves in the account menu (else one made from the email); shown only to them | Optional | App functionality, Account management |
 | Financial info → **Purchase history** | Plan (Free/Pro), subscription status and renewal date, Stripe or Google Play subscription identifiers | Optional (only people who buy Pro) | App functionality, Account management |
 | App activity → **App interactions** | Sign-in count and times, the days the app was opened (last 60), shown to staff in the admin dashboard; for each signed-in device, its kind ("Chrome on Windows"), sign-in time and last use, shown to the user (Signed-in devices) | Required | Analytics, Account management, Security |
 | App activity → **Other actions** | Storage used and how many sheets, files and share links an account has (sizes and counts, never content) | Required | App functionality (plan limits), Account management |
 | App info and performance → **Other app performance data** | Server error reports: which function, path and status failed (no email, content or IP), kept 30 days | Required | App functionality |
 
-Not collected (leave unchecked): location, name, phone, address, contacts,
+Not collected (leave unchecked): location, phone, address, contacts,
 messages, photos and videos, audio, files and docs, calendar, health, web
 browsing, device or other IDs, payment info (Stripe and Google Play take card
 details themselves; we never see them), crash logs from the device.

@@ -65,6 +65,7 @@ async function signedIn(user, body = {}, req = null, sid = null) {
   user = fresh.user;
   return json({
     email: user.email,
+    name: user.name || '',
     keyring: user.keyring || null,
     locked: Boolean(user.keyring) && !user.migratedAt ? 'migrating' : user.keyring ? 'on' : 'off',
     // Whether files and images uploaded before their types were locked have been done.
@@ -75,6 +76,16 @@ async function signedIn(user, body = {}, req = null, sid = null) {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+// The name people choose for themselves (account menu): plain text, no
+// invisible or control characters, spaces tidied, at most 40 characters.
+const NAME_MAX = 40;
+function cleanName(value) {
+  const tidy = String(value ?? '').normalize('NFC')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, '')
+    .replace(/\s+/g, ' ').trim();
+  return [...tidy].slice(0, NAME_MAX).join('').trim();
+}
 
 // Activity for the admin view: sign-ins, and the days the pad was opened.
 function withSignIn(user) {
@@ -281,6 +292,18 @@ export default withErrors('auth', async (req, context) => {
     await store.setJSON(`users/${ek}`, { ...auth.user, keyring });
     await securityNotice(req, auth.user.email, 'recovery');
     return json({ ok: true, keyring });
+  }
+
+  // The name shown in the account menu (empty: the one made from the email).
+  // Other devices hear about it through the relay and fetch it.
+  if (action === 'set-name') {
+    const auth = await requireUser(req);
+    if (auth.error) return auth.error;
+    const name = cleanName(body.name);
+    const { name: _old, ...rest } = auth.user;
+    await store.setJSON(`users/${emailKey(auth.user.email)}`, name ? { ...rest, name } : rest);
+    await notifySync(auth.user.ns, 'account', String(Date.now()));
+    return json({ ok: true, name });
   }
 
   // Every file and image type is now locked too.

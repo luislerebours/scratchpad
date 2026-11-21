@@ -947,6 +947,15 @@ body.signed-out { background: var(--auth-bg); }
 .pf-avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
 .pf-id { display: flex; flex-direction: column; min-width: 0; }
 .pf-name { font-size: 1rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.pf-name-btn { appearance: none; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: -3px -6px; padding: 3px 6px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pf-name-text { min-width: 0; overflow-wrap: anywhere; }
+.pf-name-btn .i { flex: none; width: 15px; height: 15px; color: var(--faint); }
+@media (hover: hover) { .pf-name-btn:hover { background: var(--hover); } .pf-name-btn:hover .i { color: var(--accent); } }
+.pf-name-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 0; }
+.pf-name-form { margin: -4px -7px; }
+.pf-name-input { width: 100%; min-height: 32px; padding: 3px 6px; border: 1px solid var(--accent-line); border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 1rem; font-weight: 600; outline: none; }
+.pf-name-input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
+@media (max-width: 699px) { .pf-name-input { font-size: 16px; } }
 .pf-email { color: var(--muted); font-size: .8125rem; line-height: 1.35; overflow-wrap: anywhere; }
 .pf-badge { align-self: start; margin-top: 2px; padding: 2px 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--raised); color: var(--muted); font-size: .75rem; font-weight: 600; line-height: 1.4; }
 .pf-badge.pro { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }

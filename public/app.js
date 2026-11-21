@@ -3848,7 +3848,7 @@ async function downloadMyData() {
     const summary = {
       app: 'ScrapSheet',
       exportedAt: new Date().toISOString(),
-      account: { email: account?.email || null, plan: myPlan().plan === 'free' ? 'free' : 'pro' },
+      account: { email: account?.email || null, name: account?.name || null, plan: myPlan().plan === 'free' ? 'free' : 'pro' },
       sheets: plan.map(p => ({ name: p.name, folder: p.empty ? null : p.folder, empty: p.empty, images: p.images.length, files: p.files.map(f => ({ name: f.name, type: f.type || null, size: f.size, uploadedAt: f.uploadedAt ? new Date(f.uploadedAt).toISOString() : null })) }))
     };
     const entries = [
@@ -5775,8 +5775,15 @@ window.fetch = async (...args) => {
 const profileModal = document.querySelector('#profileModal');
 const profilePanel = document.querySelector('#profilePanel');
 let profileView = 'main';
+let editingName = false;
 
-// Accounts have no separate name: the part of the email before "@", tidied.
+// The name in the account menu: the one chosen (account menu › tap the name),
+// else the part of the email before "@", tidied.
+const NAME_MAX = 40;
+const myName = () => account?.name || displayName(account?.email || '');
+function updateAvatar() {
+  avatarEl.textContent = ([...(account?.name || account?.email || '?')][0] || '?').toUpperCase();
+}
 function displayName(email = '') {
   const local = String(email).split('@')[0].replace(/\+.*$/, '');
   const words = local.split(/[._-]+/).map(w => w.replace(/\d+/g, '')).filter(Boolean);
@@ -5824,9 +5831,13 @@ function profileHtml(view) {
   const planAction = !pro ? `<button class="pf-plan-btn" type="button" data-pf="upgrade">Upgrade to Pro</button>`
     : plan.billing ? `<button class="pf-plan-link" type="button" data-pf="billing">Manage billing</button>` : '';
   const email = account?.email || '';
+  const name = myName();
+  const nameHtml = editingName
+    ? `<form class="pf-name-form" data-name-form novalidate><input class="pf-name-input" id="pfNameInput" type="text" maxlength="${NAME_MAX}" autocomplete="name" enterkeyhint="done" spellcheck="false" aria-label="Your name" placeholder="${escapeHtml(displayName(email))}" value="${escapeHtml(account?.name || '')}"></form>`
+    : `<button class="pf-name-btn" type="button" data-pf="rename" title="Change your name" aria-label="${escapeHtml(name)}, change your name"><span class="pf-name-text">${escapeHtml(name)}</span>${icon('pencil')}</button>`;
   return `<div class="pf-head">
-      <span class="pf-avatar" aria-hidden="true">${escapeHtml((displayName(email)[0] || '?').toUpperCase())}</span>
-      <div class="pf-id"><h2 class="pf-name" id="pfTitle">${escapeHtml(displayName(email))}</h2><span class="pf-email">${escapeHtml(email).replace('@', '@<wbr>')}</span></div>
+      <span class="pf-avatar" aria-hidden="true">${escapeHtml(([...name][0] || '?').toUpperCase())}</span>
+      <div class="pf-id"><h2 class="pf-name" id="pfTitle">${nameHtml}</h2><span class="pf-email">${escapeHtml(email).replace('@', '@<wbr>')}</span></div>
       <span class="pf-badge${pro ? ' pro' : ''}">${pro ? 'Pro' : 'Free'}</span>
     </div>
     ${detail || planAction ? `<div class="pf-plan"><span class="pf-plan-detail">${escapeHtml(detail)}</span>${planAction}</div>` : ''}
@@ -5877,9 +5888,74 @@ function renderProfile(view, { focusRow = null } = {}) {
   placeInfoButtons();
   profilePanel.setAttribute('aria-labelledby', 'pfTitle');
   profilePanel.removeAttribute('aria-label');
+  const nameInput = profilePanel.querySelector('#pfNameInput');
+  if (nameInput) {
+    nameInput.focus({ preventScroll: true });
+    nameInput.select();
+    return;
+  }
   const target = (focusRow && profilePanel.querySelector(`[data-pf="${focusRow}"]`))
     || profilePanel.querySelector(view === 'main' ? '.pf-row, .pf-plan-btn' : '.pf-back');
   target?.focus({ preventScroll: true });
+}
+
+// Tap your name (account menu) to change it. Enter or leaving the box saves;
+// Escape keeps the old one; an empty box goes back to the name from the email.
+function startRenameSelf() {
+  if (blockedOffline()) return;
+  editingName = true;
+  renderProfile('main');
+}
+
+let savingName = false;
+async function finishRenameSelf(save) {
+  if (!editingName || savingName) return;
+  const input = profilePanel.querySelector('#pfNameInput');
+  const wanted = [...(input?.value || '').replace(/\s+/g, ' ').trim()].slice(0, NAME_MAX).join('');
+  editingName = false;
+  const redraw = () => { if (!profileModal.hidden && profileView === 'main' && !editingName) renderProfile('main', { focusRow: 'rename' }); };
+  if (!save || wanted === (account?.name || '') || blockedOffline()) {
+    redraw();
+    return;
+  }
+  savingName = true;
+  const before = account.name || '';
+  account.name = wanted; // shown at once; put back if the server says no
+  updateAvatar();
+  redraw();
+  try {
+    const data = await authPost('set-name', { name: wanted });
+    account.name = data.name || '';
+    showToast(account.name ? 'Name saved' : 'Name reset');
+  } catch (err) {
+    account.name = before;
+    showToast(err.message || 'Couldn’t save your name. Try again.');
+  } finally {
+    savingName = false;
+    updateAvatar();
+    saveSnapshot();
+    redraw();
+  }
+}
+
+profilePanel.addEventListener('submit', e => {
+  if (!e.target.closest('[data-name-form]')) return;
+  e.preventDefault();
+  finishRenameSelf(true);
+});
+profilePanel.addEventListener('focusout', e => {
+  if (e.target.id === 'pfNameInput') finishRenameSelf(true);
+});
+
+// Another device changed the name: fetch it.
+async function refreshAccountName() {
+  const r = await rawFetch(API_AUTH, { cache: 'no-store' }).catch(() => null);
+  const me = r?.ok ? await r.json().catch(() => null) : null;
+  if (!me || me.email !== account?.email || (me.name || '') === (account.name || '')) return;
+  account.name = me.name || '';
+  updateAvatar();
+  saveSnapshot();
+  if (!profileModal.hidden && profileView === 'main' && !editingName) renderProfile('main');
 }
 
 function openProfile(view = 'main', { focusRow = null } = {}) {
@@ -5894,6 +5970,7 @@ function openProfile(view = 'main', { focusRow = null } = {}) {
 
 function closeProfile({ restore = true } = {}) {
   if (profileModal.hidden) return;
+  if (editingName) finishRenameSelf(true);
   profileModal.hidden = true;
   accountBtn.setAttribute('aria-expanded', 'false');
   updateModalOpen();
@@ -5919,6 +5996,7 @@ const PROFILE_ACTIONS = {
   password: () => fromProfile(openChangePassword),
   email: () => fromProfile(openChangeEmail),
   recovery: () => fromProfile(confirmNewRecoveryKey),
+  rename: startRenameSelf,
   'recovery-info': explainRecoveryKey,
   export: () => fromProfile(confirmDownloadData),
   signout: () => fromProfile(() => signOut('logout')),
@@ -5949,6 +6027,14 @@ profilePanel.addEventListener('click', e => {
 });
 
 profilePanel.addEventListener('keydown', e => {
+  if (e.target.id === 'pfNameInput') {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishRenameSelf(false);
+    }
+    return;
+  }
   if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();
@@ -6391,7 +6477,7 @@ emailChangeForm.addEventListener('submit', async e => {
     account.email = data.email;
     if (data.keyring) account.keyring = data.keyring;
     await vault.rememberMaster(data.email, master);
-    avatarEl.textContent = data.email.charAt(0).toUpperCase();
+    updateAvatar();
     accountBtn.title = data.email;
     accountBtn.setAttribute('aria-label', `Account: ${data.email}`);
     saveSnapshot();
@@ -6934,7 +7020,7 @@ async function startApp() {
   document.body.classList.remove('signed-out');
   authScreen.hidden = true;
   applyPlan();
-  avatarEl.textContent = (account.email || '?').charAt(0).toUpperCase();
+  updateAvatar();
   accountBtn.title = account.email;
   accountBtn.setAttribute('aria-label', `Account: ${account.email}`);
   await fetchSheets();
@@ -7128,6 +7214,10 @@ function onSyncNotice(notice) {
     checkForChanges();
     return;
   }
+  if (notice.part === 'account') {
+    refreshAccountName();
+    return;
+  }
   const other = /^(text|files)-(\d+)$/.exec(String(notice.part || ''));
   if (other && Number(other[2]) !== activeSheet) {
     if (ownRevs.get(notice.part) !== notice.rev) refreshOtherSheet(Number(other[2]), other[1]);
@@ -7218,6 +7308,7 @@ async function saveSnapshot() {
       v: 1,
       at: Date.now(),
       email: account.email,
+      name: account.name || '',
       plan: account.plan || null,
       sheets,
       sheetsSignature,
@@ -7249,7 +7340,7 @@ async function paintFromSnapshot() {
     if (data?.v !== 1 || data.email !== kept.email || !Array.isArray(data.sheets) || !data.sheets.length) return null;
 
     masterKey = key;
-    account = { email: data.email, plan: data.plan || undefined, keyring: true, locked: 'on' };
+    account = { email: data.email, name: data.name || '', plan: data.plan || undefined, keyring: true, locked: 'on' };
     sheets = data.sheets;
     sheetsSignature = data.sheetsSignature || '';
     for (const [id, c] of Object.entries(data.html || {})) sheetCache.set(Number(id), { html: c.html, updatedAt: c.updatedAt, content: htmlHasContent(c.html) });
@@ -7263,7 +7354,7 @@ async function paintFromSnapshot() {
 
     document.body.classList.remove('signed-out');
     authScreen.hidden = true;
-    avatarEl.textContent = data.email.charAt(0).toUpperCase();
+    updateAvatar();
     applyPlan();
     const remembered = rememberedSheet();
     activeSheet = hasSheet(remembered) ? remembered : hasSheet(data.activeSheet) ? data.activeSheet : sheets[0].id;

@@ -296,8 +296,10 @@ Full write-up: the `sector809labs-website` repo's README, section "Unknown subdo
   and file actions live in menus built by `openMenu()` in `app.js`
   (clear/delete always confirm in a bottom sheet).
 - Profile menu (`#profileModal`, `openProfile()` in `app.js`): a popover on
-  desktop, a bottom sheet under 700px. Main view: name (from the email, accounts
-  have no separate name), email, Free/Pro badge with Upgrade or Manage billing,
+  desktop, a bottom sheet under 700px. Main view: name (tap it to change it: `auth?action=set-name`,
+  `user.name`, 40 characters at most, plain text, shown only to its owner; empty =
+  made from the email; other devices hear of it through the relay, part
+  `account`), email, Free/Pro badge with Upgrade or Manage billing,
   then Files & share links, Recently deleted, Account & security (Appearance
   System/Light/Dark, Change email, Change password, Generate new recovery key, Download my data,
   Delete account (plain text, still confirms), Signed-in devices, Sign out of

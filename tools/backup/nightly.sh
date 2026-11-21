@@ -57,8 +57,14 @@ if [ -n "${R2_ACCESS_KEY_ID:-}" ] || [ "$R2_SRC" != "r2:scrapsheet-files" ]; the
   have=$({ "${RC[@]}" lsf -R --files-only vault:r2 2>/dev/null || true; } | wc -l)
   limit=$(( have / 10 > 50 ? have / 10 : 50 ))
   [ "${ALLOW_BIG_DELETE:-}" = 1 ] && limit=-1
-  if ! "${RC[@]}" sync "$R2_SRC" vault:r2 --backup-dir "vault:old/$DAY/r2" --max-delete "$limit"; then
-    echo "::error::The R2 copy stopped. If many file pieces are gone from R2 (more than $limit), that's on purpose: the backup keeps them. Expected? Run the workflow by hand with \"allow big delete\" ticked."
+  if ! "${RC[@]}" sync "$R2_SRC" vault:r2 --backup-dir "vault:old/$DAY/r2" --max-delete "$limit" 2>&1 | tee "$WORK/r2.log"; then
+    if grep -qiE 'max[- ]delete' "$WORK/r2.log"; then
+      echo "::error::The R2 copy stopped: more than $limit file pieces are gone from R2, so the backup kept them. Expected (many files or accounts deleted)? Run the workflow by hand with \"allow big delete\" ticked."
+    elif grep -qiE 'InvalidAccessKeyId|SignatureDoesNotMatch|AccessDenied|access key has length|403' "$WORK/r2.log"; then
+      echo "::error::The R2 copy couldn't sign in: R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY are wrong or the key was deleted. Make a new read-only key (docs/RECOVERY.md, section 7): use its Access Key ID (32 characters) and Secret Access Key (64), not the token value."
+    else
+      echo "::error::The R2 copy failed (see the lines above). Usually Cloudflare is having trouble: the next night tries again."
+    fi
     exit 1
   fi
   r2note="R2: $("${RC[@]}" lsf -R --files-only vault:r2 | wc -l) file pieces"

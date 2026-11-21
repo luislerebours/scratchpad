@@ -54,7 +54,7 @@ code's notes are in the code.
 
 | Account | What it does for ScrapSheet | If it's lost |
 |---|---|---|
-| **Google** (your Gmail) | Google Drive (the backups), Google Play Console (the Android app), Google Cloud (the Play service account; the "rclone" Drive client) | The most important login. Keep its recovery codes and phone current |
+| **Google** (your Gmail) | Google Drive (the backups), Google Play Console (the Android app), Google Cloud (the Play service account; the project "ScrapSheet backups" with the "rclone" Drive client) | The most important login. Keep its recovery codes and phone current |
 | **GitHub** (user `luislerebours`, repo `scratchpad`, public) | The code; pushes to `main` deploy the site; runs the nightly backup | Code: from the Drive bundle (section 6, "If GitHub is lost") |
 | **Netlify** (site `scrapsheet`) | Runs the site and its functions; stores the data (Blobs) and some files | Section 6, "If Netlify is lost" |
 | **Cloudflare** (the account with sector809labs.com) | DNS for scrap.sector809labs.com and sync.sector809labs.com (DNS only); the sync relay Worker `scratchpad-sync`; R2 bucket `scrapsheet-files` (files uploaded since Nov 18, 2026) | Section 6, "If Cloudflare is lost" |
@@ -170,7 +170,9 @@ to it, and set up the backup secrets there (section 7). The backup checks which 
 Open the run (GitHub › Actions › Nightly backup). Common causes:
 
 - **"Add the repository secret …"**: section 7.
-- **Drive sign-in expired or refused:** set `RCLONE_CONFIG` up again (section 7).
+- **Drive sign-in expired or refused:** set `RCLONE_CONFIG` up again (section 7). Expired after a week: the
+  Google project was left in Testing; publish it first.
+- **"The R2 copy couldn't sign in"**: make a new read-only R2 key (section 7).
 - **"… are gone from the site. Stopped so the backup keeps them."**: the site has far fewer records than last
   night. If you didn't delete many accounts, something is wrong with the site: don't change anything, call Claude.
   If it's expected, Actions › Nightly backup › Run workflow, tick "Allow big delete".
@@ -180,11 +182,24 @@ Open the run (GitHub › Actions › Nightly backup). Common causes:
 
 All in GitHub › luislerebours/scratchpad › Settings › Secrets and variables › Actions.
 
-**Google Drive (`RCLONE_CONFIG`).** Use the same Google client as FinestIQ ("Google Drive backup (rclone)" in your
-password manager):
+**Google Drive (`RCLONE_CONFIG`).** ScrapSheet has its own Google client, in its own Google Cloud project
+"ScrapSheet backups" (on the Google account that holds the FinestIQ backups). Saved in Bitwarden as
+"ScrapSheet Google Drive backup (rclone)". If it's lost, make it again:
+
+- console.cloud.google.com › new project "ScrapSheet backups" › APIs & Services › Library › **Google Drive API** ›
+  Enable.
+- OAuth consent screen (Google Auth Platform): External. **Branding**: app name ScrapSheet backups, your support
+  email, home page `https://scrap.sector809labs.com`, privacy `…/privacy`, terms `…/terms`, authorized domain
+  `sector809labs.com` (no dot at the end). Leave the logo empty (a logo needs Google's review).
+- **Audience** › Publish app (In production). Left in Testing, the sign-in stops working after 7 days.
+- **Clients** › Create client › Desktop app, name "rclone". Save its Client ID and Client secret in Bitwarden.
+
+Then:
 
 1. In PowerShell: `rclone config create drive drive scope=drive.file client_id=<Client ID> client_secret=<Client secret>`.
-   A browser opens: sign in to the Google account that holds the FinestIQ backups and allow access.
+   A browser opens: sign in to the Google account that holds the FinestIQ backups and allow access ("Google hasn't
+   verified this app": Advanced › Go to ScrapSheet backups; it's your own app). If a sign-in fails halfway,
+   `rclone config delete drive` and try again.
 2. Put the settings into GitHub, then delete them from the computer (PowerShell):
    `Get-Content $env:APPDATA\rclone\rclone.conf -Raw | gh secret set RCLONE_CONFIG -R luislerebours/scratchpad`
    then `Remove-Item $env:APPDATA\rclone\rclone.conf`. (Elsewhere, `rclone config file` says where the file is.)
@@ -194,10 +209,14 @@ passphrase", then `gh secret set BACKUP_PASSPHRASE -R luislerebours/scratchpad` 
 Changing it later: the earlier backup stays locked with the old one, so start a new `locked/` (rename the old
 folder in Drive and keep it, with its passphrase, until the new one has a few weeks).
 
-**R2 (read-only key).** Cloudflare › R2 › Manage API tokens › Create API token: permission **Object Read only**,
-bucket `scrapsheet-files`. Then `gh secret set R2_ACCESS_KEY_ID -R luislerebours/scratchpad` and
-`gh secret set R2_SECRET_ACCESS_KEY -R luislerebours/scratchpad` (paste each when asked), and
-`gh variable set R2_ACCOUNT_ID -R luislerebours/scratchpad --body <account id>`.
+**R2 (read-only key).** Cloudflare › R2 › API Tokens › Create Account API token: name "ScrapSheet R2 backup key
+(read only)", permission **Object Read only**, specific bucket `scrapsheet-files`. The next page shows the values
+once: save them in Bitwarden under that name before leaving it. Of the three values, use the two under "S3
+clients": the **Access Key ID** (32 characters) and the **Secret Access Key** (64). The "Token value" at the top
+(about 53 characters) is not used. Then `gh secret set R2_ACCESS_KEY_ID -R luislerebours/scratchpad` and
+`gh secret set R2_SECRET_ACCESS_KEY -R luislerebours/scratchpad` (paste each when asked). `R2_ACCOUNT_ID` is
+already set (`gh variable set R2_ACCOUNT_ID -R luislerebours/scratchpad --body <account id>` if it isn't: the long
+id in the R2 page's address). Delete any older backup token in that list so only one is left.
 
 **Phone alert (optional).** `gh secret set PUSHOVER_TOKEN` and `PUSHOVER_USER` with FinestIQ's values.
 

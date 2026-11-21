@@ -61,6 +61,7 @@ code's notes are in the code.
 | **Resend** | Sends every email (sign-in codes, security notices) | New account, verify the sending domain in Cloudflare DNS, new key into Netlify |
 | **Stripe** ("Sector 809 Labs LLC", Managed Payments) | Pro subscriptions on the web. Never the FinestIQ account | Its customers and subscriptions stay in Stripe; only the keys go into Netlify |
 | **Google Play Console** | The Android app `com.sector809labs.scrapsheet`, Pro bought in the app | The app's upload key: back it up (android/README.md) |
+| **Apple Developer** (signed in as developer@sector809labs.com) | The iOS app, once it's built (after the Android launch) | Nothing of ScrapSheet's lives there yet; keep its two-factor devices current |
 | **Pushover** (optional) | A phone alert when the nightly backup fails | GitHub's email still comes |
 
 ## 4. Every secret setting, by name
